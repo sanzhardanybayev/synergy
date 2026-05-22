@@ -1,0 +1,16 @@
+{
+  "name": "synergy",
+  "owner": {
+    "name": "Sanzhar Danybayev",
+    "url": "https://github.com/sanzhardanybayev"
+  },
+  "plugins": [
+    {
+      "name": "synergy",
+      "source": "./",
+      "description": "MDX spec authoring with live preview for Claude Code.",
+      "version": "0.1.0",
+      "homepage": "https://github.com/sanzhardanybayev/synergy"
+    }
+  ]
+}

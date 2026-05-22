@@ -3,7 +3,7 @@ description: Validate one or all Synergy spec sessions (schemas + cross-refs)
 argument-hint: [session-name]
 ---
 
-Run `synergy validate $ARGUMENTS` in the current project root.
+Run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate $ARGUMENTS` in the current project root.
 
 The validator parses every `.mdx` file in `.synergy/sessions/`, checks component props against the spec-kit JSON schemas, and resolves every `<CrossRef to="...">` against the actual heading anchors in the session.
 

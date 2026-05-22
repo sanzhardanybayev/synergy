@@ -175,8 +175,6 @@ importers:
         specifier: 2.1.5
         version: 2.1.5(@types/node@22.10.1)
 
-  plugins/claude-code: {}
-
 packages:
 
   '@antfu/install-pkg@1.1.0':

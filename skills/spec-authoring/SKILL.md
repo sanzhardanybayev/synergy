@@ -24,11 +24,11 @@ Rules for editing existing Synergy specs. The `create-spec` skill is for new ses
 
 - Every link between specs in the same session **must** use `<CrossRef to="<slug>" />` or `<CrossRef to="<slug>#<anchor>" />`.
 - Heading anchors are GitHub-style: lowercase, spaces → `-`, special chars stripped, deduplicated per file.
-- After editing, run `synergy validate <session-name>` — dangling cross-refs are validation errors.
+- After editing, run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session-name>` — dangling cross-refs are validation errors.
 
 ## Iterating with the preview
 
-1. The preview server is at `http://localhost:4321/s/<session-name>`. Start it with `synergy preview start` if it isn't running.
+1. The preview server is at `http://localhost:4321/s/<session-name>`. Start it with `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview start` if it isn't running.
 2. On every save, MDX files hot-reload in the browser. Confirm the user can see your change before moving on.
 3. When you add or delete a spec file, the virtual session index is rebuilt and the page does a full reload.
 
@@ -37,7 +37,7 @@ Rules for editing existing Synergy specs. The `create-spec` skill is for new ses
 Before declaring an edit complete:
 
 ```
-synergy validate <session-name>
+node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session-name>
 ```
 
 Zero errors. Warnings are OK (e.g. unparseable non-literal expressions in props) but should be reviewed.

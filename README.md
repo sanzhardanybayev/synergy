@@ -6,15 +6,32 @@ MDX spec authoring with a live web preview, packaged as a Claude Code plugin. Ge
 
 Markdown plans get unreadable fast — terminal/IDE rendering is flat, charts are missing, and structure (status, risks, phases, allocations) is hard to scan. Synergy gives agents a small MDX component vocabulary, a validator that enforces it, and a Vite preview that hot-reloads as you author.
 
-## Install
+## Install (as a Claude Code plugin)
 
-```bash
-git clone <repo> synergy && cd synergy
-pnpm install
-pnpm build
+This repo is structured as a Claude Code plugin. The fastest install:
+
+```
+/plugin marketplace add sanzhardanybayev/synergy
+/plugin install synergy@synergy
 ```
 
-To use as a Claude Code plugin, point your plugin marketplace at `plugins/claude-code/` (it exposes the `synergy` plugin with skills + slash commands).
+Then bootstrap the CLI and preview server once:
+
+```
+/synergy-setup
+```
+
+That runs `pnpm install && pnpm build` inside the plugin directory and verifies the CLI is ready. Prerequisites: `node >= 20` and `pnpm` (`npm i -g pnpm` or `corepack enable` if you don't have it).
+
+### Install from a local clone
+
+```bash
+git clone https://github.com/sanzhardanybayev/synergy
+# Then in Claude Code:
+/plugin marketplace add /absolute/path/to/synergy
+/plugin install synergy@synergy
+/synergy-setup
+```
 
 ## Quick start
 

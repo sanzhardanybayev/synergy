@@ -18,7 +18,7 @@ Author a structured MDX spec session for the work the user is about to start. Th
 
 1. **Confirm intent.** Restate the user's request in one sentence and ask one clarifying question if the work type (feature / refactor / project) or scope is ambiguous. Skip the question if it's clear.
 2. **Pick a session name.** Default to auto-generated `YYYY-MM-DD-<slug>` from the title. Offer the user a chance to override if they care; most won't.
-3. **Generate the session** by running `synergy spec "<title>" --type <feature|refactor|project>` from the project root. The CLI:
+3. **Generate the session** by running `node $CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js spec "<title>" --type <feature|refactor|project>` from the project root. The CLI:
    - creates the session folder,
    - writes the four files with sensible templates,
    - auto-starts the preview server on port `4321` (PID tracked in `.synergy/preview.pid`),
@@ -29,7 +29,7 @@ Author a structured MDX spec session for the work the user is about to start. Th
    - which phases can run in parallel via sub-agents,
    - which need an agent team (multi-step, exploratory),
    - verification gates between phases.
-6. **Validate.** Run `synergy validate <session-name>` and fix any reported issues. The validator catches: schema violations on component props, dangling cross-references.
+6. **Validate.** Run `node $CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js validate <session-name>` and fix any reported issues. The validator catches: schema violations on component props, dangling cross-references.
 7. **Iterate with the user.** The preview hot-reloads on every MDX save. Take edit requests, modify the files, and let the browser refresh.
 
 ## Component cheat sheet
@@ -74,7 +74,7 @@ You're done with this skill when:
 
 - the session exists in `.synergy/sessions/`,
 - all placeholder text in the templates has been replaced with real content,
-- `synergy validate <session-name>` reports zero errors,
+- `node $CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js validate <session-name>` reports zero errors,
 - `orchestrator.md` describes the implementation strategy (not just the spec),
 - the user confirms the spec reflects their intent.
 

@@ -1,0 +1,13 @@
+{
+  "name": "synergy",
+  "version": "0.1.0",
+  "description": "MDX spec authoring with live preview. Generate cross-referenced spec sessions in .synergy/sessions/ and view them in a browser at http://localhost:4321.",
+  "author": {
+    "name": "Sanzhar Danybayev",
+    "url": "https://github.com/sanzhardanybayev"
+  },
+  "homepage": "https://github.com/sanzhardanybayev/synergy",
+  "repository": "https://github.com/sanzhardanybayev/synergy",
+  "license": "MIT",
+  "keywords": ["spec", "mdx", "planning", "documentation", "preview"]
+}

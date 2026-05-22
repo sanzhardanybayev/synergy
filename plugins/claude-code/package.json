@@ -1,9 +1,0 @@
-{
-  "name": "@synergy/claude-code-plugin",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Synergy Claude Code plugin: skills + slash commands for MDX spec authoring.",
-  "scripts": {
-    "typecheck": "echo 'no-op'"
-  }
-}
