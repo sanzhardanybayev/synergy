@@ -1,0 +1,46 @@
+---
+title: 'Make the README s-tier'
+type: refactor
+---
+
+import { Status, SubSpec, CrossRef, OpenQuestion, Risk } from '@synergy/spec-kit';
+
+# Make the README s-tier
+
+<Status value="proposed" note="Awaiting approval, then implement in one pass" />
+
+## Summary
+
+The current `README.md` documents Synergy correctly but reads like a reference manual. The goal here is to turn it into a great first impression: a clear hook that explains why Synergy exists, a demo GIF/screenshot so the value is obvious without reading, an opinionated install path that works in one or two commands, and a complete reference that's scannable rather than narrative. We're not adding new product surface — just packaging what's already there so the README earns the install.
+
+## Goals
+
+- **Sells the value in 10 seconds.** A new reader understands what Synergy does and why they'd use it from the top of the file alone.
+- **Visual proof.** At least one screenshot or animated GIF showing the preview rendering a session.
+- **One install paragraph.** The marketplace install + `/synergy-setup` flow, with prerequisites listed inline.
+- **Full reference, scannable.** All slash commands, all CLI subcommands, all spec-kit components in tables — not paragraphs.
+- **Troubleshooting section.** The three failure modes we've already seen documented as FAQ entries.
+- **Out of scope:** new product features, new components, new commands, new examples beyond the one we already have.
+
+## Sub-specs
+
+<SubSpec slug="01-architecture" title="Structure of the new README" status="proposed" summary="Section ordering, what each section does, what to cut from the current README." />
+<SubSpec slug="02-implementation" title="Implementation plan" status="proposed" summary="One-phase rewrite, asset generation, validate." />
+
+See <CrossRef to="01-architecture#section-blueprint">the section blueprint</CrossRef> for the target shape and <CrossRef to="02-implementation#timeline">the timeline</CrossRef> for execution.
+
+## Open questions
+
+<OpenQuestion id="Q1" question="Demo media: screenshot or animated GIF?" owner="Sanzhar" resolveBy="before Phase 1">
+  GIF is more compelling but needs recording + optimization. PNG is one-shot. Recommend: one PNG of the preview UI + one ASCII diagram of the session flow. GIF later.
+</OpenQuestion>
+
+<OpenQuestion id="Q2" question="Do we link to a hosted demo, or keep it install-only?" owner="Sanzhar">
+  No hosted demo exists yet. Skip the link; revisit when there is one.
+</OpenQuestion>
+
+## Risks
+
+<Risk id="R1" title="Bloat — README grows past the point where people read it" severity="medium" category="scope" mitigation="Hard cap: 250 lines. If a section needs more, link to a doc instead." />
+<Risk id="R2" title="Outdated commands as the CLI evolves" severity="low" category="process" mitigation="Reference table generated from the CLI's --help in a follow-up PR. For now, just keep it in sync manually." />
+<Risk id="R3" title="Visual asset rots (looks dated within a release)" severity="low" category="product" mitigation="Use a screenshot of the actual current preview UI, not a mockup. Update on each minor version." />

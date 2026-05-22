@@ -1,0 +1,92 @@
+---
+title: 'Structure of the new README'
+---
+
+import { Chart, CrossRef, Status, OpenQuestion } from '@synergy/spec-kit';
+
+# Structure of the new README
+
+See <CrossRef to="00-overview">overview</CrossRef> for the why. This file specifies the *what* — the exact section order, the role each section plays, and what to cut from the current README.
+
+## Section blueprint
+
+The new README has eight sections, ordered for a reader who lands cold and decides in ~30 seconds whether to install.
+
+<Chart kind="flow" caption="Reader funnel — left to right is reading order; each section answers one question.">
+{`graph LR
+  H[Hook: what is it] --> D[Demo: show me]
+  D --> I[Install: how to run]
+  I --> Q[Quick start: the loop]
+  Q --> R[Reference: full commands]
+  R --> A[Authoring rules]
+  A --> T[Troubleshooting]
+  T --> L[License + Links]`}
+</Chart>
+
+### 1. Hook (5 lines)
+
+Single paragraph + one-line tagline. Answers "what is Synergy" in plain English. Mention markdown's failure mode (unreadable in terminals, no charts) once — that's the wedge.
+
+Target: a reader knows whether to keep reading.
+
+### 2. Demo (1 image, 5 lines of caption)
+
+One screenshot of the preview rendering the `examples/refactor-auth/` session. Caption explains: this is an MDX spec, the components are reusable, the preview hot-reloads.
+
+<OpenQuestion id="A1" question="Where does the image live?" owner="Sanzhar">
+  Option 1: commit `docs/screenshot.png` to repo. Option 2: host externally. Recommend Option 1 — keeps the README functional offline.
+</OpenQuestion>
+
+### 3. Install (8 lines max)
+
+```
+/plugin marketplace add sanzhardanybayev/synergy
+/plugin install synergy@synergy
+/synergy-setup
+```
+
+Above that: one-line prerequisite list (Node 20+, pnpm). Below that: one fallback for cloning + linking locally. Nothing else.
+
+### 4. Quick start (the loop in 4 steps)
+
+```
+/synergy-init                           # once per project
+/synergy-spec "Add rate limiting"       # creates session, opens browser
+# ...edit MDX, preview hot-reloads...
+/synergy-validate                       # before commit
+```
+
+### 5. Reference (the bulk of the doc, but in tables)
+
+Three tables:
+- **Slash commands** — name, args, what it does.
+- **CLI subcommands** — same shape, for users who prefer terminal.
+- **Spec-kit components** — name, required props, one-line purpose.
+
+The current README has this content but as prose. Convert to tables.
+
+### 6. Authoring rules (the contract)
+
+Lift the four-rule version from `AGENTS.md` (component-first, cross-refs not links, orchestrator required, validator is the gate). Link to AGENTS.md for the full version.
+
+### 7. Troubleshooting (three FAQ items)
+
+- "vite binary not found" → run `/synergy-setup`.
+- "port 4321 in use" → `lsof -i :4321`, then `/synergy-preview-stop` or kill the offender.
+- "validation fails on `<CrossRef>`" → the target slug or anchor doesn't exist; fix the target or the ref.
+
+### 8. License + Links (4 lines)
+
+MIT, link to AGENTS.md, link to CLAUDE.md, link to SYNERGY_PLAN.md.
+
+## What to cut from the current README
+
+The current README has these problems:
+
+- "Why" section reads like a tweet thread, not a hook. Compress.
+- Install instructions appear twice (top + bottom). Pick one place.
+- Architecture diagram (the ASCII tree) is interesting to the *author* of Synergy, not to a user. Cut.
+- "Development" section duplicates content from CLAUDE.md. Cut or link.
+- Component cheat sheet is in two formats (prose + table). Pick the table.
+
+<Status value="proposed" note="Section blueprint frozen at start of Phase 1" />

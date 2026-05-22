@@ -1,148 +1,113 @@
 # Synergy
 
-MDX spec authoring with a live web preview, packaged as a Claude Code plugin. Generate cross-referenced specification sessions from your editor and iterate on them in the browser.
+**Spec-driven planning for Claude Code.** Turn vague requests into MDX specifications with status badges, phase plans, agent allocations, charts, and cross-references — rendered live in your browser as you author them.
 
-## Why
+Markdown specs go stale in a terminal. Synergy gives agents a tight component vocabulary, a validator that enforces it, and a Vite preview that hot-reloads on every save.
 
-Markdown plans get unreadable fast — terminal/IDE rendering is flat, charts are missing, and structure (status, risks, phases, allocations) is hard to scan. Synergy gives agents a small MDX component vocabulary, a validator that enforces it, and a Vite preview that hot-reloads as you author.
+## Demo
 
-## Install (as a Claude Code plugin)
+![Synergy preview rendering a refactor session](docs/screenshot.png)
 
-This repo is structured as a Claude Code plugin. The fastest install:
+The preview at `http://localhost:4321` renders MDX with reusable spec components (`<Status>`, `<Phase>`, `<Chart>`, `<CrossRef>`, …), a session switcher, and an orchestrator panel. Hot-reloads as Claude Code edits the files.
+
+## Install
+
+Prerequisites: **Node ≥ 20**, **pnpm** (`corepack enable` if missing).
 
 ```
 /plugin marketplace add sanzhardanybayev/synergy
 /plugin install synergy@synergy
-```
-
-Then bootstrap the CLI and preview server once:
-
-```
 /synergy-setup
 ```
 
-That runs `pnpm install && pnpm build` inside the plugin directory and verifies the CLI is ready. Prerequisites: `node >= 20` and `pnpm` (`npm i -g pnpm` or `corepack enable` if you don't have it).
+`/synergy-setup` runs `pnpm install && pnpm build` inside the plugin once. After that, the slash commands and skills are ready.
 
-### Install from a local clone
+<details>
+<summary>Install from a local clone</summary>
 
 ```bash
 git clone https://github.com/sanzhardanybayev/synergy
-# Then in Claude Code:
+# In Claude Code:
 /plugin marketplace add /absolute/path/to/synergy
 /plugin install synergy@synergy
 /synergy-setup
 ```
+</details>
 
 ## Quick start
 
-```bash
-cd your-project
-# One-time scaffold:
-synergy init
-
-# Create a session:
-synergy spec "Add rate limiting" --type feature
-# → creates .synergy/sessions/2026-05-22-add-rate-limiting/
-# → starts preview at http://localhost:4321
-# → opens your browser to the new session
-
-# Iterate:
-#   Edit any MDX in the session — the browser hot-reloads on save.
-
-# Validate before committing:
-synergy validate
-
-# Manage the preview:
-synergy preview status   # is it running?
-synergy preview stop     # shut it down
+```
+/synergy-init                              # once per project
+/synergy-spec "Add rate limiting"          # creates a session + opens browser
+# ...edit MDX with Claude Code, preview hot-reloads...
+/synergy-validate                          # before commit
 ```
 
-In Claude Code, the slash commands are equivalent: `/synergy-spec`, `/synergy-validate`, `/synergy-preview-start|stop|status`, `/synergy-init`.
+That's the loop. The first command scaffolds `.synergy/sessions/` in your project. The second creates `.synergy/sessions/YYYY-MM-DD-add-rate-limiting/` with `00-overview.mdx`, `01-architecture.mdx`, `02-implementation.mdx`, and an `orchestrator.md` playbook — then opens your browser. The third checks schemas and cross-references before you ship.
 
-## Session layout
+## Reference
 
-```
-.synergy/sessions/<YYYY-MM-DD-slug>/
-├── 00-overview.mdx          status, goals, sub-spec map, open questions, risks
-├── 01-architecture.mdx      system shape, diagrams
-├── 02-implementation.mdx    phased build, agent allocation, timeline
-├── NN-<your-slug>.mdx       optional additional sub-specs
-├── orchestrator.md          plain-markdown playbook for implementing the work
-├── _components/             session-local React/MDX components
-└── assets/                  images and mockups
-```
+### Slash commands
 
-## Spec-kit components
-
-Imported from `@synergy/spec-kit`. The validator enforces props against generated JSON schemas.
-
-| Component | Purpose |
+| Command | Purpose |
 |---|---|
-| `<Status>` | Lifecycle badge (`draft`, `proposed`, `in-progress`, `blocked`, `done`, `shipped`) |
-| `<Phase>` | Implementation phase with optional `status`, `estimate`, `summary` |
-| `<Timeline>` | Ordered milestones with dates and statuses |
-| `<SubSpec>` | Sibling-spec link card |
-| `<CrossRef>` | Inline cross-document reference (validator-enforced) |
-| `<AgentAllocation>` | Table of agents (sub-agent / agent-team / human) and ownership |
-| `<Team>` | Group of contributors with roles |
-| `<Reviewer>` | Single reviewer and sign-off scope |
-| `<OpenQuestion>` | Unresolved decision blocking progress |
-| `<Risk>` | Known hazard with severity and mitigation |
-| `<Mockup>` | Image with caption |
-| `<Chart>` | Mermaid diagram (flow / sequence / state / gantt / ER / mindmap / architecture) |
+| `/synergy-init` | Scaffold `.synergy/` in the current project. Once per project. |
+| `/synergy-spec "<title>"` | Create a new spec session (also auto-starts preview, opens browser). |
+| `/synergy-validate [session]` | Validate schemas + cross-refs. Zero errors before commit. |
+| `/synergy-preview-start` | Boot the preview server on port 4321. Idempotent. |
+| `/synergy-preview-stop` | Kill the preview server, remove PID file. |
+| `/synergy-preview-status` | Report running / stopped, pid, URL. |
+| `/synergy-setup` | One-time bootstrap (install + build). |
 
-For visuals beyond Mermaid, drop a session-local component in `_components/` and import any chart library you need.
+### CLI subcommands
 
-## Cross-reference syntax
+For terminal users — same surface, available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" ...` after `/synergy-setup`.
 
-```mdx
-<CrossRef to="01-architecture" />                       <!-- whole file -->
-<CrossRef to="01-architecture#token-flow" />            <!-- specific heading -->
-<CrossRef to="01-architecture">the architecture</CrossRef> <!-- custom label -->
-```
+| Command | Flags | Purpose |
+|---|---|---|
+| `synergy init` | `--root <dir>` | Scaffold `.synergy/` |
+| `synergy spec <title>` | `--type feature\|refactor\|project`, `--name`, `--no-preview`, `--no-open`, `--root` | Create a session |
+| `synergy preview <action>` | `--root`, `--port` (default 4321) | `start \| stop \| status` |
+| `synergy validate [session]` | `--root` | Validate sessions in `.synergy/sessions/` |
 
-Heading anchors are GitHub-style (lowercase, spaces → `-`, special chars stripped). The validator resolves every target — dangling refs are errors.
+### Spec-kit components
 
-## Orchestrator file
+Imported from `@synergy/spec-kit`. Props are schema-validated; cross-references are link-checked.
 
-Every session has an `orchestrator.md` (plain markdown — readable in any tool, including a terminal). It tells the implementing agent how to execute the work: dependency graph, parallelizable chunks, sub-agent vs agent-team strategy, verification gates.
+| Component | Required props | One-line purpose |
+|---|---|---|
+| `<Status>` | `value` | Lifecycle badge: `draft`, `proposed`, `in-progress`, `blocked`, `done`, `shipped` |
+| `<Phase>` | `number`, `title` | Implementation phase block (optional `status`, `estimate`, `summary`) |
+| `<Timeline>` | `milestones` | Ordered visual milestones with optional dates and statuses |
+| `<SubSpec>` | `slug`, `title` | Link card to a sibling spec file |
+| `<CrossRef>` | `to` | Inline reference; `to="<spec-slug>"` or `"<spec-slug>#<heading-slug>"` |
+| `<AgentAllocation>` | `entries` | Table of agents (`sub-agent`, `agent-team`, `human`) and ownership |
+| `<Team>` | `name`, `members` | Group of contributors with roles |
+| `<Reviewer>` | `name`, `role`, `scope` | Reviewer and their sign-off scope |
+| `<OpenQuestion>` | `question` | Unresolved decision blocking progress |
+| `<Risk>` | `title`, `severity` | Known hazard with optional mitigation |
+| `<Mockup>` | `src`, `alt` | Image with caption (relative to session `assets/`) |
+| `<Chart>` | source as children | Mermaid diagram (`flow`, `sequence`, `state`, `gantt`, `er`, `mindmap`, `architecture`) |
 
-When you want to implement the spec, reference the session in Claude Code:
+For visuals beyond Mermaid, drop a custom component in `.synergy/sessions/<name>/_components/` and import it locally.
 
-```
-Implement the plan in @.synergy/sessions/<name>/ — start with orchestrator.md.
-```
+## Authoring rules
 
-## Architecture
+Four rules. Full text in [AGENTS.md](AGENTS.md).
 
-```
-synergy/
-├── packages/
-│   ├── spec-kit/        MDX component library + JSON schemas
-│   ├── validator/       MDX parser + schema check + cross-ref resolver
-│   ├── preview/         Vite + React app, watches .synergy/sessions/
-│   └── cli/             synergy CLI (init / spec / preview / validate)
-├── plugins/claude-code/ plugin manifest + skills + slash commands
-└── examples/refactor-auth/  canonical example session
-```
+1. **Components over markdown.** Use spec-kit components for structured content. If the shape doesn't exist, build a session-local component — don't fall back to raw markdown.
+2. **CrossRefs, not links.** Spec-to-spec navigation uses `<CrossRef to="...">`. The validator catches dangling refs; raw markdown links it can't.
+3. **Every session ships an `orchestrator.md`.** Plain markdown, not MDX, so it's readable in any tool. Describes dependency graph, parallel chunks, sub-agent vs agent-team strategy, verification gates.
+4. **Validator is the gate.** `synergy validate` returns zero errors before a session is considered ready.
 
-- **Preview port:** fixed at `4321`.
-- **Session naming:** `YYYY-MM-DD-<slug>` from the title; collision → 6-char hash suffix.
-- **Codex / other hosts:** not in v1.
+## Troubleshooting
 
-See `AGENTS.md` for the spec-authoring rules and `CLAUDE.md` for project conventions.
+**"vite binary not found" or "command not found"** — the plugin's workspace isn't built. Run `/synergy-setup`. If pnpm itself is missing, `corepack enable` or `npm i -g pnpm`.
 
-## Development
+**"port 4321 in use"** — another process owns the port. Run `/synergy-preview-stop` first; if a different program holds it, identify with `lsof -i :4321` and quit it before retrying.
 
-```bash
-pnpm install
-pnpm build            # builds all packages
-pnpm typecheck        # tsc across the workspace
-pnpm validate         # runs the validator against examples/
-pnpm preview:start    # boots preview against examples/
-pnpm preview:stop
-```
+**Validation fails on `<CrossRef>`** — the target slug or heading anchor doesn't exist in the session. Either fix the `to=` value or add the heading. Anchors are GitHub-style: lowercase, spaces → `-`, special chars stripped.
 
-## License
+## License & links
 
-MIT.
+MIT. See [AGENTS.md](AGENTS.md) for spec-authoring rules, [CLAUDE.md](CLAUDE.md) for project conventions, [SYNERGY_PLAN.md](SYNERGY_PLAN.md) for the original design.

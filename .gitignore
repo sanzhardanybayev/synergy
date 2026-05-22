@@ -12,3 +12,6 @@ dist/
 # IDE
 .vscode/
 .idea/
+
+# Playwright MCP artifacts
+.playwright-mcp/
