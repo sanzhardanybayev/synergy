@@ -86,7 +86,21 @@ function validateSession(sessionDir: string): ValidationIssue[] {
     return issues;
   }
 
-  const parsed = files.map((f) => parseSpec(f));
+  const parsed: ReturnType<typeof parseSpec>[] = [];
+  for (const f of files) {
+    try {
+      parsed.push(parseSpec(f));
+    } catch (err) {
+      const e = err as { line?: number; column?: number; reason?: string; message?: string };
+      issues.push({
+        file: f,
+        line: e.line,
+        column: e.column,
+        severity: 'error',
+        message: `Parse failed: ${e.reason ?? e.message ?? String(err)}`,
+      });
+    }
+  }
   const inventory = buildInventory(parsed);
 
   for (const spec of parsed) {
