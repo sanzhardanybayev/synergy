@@ -1,0 +1,25 @@
+{
+  "name": "synergy-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Synergy — MDX spec authoring skill for Claude Code with live preview.",
+  "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/**\" run build",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "pnpm -r run test",
+    "validate": "node packages/cli/dist/cli.js validate --root examples",
+    "preview:start": "node packages/cli/dist/cli.js preview start --root examples",
+    "preview:stop": "node packages/cli/dist/cli.js preview stop --root examples",
+    "preview:status": "node packages/cli/dist/cli.js preview status --root examples"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "typescript": "5.6.3"
+  }
+}

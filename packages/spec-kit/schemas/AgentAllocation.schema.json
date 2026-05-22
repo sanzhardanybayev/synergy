@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/AgentAllocationProps",
+  "definitions": {
+    "AgentAllocationProps": {
+      "type": "object",
+      "properties": {
+        "context": {
+          "type": "string",
+          "description": "Short context line above the table."
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AgentAllocationEntry"
+          }
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    "AgentAllocationEntry": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/AgentType"
+        },
+        "responsibility": {
+          "type": "string",
+          "description": "What this agent owns."
+        },
+        "phases": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "description": "Optional: which phases they touch."
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "responsibility"
+      ],
+      "additionalProperties": false
+    },
+    "AgentType": {
+      "type": "string",
+      "enum": [
+        "sub-agent",
+        "agent-team",
+        "human"
+      ]
+    }
+  }
+}

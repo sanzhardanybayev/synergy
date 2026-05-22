@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/RiskProps",
+  "definitions": {
+    "RiskProps": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Short identifier, e.g. \"R1\"."
+        },
+        "title": {
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/definitions/Severity"
+        },
+        "category": {
+          "$ref": "#/definitions/RiskCategory"
+        },
+        "mitigation": {
+          "type": "string",
+          "description": "What mitigates this."
+        }
+      },
+      "required": [
+        "title",
+        "severity"
+      ],
+      "additionalProperties": false
+    },
+    "Severity": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "RiskCategory": {
+      "type": "string",
+      "enum": [
+        "technical",
+        "product",
+        "security",
+        "performance",
+        "process",
+        "scope"
+      ]
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/MockupProps",
+  "definitions": {
+    "MockupProps": {
+      "type": "object",
+      "properties": {
+        "src": {
+          "type": "string",
+          "description": "Path to image relative to the session's `assets/` folder, or absolute URL."
+        },
+        "alt": {
+          "type": "string"
+        },
+        "caption": {
+          "type": "string"
+        },
+        "maxWidth": {
+          "type": "string",
+          "description": "Optional max width in px or CSS unit."
+        }
+      },
+      "required": [
+        "src",
+        "alt"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

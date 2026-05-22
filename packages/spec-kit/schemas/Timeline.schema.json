@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/TimelineProps",
+  "definitions": {
+    "TimelineProps": {
+      "type": "object",
+      "properties": {
+        "milestones": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TimelineMilestone"
+          }
+        },
+        "caption": {
+          "type": "string",
+          "description": "Optional caption above the timeline."
+        }
+      },
+      "required": [
+        "milestones"
+      ],
+      "additionalProperties": false
+    },
+    "TimelineMilestone": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "when": {
+          "type": "string",
+          "description": "ISO date or human string."
+        },
+        "status": {
+          "$ref": "#/definitions/StatusValue"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "StatusValue": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "proposed",
+        "in-progress",
+        "blocked",
+        "done",
+        "shipped"
+      ]
+    }
+  }
+}

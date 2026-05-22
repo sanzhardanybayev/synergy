@@ -1,0 +1,59 @@
+{
+  "name": "@synergy/spec-kit",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MDX component library and JSON schemas for Synergy specs.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json",
+    "./components": {
+      "types": "./dist/components/index.d.ts",
+      "import": "./dist/components/index.js"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./schemas/*.json": "./schemas/*.json",
+    "./schemas/index": {
+      "types": "./dist/schemas-index.d.ts",
+      "import": "./dist/schemas-index.js"
+    },
+    "./templates/*": "./templates/*"
+  },
+  "files": [
+    "dist",
+    "schemas",
+    "templates"
+  ],
+  "scripts": {
+    "build": "pnpm run gen:schemas && tsup",
+    "gen:schemas": "tsx scripts/generate-schemas.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "clsx": "2.1.1"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "mermaid": ">=11"
+  },
+  "peerDependenciesMeta": {
+    "mermaid": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "22.10.1",
+    "@types/react": "18.3.12",
+    "mermaid": "11.4.1",
+    "react": "18.3.1",
+    "ts-json-schema-generator": "2.3.0",
+    "tsup": "8.3.5",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3",
+    "vitest": "2.1.5"
+  }
+}

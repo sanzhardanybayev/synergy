@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.turbo/
+.vite/
+*.log
+.DS_Store
+
+# session preview lifecycle artifacts (kept out of git in consumer projects too)
+.synergy/preview.pid
+.synergy/preview.log
+
+# IDE
+.vscode/
+.idea/

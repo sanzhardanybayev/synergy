@@ -1,0 +1,43 @@
+{
+  "name": "@synergy/validator",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MDX parser and validator for Synergy specs: schema check + cross-ref resolution.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "synergy-validate": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@synergy/spec-kit": "workspace:*",
+    "ajv": "8.17.1",
+    "github-slugger": "2.0.0",
+    "json5": "2.2.3",
+    "kleur": "4.1.5",
+    "remark-mdx": "3.1.0",
+    "remark-parse": "11.0.0",
+    "unified": "11.0.5",
+    "unist-util-visit": "5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.1",
+    "tsup": "8.3.5",
+    "typescript": "5.6.3",
+    "vitest": "2.1.5"
+  }
+}

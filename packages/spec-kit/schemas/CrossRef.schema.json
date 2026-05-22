@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/CrossRefProps",
+  "definitions": {
+    "CrossRefProps": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "string",
+          "description": "Target reference. Format: `<slug>` or `<slug>#<anchor>`. Slug is another spec file in the same session (without extension). Anchor is a slugified heading inside that file."
+        },
+        "label": {
+          "type": "string",
+          "description": "Optional human label override. Defaults to children, then `to`."
+        }
+      },
+      "required": [
+        "to"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

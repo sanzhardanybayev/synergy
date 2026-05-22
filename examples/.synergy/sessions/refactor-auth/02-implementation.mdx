@@ -1,0 +1,62 @@
+---
+title: 'Implementation Plan'
+---
+
+import { Phase, Timeline, AgentAllocation, Status, CrossRef } from '@synergy/spec-kit';
+
+# Implementation Plan
+
+Phases land sequentially; chunks inside each phase may run in parallel — see <CrossRef to="00-overview#sub-specs">sub-specs</CrossRef> and the orchestrator file.
+
+<Phase number={1} title="Storage interface + dual write" status="proposed" estimate="2d" summary="Land the new TokenStore interface and dual-write to both stores.">
+  - Define and freeze `TokenStore`.
+  - Implement `ComplianceStore` against the new backend.
+  - Wire dual-write in `TokenService.put`; reads still hit the legacy store.
+  - Add structured logging at every store operation.
+  - Verification: writes land in both stores for 100% of new sessions.
+</Phase>
+
+<Phase number={2} title="Cutover reads + migration" status="proposed" estimate="3d" summary="Swap read path; migrate legacy rows.">
+  - Add a feature flag to flip reads to the compliance store.
+  - Backfill job: stream legacy rows → compliance store, idempotent.
+  - Canary read traffic (1% → 10% → 100%), watching p95 latency.
+  - Stop dual-write once reads are at 100% for 24h.
+  - Verification: zero divergence between stores during read-canary; backfill drops to zero new rows.
+</Phase>
+
+<Phase number={3} title="Cleanup + audit" status="proposed" estimate="1d" summary="Delete the legacy store, finalize audit trail.">
+  - Remove dual-write paths.
+  - Decommission `LegacyStore`.
+  - Compliance audit packet: structured logs + design doc + migration receipts.
+  - Verification: Riya signs off; legacy store deleted.
+</Phase>
+
+## Agent allocation
+
+<AgentAllocation
+  context="Phase 1 and 3 are bounded enough for sub-agents. Phase 2 has live-traffic risk and runs as an agent team with human-in-the-loop at every canary step."
+  entries={[
+    { name: 'storage-impl', type: 'sub-agent', responsibility: 'Implement TokenStore + ComplianceStore', phases: [1] },
+    { name: 'service-wiring', type: 'sub-agent', responsibility: 'Wire dual-write, instrumentation', phases: [1] },
+    { name: 'migration-team', type: 'agent-team', responsibility: 'Read cutover + backfill, with canary supervision', phases: [2] },
+    { name: 'audit-prep', type: 'sub-agent', responsibility: 'Compliance audit packet', phases: [3] },
+    { name: 'avery', type: 'human', responsibility: 'Approve each phase boundary', phases: [1, 2, 3] },
+    { name: 'riya', type: 'human', responsibility: 'Compliance sign-off after Phase 3', phases: [3] }
+  ]}
+/>
+
+## Timeline
+
+<Timeline
+  caption="Indicative dates — slip up to 2 days per phase, no further."
+  milestones={[
+    { label: 'Plan approved', when: '2026-05-23', status: 'proposed' },
+    { label: 'Phase 1 complete (dual-write live)', when: '2026-05-27', status: 'draft' },
+    { label: 'Phase 2 50% read canary', when: '2026-05-30', status: 'draft' },
+    { label: 'Phase 2 complete (reads 100%)', when: '2026-06-02', status: 'draft' },
+    { label: 'Phase 3 + audit sign-off', when: '2026-06-04', status: 'draft' },
+    { label: 'Legacy store deleted', when: '2026-06-05', status: 'draft' }
+  ]}
+/>
+
+<Status value="proposed" note="Ready for Avery's sign-off" />

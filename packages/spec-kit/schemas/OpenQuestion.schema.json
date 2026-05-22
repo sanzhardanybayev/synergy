@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/OpenQuestionProps",
+  "definitions": {
+    "OpenQuestionProps": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Short identifier, e.g. \"Q1\". Used for cross-refs."
+        },
+        "question": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Who needs to answer."
+        },
+        "resolveBy": {
+          "type": "string",
+          "description": "When this needs to be resolved."
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

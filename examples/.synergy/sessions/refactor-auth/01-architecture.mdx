@@ -1,0 +1,74 @@
+---
+title: 'Architecture'
+---
+
+import { Chart, CrossRef, Status } from '@synergy/spec-kit';
+
+# Architecture
+
+See <CrossRef to="00-overview">overview</CrossRef> for goals and constraints.
+
+## Layering
+
+The new design separates three concerns that the current middleware conflates:
+
+- **Middleware** (HTTP boundary): unchanged public API — `authenticate(req)` and `requireRole(roles)`.
+- **Token service** (logic): issuance, refresh, revocation. Pure functions over a storage interface.
+- **Token store** (storage): the compliance-approved backend. Swappable; one implementation today, more later.
+
+## Token flow
+
+<Chart kind="sequence" caption="Authenticated request — happy path">
+{`sequenceDiagram
+  participant C as Client
+  participant M as Middleware
+  participant T as TokenService
+  participant S as TokenStore
+  C->>M: Request + Bearer token
+  M->>T: verify(token)
+  T->>S: lookup(token_id)
+  S-->>T: row
+  T-->>M: claims
+  M-->>C: 200 + response`}
+</Chart>
+
+## State machine
+
+<Chart kind="state" caption="Token lifecycle">
+{`stateDiagram-v2
+  [*] --> issued
+  issued --> active : first use
+  active --> refreshed : refresh()
+  refreshed --> active
+  active --> revoked : revoke()
+  active --> expired : ttl elapses
+  revoked --> [*]
+  expired --> [*]`}
+</Chart>
+
+## Architecture diagram
+
+<Chart kind="flow" caption="Component dependencies — Phase 2 (after store swap)">
+{`graph LR
+  Client --> Middleware
+  Middleware --> TokenService
+  TokenService --> ComplianceStore[(Compliance store)]
+  TokenService --> LegacyStore[(Legacy store)]
+  ComplianceStore -.dual-write.-> LegacyStore
+  Logging[Structured logs] --- TokenService`}
+</Chart>
+
+## Storage interface
+
+The token store has a tight interface to make the swap safe:
+
+```ts
+interface TokenStore {
+  get(id: string): Promise<TokenRow | null>;
+  put(row: TokenRow): Promise<void>;
+  revoke(id: string): Promise<void>;
+  scan(opts: { since: Date }): AsyncIterable<TokenRow>;
+}
+```
+
+<Status value="proposed" note="Interface frozen at start of Phase 1" />

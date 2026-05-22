@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/StatusProps",
+  "definitions": {
+    "StatusProps": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "#/definitions/StatusValue"
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional short note shown next to the badge."
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "StatusValue": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "proposed",
+        "in-progress",
+        "blocked",
+        "done",
+        "shipped"
+      ]
+    }
+  }
+}

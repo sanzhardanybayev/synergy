@@ -1,0 +1,63 @@
+---
+title: 'Refactor auth middleware'
+type: refactor
+---
+
+import { Status, SubSpec, CrossRef, OpenQuestion, Risk, Team, Reviewer } from '@synergy/spec-kit';
+
+# Refactor auth middleware
+
+<Status value="proposed" note="Awaiting design review" />
+
+## Summary
+
+The current auth middleware stores session tokens in a way that doesn't meet our updated compliance requirements. This session refactors the middleware into a token-handling layer that separates issuance, storage, and verification, with a clean migration path for existing sessions.
+
+## Goals
+
+- Replace token storage with the compliance-approved store.
+- Keep the public middleware API stable — no changes for downstream services.
+- Migrate existing sessions without forcing users to re-login.
+- Add structured logging at every token operation.
+
+**Out of scope:** OAuth provider changes, session timeout policy, password hashing.
+
+## Sub-specs
+
+<SubSpec slug="01-architecture" title="Architecture" status="proposed" summary="New layering: middleware → token service → storage." />
+<SubSpec slug="02-implementation" title="Implementation plan" status="proposed" summary="Three phases, sub-agents per phase, blue/green rollout." />
+
+See also: <CrossRef to="01-architecture#token-flow">the new token flow</CrossRef> and <CrossRef to="02-implementation#timeline">the rollout timeline</CrossRef>.
+
+## Team
+
+<Team
+  name="Auth platform"
+  mission="Owns identity, sessions, and access control across all services."
+  members={[
+    { name: 'Avery Liu', role: 'lead' },
+    { name: 'Sam Patel', role: 'engineer', handle: 'sam-p' },
+    { name: 'Jordan Ng', role: 'engineer', handle: 'jng' }
+  ]}
+/>
+
+## Reviewers
+
+<Reviewer name="Riya Shah" role="reviewer" scope="security + compliance sign-off" handle="riya-s" />
+<Reviewer name="Dan Park" role="sre" scope="rollout plan + migration safety" handle="dpark" />
+
+## Open questions
+
+<OpenQuestion id="Q1" question="Do we migrate active sessions or invalidate them?" owner="Avery" resolveBy="before Phase 1">
+  Active-session migration preserves UX but doubles the migration complexity. Invalidation forces re-login.
+</OpenQuestion>
+
+<OpenQuestion id="Q2" question="Is the new storage layer multi-region from day one?" owner="Dan">
+  Affects rollout sequencing.
+</OpenQuestion>
+
+## Risks
+
+<Risk id="R1" title="Token-store latency regression" severity="high" category="performance" mitigation="Benchmark p95 on phase-1 storage swap before flipping reads." />
+<Risk id="R2" title="Silent migration drop on stale rows" severity="medium" category="technical" mitigation="Write end-to-end test that asserts every legacy row maps to exactly one new row." />
+<Risk id="R3" title="Compliance audit slips past deadline" severity="critical" category="process" mitigation="Riya reviews Phase 1 design in writing before code starts." />

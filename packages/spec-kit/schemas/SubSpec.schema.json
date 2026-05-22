@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/SubSpecProps",
+  "definitions": {
+    "SubSpecProps": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Sibling spec slug, e.g. \"01-architecture\"."
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/StatusValue"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-line summary."
+        }
+      },
+      "required": [
+        "slug",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "StatusValue": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "proposed",
+        "in-progress",
+        "blocked",
+        "done",
+        "shipped"
+      ]
+    }
+  }
+}

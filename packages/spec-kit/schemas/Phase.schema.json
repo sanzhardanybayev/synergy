@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/PhaseProps",
+  "definitions": {
+    "PhaseProps": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "number"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/StatusValue",
+          "description": "Optional status badge for this phase."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short summary shown under the heading."
+        },
+        "estimate": {
+          "type": "string",
+          "description": "Estimated effort: e.g. \"1d\", \"half day\"."
+        }
+      },
+      "required": [
+        "number",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "StatusValue": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "proposed",
+        "in-progress",
+        "blocked",
+        "done",
+        "shipped"
+      ]
+    }
+  }
+}

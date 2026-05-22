@@ -1,0 +1,12 @@
+{
+  "name": "synergy",
+  "version": "0.1.0",
+  "description": "MDX spec authoring with live preview. Create cross-referenced spec sessions and view them in a browser.",
+  "author": {
+    "name": "Synergy",
+    "url": "https://github.com/synergy/synergy"
+  },
+  "homepage": "https://github.com/synergy/synergy",
+  "license": "MIT",
+  "keywords": ["spec", "mdx", "planning", "documentation"]
+}
