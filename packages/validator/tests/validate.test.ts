@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { validate } from '../src/validate.js';
-import { makeTempProject, minimalOverview } from './helpers.js';
+import { makeTempProject, minimalOverview, minimalPhaseSpec } from './helpers.js';
 
 let cleanups: Array<() => void> = [];
 
@@ -26,6 +26,42 @@ describe('validate — happy path', () => {
     const report = validate({ projectRoot: root });
     const errors = report.issues.filter((i) => i.severity === 'error');
     expect(errors).toEqual([]);
+  });
+
+  it('passes a single-phase session', () => {
+    const root = project({
+      [`${SESSION_REL}/00-overview.mdx`]: minimalOverview('Single phase'),
+      [`${SESSION_REL}/orchestrator.md`]: '# o',
+      [`${SESSION_REL}/phases/01-core/spec.mdx`]: minimalPhaseSpec('Core', 1),
+      [`${SESSION_REL}/phases/01-core/orchestrator.md`]: '# o',
+    });
+    const report = validate({ projectRoot: root });
+    const errors = report.issues.filter((i) => i.severity === 'error');
+    expect(errors).toEqual([]);
+  });
+});
+
+describe('validate — phase folder validation integration', () => {
+  it('errors on a phase folder missing spec.mdx', () => {
+    const root = project({
+      [`${SESSION_REL}/00-overview.mdx`]: minimalOverview('phased'),
+      [`${SESSION_REL}/phases/01-core/orchestrator.md`]: '# o',
+    });
+    const report = validate({ projectRoot: root });
+    const err = report.issues.find((i) => i.severity === 'error' && /spec\.mdx/i.test(i.message));
+    expect(err).toBeDefined();
+  });
+
+  it('warns on a phase folder missing orchestrator.md', () => {
+    const root = project({
+      [`${SESSION_REL}/00-overview.mdx`]: minimalOverview('phased'),
+      [`${SESSION_REL}/phases/01-core/spec.mdx`]: minimalPhaseSpec('Core', 1),
+    });
+    const report = validate({ projectRoot: root });
+    const warn = report.issues.find(
+      (i) => i.severity === 'warning' && /orchestrator\.md/i.test(i.message),
+    );
+    expect(warn).toBeDefined();
   });
 });
 

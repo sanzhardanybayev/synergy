@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { componentNames, schemas, type ComponentName } from '@synergy/spec-kit';
 import Ajv, { type ValidateFunction } from 'ajv';
 import { parseSpec, type ParsedSpec } from './parse.js';
+import { validatePhaseStructure } from './phase.js';
 import type {
   SessionInventory,
   ValidateOptions,
@@ -129,6 +130,9 @@ function validateSession(sessionDir: string): ValidationIssue[] {
 
   // Required-heading check on the overview file.
   issues.push(...validateOverviewHeadings(parsed));
+
+  // Phase folder structural validation.
+  issues.push(...validatePhaseStructure(sessionDir));
 
   for (const spec of parsed) {
     for (const comp of spec.components) {
