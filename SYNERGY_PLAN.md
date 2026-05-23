@@ -5,6 +5,15 @@ A Claude Code plugin that ships a spec-authoring skill plus a Vite/React MDX pre
 **v1 scope:** spec generation + preview + orchestrator file.
 **Distribution:** Claude Code plugin only (Codex deferred).
 
+> **Status:** v1 shipped. The current canonical design lives in
+> `docs/superpowers/specs/2026-05-23-synergy-multipage-preview-design.md`,
+> which supersedes this document on three points: (1) phases are now
+> first-class folders, not inline `<Phase>` blocks; (2) the CLI no longer
+> has a `synergy spec` command — authoring lives in the `synergy:create-spec`
+> and `synergy:spec-authoring` skills; (3) the preview app is multi-page
+> with hierarchical sidebar navigation. The notes below are kept for
+> historical context; refer to the design doc for current behavior.
+
 ## Resolved decisions
 
 1. **Session naming:** `YYYY-MM-DD-<slug-from-title>`. Collisions get a short hash suffix.
@@ -20,7 +29,7 @@ synergy/                              pnpm monorepo
 │  ├─ spec-kit/        MDX component library + JSON schemas + styles
 │  ├─ validator/       MDX parse, schema check, cross-ref resolution
 │  ├─ preview/         Vite + React app, watches .synergy/sessions/
-│  └─ cli/             `synergy` binary: init, spec, preview, validate
+│  └─ cli/             `synergy` binary: init, preview, validate (authoring is a skill)
 ├─ plugins/
 │  └─ claude-code/     plugin.json, skills/, commands/
 ├─ examples/refactor-auth/   canonical example session (dogfood)
@@ -59,7 +68,7 @@ Each component: TS props → JSON schema (build-step generated) → validator en
 | 0 | pnpm monorepo scaffold, TS config, biome, CI typecheck | — |
 | 1 | spec-kit: 11 core components + schema gen + styles | 0 |
 | 2 | validator: MDX parse, schema check, cross-ref resolver, CLI | 1 |
-| 3 | cli: `synergy init\|spec\|preview\|validate`, session naming, preview lifecycle | 1 (parallelizable w/ 2) |
+| 3 | cli: `synergy init\|preview\|validate`, session naming, preview lifecycle (authoring lives in skills) | 1 (parallelizable w/ 2) |
 | 4 | preview app: Vite+React, MDX provider, session nav, concatenated page render, file watcher | 1 |
 | 5 | plugin packaging: Claude Code `plugin.json`, skills, commands | 3, 4 |
 | 6 | AGENTS.md + CLAUDE.md: authoring rules + project memory | 1 |
@@ -102,11 +111,12 @@ Skills:
 ## CLI surface
 
 ```
-synergy init                     scaffold .synergy/ in cwd
-synergy spec [title] [--type]    create a new session
-synergy preview <start|stop|status>
-synergy validate [session]
+synergy init                          scaffold .synergy/ in cwd
+synergy preview <start|stop|status>   long-running preview server (port 4321)
+synergy validate [session]            parser + cross-ref check
 ```
+
+Session creation lives in the `synergy:create-spec` skill (superseded the original `synergy spec` CLI command).
 
 ## Effort estimate
 
