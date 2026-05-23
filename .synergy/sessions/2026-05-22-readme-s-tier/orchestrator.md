@@ -10,12 +10,12 @@ Rewrite `README.md` against the eight-section blueprint in `01-architecture.mdx`
 ## Dependency graph
 
 ```
-Phase 1 (capture screenshot)
-   └─> Phase 2 (rewrite README using blueprint + screenshot)
-        └─> Phase 3 (cross-link + validate)
+phases/01-capture-screenshot
+   └─> phases/02-rewrite-readme
+        └─> phases/03-link-validate
 ```
 
-Strictly sequential. The screenshot has to exist before the README references it; the README has to exist before we link-check it.
+Strictly sequential. The screenshot has to exist before the README references it; the README has to exist before we link-check it. Each phase has its own folder under `phases/` with a `spec.mdx` and an `orchestrator.md`.
 
 ## Parallel chunks
 
@@ -46,4 +46,4 @@ Single author, no sub-agents.
 Stop after each phase for me to glance at the output.
 ```
 
-The implementing agent should read this file first, then `00-overview.mdx` for the why, then `01-architecture.mdx` for the section blueprint, then `02-implementation.mdx` for the phase-by-phase plan.
+The implementing agent should read this file first, then `00-overview.mdx` for the why, then `01-architecture.mdx` for the section blueprint, then `02-implementation.mdx` for the phase index. From there, walk into each `phases/<NN>-<slug>/` folder in order — each phase has its own `spec.mdx` and `orchestrator.md`.

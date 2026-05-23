@@ -1,0 +1,31 @@
+---
+title: 'Capture the demo asset'
+order: 1
+---
+
+import { Status, CrossRef } from '@synergy/spec-kit';
+
+# Phase 1: Capture the demo asset
+
+<Status value="proposed" note="20m estimate — single screenshot, no narrative work" />
+
+## Goal
+
+One screenshot of the preview rendering `examples/refactor-auth`, saved as `docs/screenshot.png`, ready to embed in the rewritten README.
+
+## Tasks
+
+- Boot preview against `examples/`: `pnpm preview:start`.
+- Open `http://localhost:4321/s/refactor-auth` in a real browser.
+- Capture a screenshot showing: top SessionNav, the rendered MDX (Phase + Chart visible), the orchestrator panel toggle.
+- Save as `docs/screenshot.png`. Optimize to under 200KB.
+
+## Verification
+
+- `docs/screenshot.png` exists.
+- File size under 200KB.
+- Renders correctly in a markdown preview (GitHub or local).
+
+## Dependencies
+
+None — this phase is the front door. See <CrossRef to="01-architecture#section-blueprint">the section blueprint</CrossRef> for where the screenshot lands in the README structure.

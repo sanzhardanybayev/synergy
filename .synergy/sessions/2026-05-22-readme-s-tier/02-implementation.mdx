@@ -2,50 +2,19 @@
 title: 'Implementation Plan'
 ---
 
-import { Phase, Timeline, AgentAllocation, Status, CrossRef } from '@synergy/spec-kit';
+import { Timeline, AgentAllocation, Status, CrossRef } from '@synergy/spec-kit';
 
 # Implementation Plan
 
 A small, single-pass refactor. The work splits cleanly into three short phases, but they're sequential — no point parallelizing 30-minute chunks. See <CrossRef to="01-architecture#section-blueprint">the section blueprint</CrossRef> for the target shape.
 
-<Phase number={1} title="Capture the demo asset" status="proposed" estimate="20m" summary="One screenshot of the preview rendering examples/refactor-auth.">
-  - Boot preview against `examples/`: `pnpm preview:start`.
-  - Open `http://localhost:4321/s/refactor-auth` in a real browser.
-  - Capture a screenshot showing: top SessionNav, the rendered MDX (Phase + Chart visible), the orchestrator panel toggle.
-  - Save as `docs/screenshot.png`. Optimize to under 200KB.
-  - Verification: file exists, < 200KB, renders correctly in a markdown preview.
-</Phase>
+## Phases
 
-<Phase number={2} title="Rewrite README.md against the blueprint" status="proposed" estimate="45m" summary="Eight sections, hard cap 250 lines, prose → tables for reference content.">
-  - Open `README.md`. Walk the blueprint top to bottom.
-  - Section 1 (Hook): 5 lines max. Lead with the value, not the architecture.
-  - Section 2 (Demo): embed `docs/screenshot.png` with a 1-sentence caption.
-  - Section 3 (Install): the three-command marketplace path. Inline prereqs.
-  - Section 4 (Quick start): code block + commentary, 4 lines total.
-  - Section 5 (Reference): three tables — slash commands, CLI subcommands, spec-kit components.
-  - Section 6 (Authoring): four-bullet contract. Link to AGENTS.md.
-  - Section 7 (Troubleshooting): three FAQ items from the spec.
-  - Section 8 (License + Links): MIT, AGENTS.md, CLAUDE.md, SYNERGY_PLAN.md.
-  - Cut the items called out in `01-architecture` ("What to cut").
-  - Verification: `wc -l README.md` ≤ 250.
-</Phase>
+- <CrossRef to="phases/capture-screenshot" /> — capture the demo asset.
+- <CrossRef to="phases/rewrite-readme" /> — rewrite README against the eight-section blueprint.
+- <CrossRef to="phases/link-validate" /> — link-check and run the validator.
 
-<Phase number={3} title="Cross-link and validate" status="proposed" estimate="15m" summary="Make sure every internal link works and the spec validator stays green.">
-  - Spot-check every link in the README (Markdown link checker or visual scan).
-  - Confirm the screenshot renders in GitHub's markdown preview by pushing a draft branch (optional).
-  - Run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate` — must remain zero errors.
-  - Open a PR with a before/after screenshot in the description.
-</Phase>
-
-## Agent allocation
-
-<AgentAllocation
-  context="Small single-author refactor. No sub-agents needed; a human author plus a reviewer covers it."
-  entries={[
-    { name: 'author', type: 'human', responsibility: 'Capture asset, rewrite README, link-check', phases: [1, 2, 3] },
-    { name: 'reviewer', type: 'human', responsibility: 'Read as a new user; flag anything unclear', phases: [3] }
-  ]}
-/>
+Each phase has its own folder under `phases/` with a `spec.mdx` and a short `orchestrator.md`.
 
 ## Timeline
 
@@ -56,6 +25,16 @@ A small, single-pass refactor. The work splits cleanly into three short phases, 
     { label: 'Screenshot captured', when: '2026-05-22', status: 'draft' },
     { label: 'README rewritten', when: '2026-05-22', status: 'draft' },
     { label: 'PR merged', when: '2026-05-22', status: 'draft' }
+  ]}
+/>
+
+## Agent allocation
+
+<AgentAllocation
+  context="Small single-author refactor. No sub-agents needed; a human author plus a reviewer covers it."
+  entries={[
+    { name: 'author', type: 'human', responsibility: 'Capture asset, rewrite README, link-check', phases: [1, 2, 3] },
+    { name: 'reviewer', type: 'human', responsibility: 'Read as a new user; flag anything unclear', phases: [3] }
   ]}
 />
 
