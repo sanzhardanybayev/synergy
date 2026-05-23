@@ -9,7 +9,7 @@ See `SYNERGY_PLAN.md` for the full implementation plan and `AGENTS.md` (once wri
 - `packages/spec-kit` — MDX component library + JSON schemas + styles.
 - `packages/validator` — MDX parse, schema check, cross-ref resolver. CLI: `synergy validate`.
 - `packages/preview` — Vite + React app, watches `.synergy/sessions/`, hot reloads on MDX edits.
-- `packages/cli` — `synergy` binary: `init`, `spec`, `preview`, `validate`.
+- `packages/cli` — `synergy` binary: `init`, `preview`, `validate`. Spec authoring lives in skills.
 - `plugins/claude-code` — Claude Code plugin manifest, skills, commands.
 - `examples/` — canonical dogfood sessions.
 
@@ -21,8 +21,10 @@ Codex distribution is **not in v1**. Do not add Codex skill files yet.
 - TypeScript everywhere. Strict mode on.
 - One package per concern — do not let preview leak into spec-kit, or vice versa.
 - Each MDX session lives in `.synergy/sessions/YYYY-MM-DD-<slug-from-title>/`. Slug max 40 chars, lowercase, hyphenated. Collisions get a `-<6-char-hash>` suffix.
+- Phases live as first-class folders: `phases/<NN>-<slug>/spec.mdx` (required) + `orchestrator.md` (optional). `NN` is a zero-padded ordering integer; the slug is the stable identifier. Renumbering folders does not break cross-refs.
 - Preview server runs on **port 4321** (fixed). PID file at `.synergy/preview.pid`. Start is idempotent.
-- Cross-references use `<CrossRef to="03-data-model#user-table">`. Validator fails the build on dangling refs.
+- Cross-references use `<CrossRef to="03-data-model#user-table">` for sibling specs and `<CrossRef to="phases/<slug>" />` for phase folders (slug, not numeric prefix). Validator fails the build on dangling refs and warns on legacy phase forms like `02-implementation#phase-N`.
+- Spec authoring is owned by skills (`synergy:create-spec` for new sessions, `synergy:spec-authoring` for edits). There is no `synergy spec` CLI command — the CLI only handles process operations (`init`, `preview`, `validate`).
 
 ## Spec-kit usage rules
 
@@ -34,17 +36,20 @@ Codex distribution is **not in v1**. Do not add Codex skill files yet.
 ## Commands
 
 ```
-synergy init                     scaffold .synergy/ in the cwd
-synergy spec [title] [--type]    create a new session (type: feature|refactor|project)
-synergy preview <start|stop|status>
-synergy validate [session]
+synergy init                          scaffold .synergy/ in the cwd
+synergy preview <start|stop|status>   long-running preview server (port 4321, PID-tracked)
+synergy validate [session]            parser + cross-ref check
 ```
 
-Claude Code slash commands mirror the CLI: `/synergy-spec`, `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`.
+Spec authoring is not a CLI command — invoke the `synergy:create-spec` skill (or `/synergy-spec` slash command, which dispatches to the skill).
+
+Claude Code slash commands: `/synergy-spec` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`.
 
 ## What not to do
 
 - Don't add a Next.js or Astro dependency to `packages/preview`. Vite + React + MDX only.
 - Don't pin the preview port to anything other than 4321 without updating this file and the plan.
 - Don't write raw `[link](other-file.mdx)` markdown links between specs — use `<CrossRef>` so the validator can catch breakage.
+- Don't reference phases by their numeric prefix in CrossRefs (`phases/01-core` is wrong). Use the slug only: `<CrossRef to="phases/core" />`. The numeric prefix is for sort order, not identity.
+- Don't reintroduce `synergy spec` as a CLI command. The skill is the contract.
 - Don't co-locate session content inside `packages/` — sessions live in the consumer project's `.synergy/sessions/`, not in this repo (except the dogfood examples under `examples/`).

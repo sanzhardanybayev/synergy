@@ -1,0 +1,41 @@
+---
+title: 'Implementation plan'
+---
+
+import { Phase, Timeline, AgentAllocation, CrossRef } from '@synergy/spec-kit';
+
+# Implementation plan
+
+The phase folders under `phases/` are the source of truth. The cards
+below are summaries — each one cross-refs the real folder.
+
+## Phase index
+
+<Phase number={1} title="<first-phase-title>" status="proposed" estimate="?d" summary="One-line summary.">
+  Full task list and verification gate in <CrossRef to="phases/<first-phase-slug>" />.
+</Phase>
+
+<Phase number={2} title="<second-phase-title>" status="proposed" estimate="?d">
+  See <CrossRef to="phases/<second-phase-slug>" />.
+</Phase>
+
+## Timeline
+
+<Timeline
+  milestones={[
+    { label: 'Plan approved', status: 'proposed' },
+    { label: 'Phase 1 complete', status: 'draft' },
+    { label: 'Phase 2 complete', status: 'draft' },
+    { label: 'Ready to ship', status: 'draft' },
+  ]}
+/>
+
+## Agent allocation
+
+<AgentAllocation
+  context="Who owns which phases."
+  entries={[
+    { name: 'core-impl', type: 'sub-agent', responsibility: 'Phase 1 & 2 implementation', phases: [1, 2] },
+    { name: 'reviewer', type: 'human', responsibility: 'PR review + acceptance', phases: [1, 2] },
+  ]}
+/>

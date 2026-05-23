@@ -1,0 +1,35 @@
+---
+title: 'Architecture'
+---
+
+import { Chart, CrossRef, Mockup } from '@synergy/spec-kit';
+
+# Architecture
+
+See <CrossRef to="00-overview" /> for goals and scope.
+
+## System overview
+
+_One paragraph: how the pieces fit together at the highest level._
+
+## System diagram
+
+<Chart kind="flow" caption="High-level data flow">
+{`graph LR
+  A[Client] --> B[API]
+  B --> C[Database]
+  B --> D[Worker]`}
+</Chart>
+
+## Components
+
+- **`<component-name>`** — responsibilities, dependencies, owners.
+- **`<component-name>`** — _..._
+
+## Data model
+
+_Tables, types, or schemas this work introduces or changes._
+
+## Interfaces
+
+_HTTP routes, function signatures, event shapes — whatever the contract is between components._

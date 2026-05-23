@@ -2,10 +2,8 @@ import { resolve } from 'node:path';
 import { validate } from '@synergy/validator';
 import cac from 'cac';
 import { bold, dim, green, red, yellow } from 'kleur/colors';
-import open from 'open';
 import { initProject } from './init.js';
 import { previewStart, previewStatus, previewStop, printStatus } from './preview.js';
-import { createSpec, isSpecType, type SpecType } from './spec.js';
 
 const cli = cac('synergy');
 
@@ -18,57 +16,6 @@ cli
   .action((flags: { root?: string }) => {
     initProject(flags.root);
   });
-
-cli
-  .command('spec [title]', 'Create a new spec session')
-  .option('--type <type>', 'Spec type: feature | refactor | project', { default: 'feature' })
-  .option('--name <name>', 'Explicit session name (skips auto-generation)')
-  .option('--root <dir>', 'Project root (default: cwd)')
-  .option('--no-preview', 'Do not auto-start preview after creating')
-  .option('--no-open', 'Do not auto-open browser')
-  .action(
-    async (
-      title: string | undefined,
-      flags: {
-        type: string;
-        name?: string;
-        root?: string;
-        preview?: boolean;
-        open?: boolean;
-      },
-    ) => {
-      if (!title) {
-        process.stderr.write(red('Error:') + ' a title is required: `synergy spec "My feature"`\n');
-        process.exit(2);
-      }
-      if (!isSpecType(flags.type)) {
-        process.stderr.write(
-          red('Error:') + ` --type must be one of: feature, refactor, project (got "${flags.type}")\n`,
-        );
-        process.exit(2);
-      }
-      const type: SpecType = flags.type;
-      const result = createSpec({
-        title,
-        type,
-        sessionName: flags.name,
-        root: flags.root,
-      });
-
-      if (flags.preview !== false) {
-        const status = previewStart({ root: flags.root });
-        if (flags.open !== false && status.running) {
-          const url = `${status.url}/s/${result.sessionName}`;
-          try {
-            await open(url);
-            process.stdout.write(`${dim('→')} Opened ${url}\n`);
-          } catch {
-            process.stdout.write(`${dim('→')} Visit ${url}\n`);
-          }
-        }
-      }
-    },
-  );
 
 cli
   .command('preview <action>', 'Manage the preview server (start | stop | status)')

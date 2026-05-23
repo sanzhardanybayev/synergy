@@ -1,0 +1,28 @@
+---
+title: '{{PHASE_TITLE}}'
+order: {{PHASE_NUMBER}}
+---
+
+import { CrossRef } from '@synergy/spec-kit';
+
+# Phase {{PHASE_NUMBER}}: {{PHASE_TITLE}}
+
+## Goal
+
+_What this phase accomplishes — one paragraph._
+
+## Tasks
+
+1. _First concrete task._
+2. _Second concrete task._
+3. _..._
+
+## Verification
+
+- _Command or criterion that confirms this phase is done._
+- _e.g. `pnpm test` green; smoke test passes; manual check X._
+
+## Dependencies
+
+- _What must land first._ See <CrossRef to="phases/<prev-phase-slug>" /> if applicable.
+- _Up-stream interfaces this phase consumes._

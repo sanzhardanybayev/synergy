@@ -2,7 +2,7 @@
   "name": "@synergy/cli",
   "version": "0.1.0",
   "type": "module",
-  "description": "Synergy CLI: init, spec, preview, validate.",
+  "description": "Synergy CLI: init, preview, validate.",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -29,8 +29,7 @@
     "@synergy/spec-kit": "workspace:*",
     "@synergy/validator": "workspace:*",
     "cac": "6.7.14",
-    "kleur": "4.1.5",
-    "open": "10.1.0"
+    "kleur": "4.1.5"
   },
   "devDependencies": {
     "@types/node": "22.10.1",

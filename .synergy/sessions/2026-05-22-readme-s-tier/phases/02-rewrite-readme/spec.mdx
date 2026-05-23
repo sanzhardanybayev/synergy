@@ -1,0 +1,37 @@
+---
+title: 'Rewrite README.md against the blueprint'
+order: 2
+---
+
+import { Status, CrossRef } from '@synergy/spec-kit';
+
+# Phase 2: Rewrite README.md against the blueprint
+
+<Status value="proposed" note="45m estimate — eight sections, hard 250-line cap" />
+
+## Goal
+
+A new `README.md` that walks the eight-section blueprint top to bottom, embeds the screenshot from Phase 1, converts prose reference content into tables, and stays under the 250-line hard cap.
+
+## Tasks
+
+- Open `README.md`. Walk the blueprint top to bottom.
+- Section 1 (Hook): 5 lines max. Lead with the value, not the architecture.
+- Section 2 (Demo): embed `docs/screenshot.png` with a 1-sentence caption.
+- Section 3 (Install): the three-command marketplace path. Inline prereqs.
+- Section 4 (Quick start): code block + commentary, 4 lines total.
+- Section 5 (Reference): three tables — slash commands, CLI subcommands, spec-kit components.
+- Section 6 (Authoring): four-bullet contract. Link to AGENTS.md.
+- Section 7 (Troubleshooting): three FAQ items from the spec.
+- Section 8 (License + Links): MIT, AGENTS.md, CLAUDE.md, SYNERGY_PLAN.md.
+- Cut the items called out in <CrossRef to="01-architecture#what-to-cut-from-the-current-readme">"What to cut"</CrossRef>.
+
+## Verification
+
+- `wc -l README.md` ≤ 250.
+- All eight blueprint sections present.
+- No content lifted verbatim from `AGENTS.md` / `CLAUDE.md` (link instead).
+
+## Dependencies
+
+Requires <CrossRef to="phases/capture-screenshot" /> — the README's Demo section embeds the captured screenshot.

@@ -5,77 +5,111 @@ description: Use when the user wants to plan a new feature, refactor, or project
 
 # create-spec
 
-Author a structured MDX spec session for the work the user is about to start. The session lives in `.synergy/sessions/<YYYY-MM-DD-slug>/` and contains:
+You are scaffolding a new Synergy MDX spec session. There is **no `synergy spec` CLI command** — this skill is the authoring path. You read templates from disk, fill in placeholders, and write the result into `.synergy/sessions/<name>/`.
 
-- `00-overview.mdx` — top-level spec (status, goals, sub-spec links, open questions, risks).
-- `01-architecture.mdx` — system shape, diagrams.
-- `02-implementation.mdx` — phased build, agent allocation, timeline.
-- `orchestrator.md` — plain-markdown playbook the agent reads before implementing.
-- `_components/` — empty; use it for session-specific MDX components.
-- `assets/` — empty; use it for images, diagrams.
+## Scope reasoning
 
-## Workflow
+Before scaffolding anything, decide the shape of the spec from the user's request. Phase count is a judgment call, not a default.
 
-1. **Confirm intent.** Restate the user's request in one sentence and ask one clarifying question if the work type (feature / refactor / project) or scope is ambiguous. Skip the question if it's clear.
-2. **Pick a session name.** Default to auto-generated `YYYY-MM-DD-<slug>` from the title. Offer the user a chance to override if they care; most won't.
-3. **Generate the session** by running `node $CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js spec "<title>" --type <feature|refactor|project>` from the project root. The CLI:
-   - creates the session folder,
-   - writes the four files with sensible templates,
-   - auto-starts the preview server on port `4321` (PID tracked in `.synergy/preview.pid`),
-   - opens the browser to `http://localhost:4321/s/<session-name>`.
-4. **Fill in the templates.** Open the generated `00-overview.mdx`, `01-architecture.mdx`, and `02-implementation.mdx` and replace the placeholder text with the actual spec content based on the conversation. Use spec-kit components liberally — see "Component cheat sheet" below.
-5. **Write the orchestrator.** Edit `orchestrator.md`. Specify:
-   - dependency graph of phases / chunks,
-   - which phases can run in parallel via sub-agents,
-   - which need an agent team (multi-step, exploratory),
-   - verification gates between phases.
-6. **Validate.** Run `node $CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js validate <session-name>` and fix any reported issues. The validator catches: schema violations on component props, dangling cross-references.
-7. **Iterate with the user.** The preview hot-reloads on every MDX save. Take edit requests, modify the files, and let the browser refresh.
+| Signal | Shape |
+|---|---|
+| One-paragraph ask, no architecture concerns, < 1 day of work | **Tiny** — `00-overview.mdx` (minimal) + `orchestrator.md`. Nothing else. |
+| Single coherent change, clear path, 1–3 days, no parallelism | **Single-phase** — overview (full) + architecture + implementation + one `phases/01-<slug>/`. |
+| Multiple independent or sequenced chunks, > 3 days, parallelizable work, multiple agents | **Multi-phase** — overview (full) + architecture + implementation + `phases/01-…/`, `phases/02-…/`, etc. |
+
+When in doubt, ask one clarifying question rather than over-scaffolding.
+
+## Layout rules
+
+Session directory: `.synergy/sessions/<YYYY-MM-DD>-<slug>/`.
+
+**Slug rules** (for both session and phase slugs):
+- lowercase, kebab-case (`a-z0-9-`), max 40 chars,
+- derived from the title,
+- on collision with an existing directory, append `-<6-char-hash>` (sha1 of `title-now`, sliced to 6).
+
+**Required vs optional files:**
+
+| File | Required? |
+|---|---|
+| `orchestrator.md` | always |
+| `00-overview.mdx` | always (Summary + Goals headings required by the validator) |
+| `01-architecture.mdx` | optional |
+| `02-implementation.mdx` | optional — include when there are phases |
+| `_components/` | optional |
+| `assets/` | optional |
+| `phases/<NN>-<slug>/spec.mdx` | required if the phase folder exists |
+| `phases/<NN>-<slug>/orchestrator.md` | optional but warned-on-miss |
+
+**Phase folder format:** `<NN>-<slug>` where `NN` is zero-padded (`01`, `02`, …). `NN` sequence must be gap-free starting at `01`. The slug is the stable identifier; renumbering is safe because CrossRefs use slugs.
+
+**CrossRefs to phases use the slug, not the number:** `<CrossRef to="phases/core" />` resolves to whichever folder has slug `core`, regardless of its numeric prefix. Use `phases/<slug>`, never `phases/02-core` or `02-implementation#phase-2`.
+
+## Templates
+
+Templates live at `$CLAUDE_PLUGIN_ROOT/skills/create-spec/templates/`. Read them with the `Read` tool, substitute placeholders, write into the session. Do **not** paste template bodies back into the conversation.
+
+| Scope | Templates to copy |
+|---|---|
+| Tiny | `overview-minimal.mdx` → `00-overview.mdx`; `orchestrator-root.md` → `orchestrator.md`. |
+| Single-phase | `overview-full.mdx` → `00-overview.mdx`; `architecture.mdx` → `01-architecture.mdx`; `implementation.mdx` → `02-implementation.mdx`; `orchestrator-root.md` → `orchestrator.md`; `phase/spec.mdx` → `phases/01-<slug>/spec.mdx`; `phase/orchestrator.md` → `phases/01-<slug>/orchestrator.md`. |
+| Multi-phase | Same as single-phase, but copy the `phase/*` templates once per phase into `phases/<NN>-<slug>/`. |
+
+**Placeholders to substitute** at write time:
+
+| Placeholder | Value |
+|---|---|
+| `{{TITLE}}` | Session title (human-readable). |
+| `{{TYPE}}` | `feature`, `refactor`, or `project`. |
+| `{{TODAY}}` | ISO date (`YYYY-MM-DD`). |
+| `{{PHASE_NUMBER}}` | Phase ordinal (`1`, `2`, …) — no zero-padding inside templates. |
+| `{{PHASE_TITLE}}` | Phase title (human-readable). |
+
+CrossRef placeholders like `<first-phase-slug>`, `<prev-phase-slug>` are hints to **you** — replace them with the real phase slugs the user agreed on. Don't leave angle-bracket placeholders in the written session.
+
+## Scaffolding procedure
+
+1. **Confirm intent.** Restate the user's ask in one sentence. Decide tiny / single-phase / multi-phase per the scope table. Ask one clarifying question only if the shape is ambiguous.
+2. **Init if needed.** If `.synergy/sessions/` does not exist, run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" init` from the project root.
+3. **Pick the session slug** (`YYYY-MM-DD-<slug>`, max 40 chars in the slug part, `-<6-char-hash>` suffix on collision).
+4. **Create directories** — `mkdir -p .synergy/sessions/<name>/{_components,assets}` plus `phases/<NN>-<slug>/` for each phase you decided on.
+5. **Copy templates** into the session per the scope table. Read each template, substitute placeholders, write to the destination. Replace `<…-slug>` hint placeholders with the real slugs.
+6. **Start the preview** by running `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview start`. It is idempotent — safe to call when already running.
+7. **Print the URL** for the user: `http://localhost:4321/s/<session-name>/overview`. This is the contract. Browser auto-open is best-effort and OS-dependent — try it but don't fail the flow on it.
+8. **Fill the templates.** Open the written files and replace the placeholder body text (`_..._` blocks, example phases, sample components) with content derived from the conversation.
+9. **Validate.** Run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session-name>`. Fix every error before declaring done.
 
 ## Component cheat sheet
 
-All from `@synergy/spec-kit`. Import at the top of each MDX file.
+All from `@synergy/spec-kit`. Keep this short — the canonical list is in the package itself.
 
-| Component | When to use |
+| Component | Use for |
 |---|---|
-| `<Status value="draft\|proposed\|in-progress\|blocked\|done\|shipped" />` | Mark the spec or a sub-section's lifecycle stage. |
-| `<Phase number title status estimate>` | Wrap each implementation phase. |
-| `<Timeline milestones={[...]} />` | Show ordered milestones with optional `when` and `status`. |
-| `<SubSpec slug title summary />` | Link to a sibling MDX in the session. |
-| `<CrossRef to="01-architecture#section-anchor" />` | Inline reference to another spec or anchor. Validator enforces target exists. |
-| `<AgentAllocation entries={[...]} />` | Table of agents (sub-agent / agent-team / human) and what they own. |
-| `<Team name members mission />` | Group of contributors with roles. |
-| `<Reviewer name role scope handle />` | Single reviewer and their sign-off scope. |
-| `<OpenQuestion id question owner resolveBy />` | Unresolved decision blocking progress. |
-| `<Risk id title severity category mitigation />` | Known hazard with mitigation. |
-| `<Mockup src alt caption />` | Embed an image from `assets/`. |
-| `<Chart kind="flow\|sequence\|state\|er\|gantt\|mindmap\|architecture">{`mermaid source`}</Chart>` | Mermaid-rendered diagram. Use for any visual you can express in Mermaid. |
-
-For visual layouts beyond Mermaid (custom React-flow, recharts, etc.), an agent may add new components in `_components/` for that session and import them locally.
-
-## Cross-reference syntax
-
-`<CrossRef to="<spec-slug>" />` — link to another file in the session.
-`<CrossRef to="<spec-slug>#<heading-slug>" />` — link to a specific heading. Heading slugs are GitHub-style: lowercased, spaces → `-`, special chars stripped.
-
-The validator resolves every `to=` at build time. If you reference a missing slug or anchor, validation fails.
+| `<Status value="…" />` | Lifecycle badge (draft/proposed/in-progress/blocked/done/shipped). |
+| `<Phase number title status estimate>` | Phase summary card inside `02-implementation.mdx`. Phase content itself lives in `phases/<NN>-<slug>/spec.mdx`. |
+| `<Timeline milestones={[…]} />` | Ordered milestones with optional `when` / `status`. |
+| `<SubSpec slug title summary />` | Pointer to a sibling MDX file from `00-overview.mdx`. |
+| `<CrossRef to="…" />` | Validator-enforced spec-to-spec link. Use `phases/<slug>` for phases. |
+| `<AgentAllocation entries={[…]} />` | Who owns which phase(s). |
+| `<OpenQuestion id question />` | Unresolved decision. |
+| `<Risk id title severity />` | Known hazard + mitigation. |
+| `<Mockup src alt caption />` | Image from `assets/`. |
+| `<Chart kind="flow\|sequence\|state\|er\|gantt\|mindmap">{`mermaid src`}</Chart>` | Diagrams. Default to Mermaid; build a session-local component if Mermaid is insufficient. |
 
 ## Hard rules
 
-- **Prefer spec-kit components over raw markdown** for structured content (status, phases, risks, allocations, timelines, charts).
-- **Always include `orchestrator.md`.** Without it, agents implementing the spec don't know the execution strategy.
-- **Charts:** default to `<Chart>` (Mermaid). When Mermaid can't express what's needed, build a session-local component in `_components/` and import it.
-- **Don't write raw `[link](other.mdx)` between specs** — use `<CrossRef>` so the validator can catch breakage.
-- **Don't co-locate the session in the consumer's source tree** — `.synergy/sessions/` is the single home.
+- **Prefer components over markdown** for structured content (status, phases, risks, allocations, timelines, charts).
+- **No raw markdown links between specs** (`[link](other.mdx)`). Use `<CrossRef>` so the validator can catch breakage.
+- **`<Phase>` in `02-implementation.mdx` is a summary card only.** The real phase content lives in `phases/<NN>-<slug>/spec.mdx`. The card's job is to summarize and cross-ref the phase folder.
+- **CrossRef phase references use the slug**, not the numeric prefix. `phases/core`, never `phases/02-core` or `02-implementation#phase-2`. Slugs are stable across renumbering; numbers are not.
+- **Orchestrator stays plain markdown.** No MDX components, no JSX.
 
 ## Stop conditions
 
-You're done with this skill when:
+Done when **all** of these are true:
 
-- the session exists in `.synergy/sessions/`,
-- all placeholder text in the templates has been replaced with real content,
-- `node $CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js validate <session-name>` reports zero errors,
-- `orchestrator.md` describes the implementation strategy (not just the spec),
-- the user confirms the spec reflects their intent.
-
-After that, hand off to the user. They will reference the session in a future conversation to implement it.
+- The session directory exists under `.synergy/sessions/<YYYY-MM-DD-slug>/`.
+- All `{{PLACEHOLDER}}` substitutions are complete and all `<…-slug>` hints are replaced with real slugs.
+- `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session-name>` returns zero errors.
+- `orchestrator.md` describes the actual execution strategy (dependency graph, parallel chunks, agent strategy, verification gates) — not template boilerplate.
+- The user confirms the session reflects their intent.

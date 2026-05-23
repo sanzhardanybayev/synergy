@@ -1,0 +1,31 @@
+---
+title: 'Cross-link and validate'
+order: 3
+---
+
+import { Status, CrossRef } from '@synergy/spec-kit';
+
+# Phase 3: Cross-link and validate
+
+<Status value="proposed" note="15m estimate — guardrails only" />
+
+## Goal
+
+Make sure every internal link in the new README works, the screenshot renders in GitHub's markdown preview, and the Synergy validator stays green.
+
+## Tasks
+
+- Spot-check every link in the README (Markdown link checker or visual scan).
+- Confirm the screenshot renders in GitHub's markdown preview by pushing a draft branch (optional).
+- Run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate` — must remain zero errors.
+- Open a PR with a before/after screenshot in the description.
+
+## Verification
+
+- Every Markdown link in `README.md` resolves.
+- `synergy validate` returns zero errors against this session.
+- PR opened with before/after screenshot.
+
+## Dependencies
+
+Requires <CrossRef to="phases/rewrite-readme" /> — there's nothing to validate until the README has been rewritten.
