@@ -17,6 +17,9 @@ for (const name of componentNames) {
   validators.set(name, ajv.compile(schemas[name] as object));
 }
 
+/** Headings the spec layout requires inside `00-overview.mdx`. */
+const REQUIRED_OVERVIEW_HEADINGS = ['summary', 'goals'] as const;
+
 function isComponent(name: string): name is ComponentName {
   return (componentNames as string[]).includes(name);
 }
@@ -57,6 +60,27 @@ function buildInventory(parsed: ParsedSpec[]): SessionInventory {
     files.push(spec.slug);
   }
   return { headings, files };
+}
+
+/**
+ * Check that `00-overview.mdx` contains the required structural headings
+ * (`## Summary` and `## Goals`). No-op when the overview file is absent.
+ */
+function validateOverviewHeadings(parsed: ParsedSpec[]): ValidationIssue[] {
+  const overview = parsed.find((p) => p.slug === '00-overview');
+  if (!overview) return [];
+  const issues: ValidationIssue[] = [];
+  for (const required of REQUIRED_OVERVIEW_HEADINGS) {
+    if (!overview.headingSlugs.has(required)) {
+      const heading = required[0]!.toUpperCase() + required.slice(1);
+      issues.push({
+        file: overview.filePath,
+        severity: 'error',
+        message: `\`00-overview.mdx\` is missing required heading \`## ${heading}\``,
+      });
+    }
+  }
+  return issues;
 }
 
 function resolveCrossRef(
@@ -102,6 +126,9 @@ function validateSession(sessionDir: string): ValidationIssue[] {
     }
   }
   const inventory = buildInventory(parsed);
+
+  // Required-heading check on the overview file.
+  issues.push(...validateOverviewHeadings(parsed));
 
   for (const spec of parsed) {
     for (const comp of spec.components) {
