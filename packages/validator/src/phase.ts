@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ParsedSpec } from './parse.js';
 import type { ValidationIssue } from './types.js';
 
 /** Slug constraints derived from the spec. */
@@ -176,4 +177,43 @@ export function validatePhaseStructure(sessionDir: string): ValidationIssue[] {
   }
 
   return issues;
+}
+
+/**
+ * Context required to resolve a CrossRef target. The validator owns the
+ * concrete data; this module only needs the lookup shape.
+ */
+export interface PhaseRefContext {
+  /** Map: phase slug -> parsed `spec.mdx` (heading slugs, etc.). */
+  phases: Map<string, ParsedSpec>;
+}
+
+export type CrossRefResult = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Resolve a CrossRef `to=` string in the form `phases/<slug>[#<anchor>]`
+ * against the session's phase folders. The slug — not the numeric prefix —
+ * is the identifier, so refs survive renumbering.
+ */
+export function resolvePhaseCrossRef(target: string, ctx: PhaseRefContext): CrossRefResult {
+  const [head, anchor] = target.split('#');
+  if (!head) return { ok: false, reason: 'CrossRef `to` is empty' };
+  const phasePrefix = 'phases/';
+  if (!head.startsWith(phasePrefix)) {
+    return { ok: false, reason: `Not a phases/ CrossRef target: "${target}"` };
+  }
+  const slug = head.slice(phasePrefix.length);
+  if (!slug) {
+    return { ok: false, reason: `CrossRef "${target}" is missing a phase slug` };
+  }
+  const spec = ctx.phases.get(slug);
+  if (!spec) {
+    const known = [...ctx.phases.keys()];
+    const hint = known.length > 0 ? ` (known phases: ${known.join(', ')})` : '';
+    return { ok: false, reason: `Unknown phase slug "${slug}"${hint}` };
+  }
+  if (anchor && !spec.headingSlugs.has(anchor)) {
+    return { ok: false, reason: `Unknown anchor "${anchor}" in phase "${slug}"` };
+  }
+  return { ok: true };
 }

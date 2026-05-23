@@ -1,9 +1,9 @@
-import { readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { componentNames, schemas, type ComponentName } from '@synergy/spec-kit';
+import { type ComponentName, componentNames, schemas } from '@synergy/spec-kit';
 import Ajv, { type ValidateFunction } from 'ajv';
-import { parseSpec, type ParsedSpec } from './parse.js';
-import { validatePhaseStructure } from './phase.js';
+import { type ParsedSpec, parseSpec } from './parse.js';
+import { listPhases, resolvePhaseCrossRef, validatePhaseStructure } from './phase.js';
 import type {
   SessionInventory,
   ValidateOptions,
@@ -18,8 +18,10 @@ for (const name of componentNames) {
   validators.set(name, ajv.compile(schemas[name] as object));
 }
 
-/** Headings the spec layout requires inside `00-overview.mdx`. */
 const REQUIRED_OVERVIEW_HEADINGS = ['summary', 'goals'] as const;
+const PHASE_REF_PREFIX = 'phases/';
+/** Heuristic: legacy phase ref like "02-implementation#phase-1". */
+const LEGACY_PHASE_REF_RE = /^[0-9]{2}-implementation#phase-[0-9]+$/;
 
 function isComponent(name: string): name is ComponentName {
   return (componentNames as string[]).includes(name);
@@ -63,9 +65,63 @@ function buildInventory(parsed: ParsedSpec[]): SessionInventory {
   return { headings, files };
 }
 
+interface ResolveContext {
+  inventory: SessionInventory;
+  phases: Map<string, ParsedSpec>;
+}
+
+interface ResolveOutcome {
+  ok: boolean;
+  /** Reason for an `ok: false` result. */
+  reason?: string;
+  /** Optional warning to emit even when the ref resolves. */
+  warning?: string;
+}
+
+function resolveLegacyFileRef(target: string, inventory: SessionInventory): ResolveOutcome {
+  const [slug, anchor] = target.split('#');
+  if (!slug) return { ok: false, reason: 'CrossRef `to` is empty' };
+  if (!(slug in inventory.headings)) {
+    return { ok: false, reason: `Unknown spec slug "${slug}"` };
+  }
+  if (anchor && !inventory.headings[slug]!.has(anchor)) {
+    return { ok: false, reason: `Unknown anchor "${anchor}" in spec "${slug}"` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Route a CrossRef `to=` target through the appropriate resolver:
+ * - `phases/<slug>[#<anchor>]` -> new phase-folder resolver.
+ * - everything else -> legacy file-anchor resolver.
+ * - if the legacy form happens to look like the deprecated phase ref
+ *   (`<NN>-implementation#phase-<N>`) and resolves, emit a warning that
+ *   points authors toward the new form.
+ */
+function resolveCrossRef(target: string, ctx: ResolveContext): ResolveOutcome {
+  if (target.startsWith(PHASE_REF_PREFIX)) {
+    const result = resolvePhaseCrossRef(target, { phases: ctx.phases });
+    if (result.ok) return { ok: true };
+    return { ok: false, reason: result.reason };
+  }
+
+  const result = resolveLegacyFileRef(target, ctx.inventory);
+  if (!result.ok) return result;
+
+  if (LEGACY_PHASE_REF_RE.test(target)) {
+    return {
+      ok: true,
+      warning: `Legacy phase CrossRef form \`${target}\` — prefer the new \`phases/<slug>\` form (e.g. \`phases/core\`) so refs survive renumbering.`,
+    };
+  }
+  return { ok: true };
+}
+
 /**
  * Check that `00-overview.mdx` contains the required structural headings
- * (`## Summary` and `## Goals`). No-op when the overview file is absent.
+ * (`## Summary` and `## Goals`). No-op when the file is absent — the
+ * spec layout requires it, but enforcing presence is outside the scope
+ * of this Phase 1 change.
  */
 function validateOverviewHeadings(parsed: ParsedSpec[]): ValidationIssue[] {
   const overview = parsed.find((p) => p.slug === '00-overview');
@@ -84,19 +140,51 @@ function validateOverviewHeadings(parsed: ParsedSpec[]): ValidationIssue[] {
   return issues;
 }
 
-function resolveCrossRef(
-  target: string,
-  inventory: SessionInventory,
-): { ok: true } | { ok: false; reason: string } {
-  const [slug, anchor] = target.split('#');
-  if (!slug) return { ok: false, reason: 'CrossRef `to` is empty' };
-  if (!(slug in inventory.headings)) {
-    return { ok: false, reason: `Unknown spec slug "${slug}"` };
+interface ParseAttempt {
+  parsed?: ParsedSpec;
+  issue?: ValidationIssue;
+}
+
+function tryParse(file: string): ParseAttempt {
+  try {
+    return { parsed: parseSpec(file) };
+  } catch (err) {
+    const e = err as { line?: number; column?: number; reason?: string; message?: string };
+    return {
+      issue: {
+        file,
+        line: e.line,
+        column: e.column,
+        severity: 'error',
+        message: `Parse failed: ${e.reason ?? e.message ?? String(err)}`,
+      },
+    };
   }
-  if (anchor && !inventory.headings[slug]!.has(anchor)) {
-    return { ok: false, reason: `Unknown anchor "${anchor}" in spec "${slug}"` };
+}
+
+interface PhaseParseResult {
+  /** Map: phase slug -> parsed `spec.mdx`. Excludes phases with parse errors / missing files. */
+  parsed: Map<string, ParsedSpec>;
+  /** Issues collected while parsing phase `spec.mdx` files. */
+  issues: ValidationIssue[];
+}
+
+function parsePhases(sessionDir: string): PhaseParseResult {
+  const phases = listPhases(sessionDir);
+  const parsed = new Map<string, ParsedSpec>();
+  const issues: ValidationIssue[] = [];
+  for (const phase of phases) {
+    if (phase.malformed || !phase.slug) continue;
+    const specFile = join(phase.dir, 'spec.mdx');
+    if (!existsSync(specFile)) continue;
+    const attempt = tryParse(specFile);
+    if (attempt.issue) {
+      issues.push(attempt.issue);
+      continue;
+    }
+    if (attempt.parsed) parsed.set(phase.slug, attempt.parsed);
   }
-  return { ok: true };
+  return { parsed, issues };
 }
 
 function validateSession(sessionDir: string): ValidationIssue[] {
@@ -111,20 +199,11 @@ function validateSession(sessionDir: string): ValidationIssue[] {
     return issues;
   }
 
-  const parsed: ReturnType<typeof parseSpec>[] = [];
+  const parsed: ParsedSpec[] = [];
   for (const f of files) {
-    try {
-      parsed.push(parseSpec(f));
-    } catch (err) {
-      const e = err as { line?: number; column?: number; reason?: string; message?: string };
-      issues.push({
-        file: f,
-        line: e.line,
-        column: e.column,
-        severity: 'error',
-        message: `Parse failed: ${e.reason ?? e.message ?? String(err)}`,
-      });
-    }
+    const attempt = tryParse(f);
+    if (attempt.issue) issues.push(attempt.issue);
+    if (attempt.parsed) parsed.push(attempt.parsed);
   }
   const inventory = buildInventory(parsed);
 
@@ -134,10 +213,17 @@ function validateSession(sessionDir: string): ValidationIssue[] {
   // Phase folder structural validation.
   issues.push(...validatePhaseStructure(sessionDir));
 
-  for (const spec of parsed) {
+  // Parse phase spec.mdx files so phase CrossRefs and anchors resolve.
+  const phaseParse = parsePhases(sessionDir);
+  issues.push(...phaseParse.issues);
+
+  // Every parsed file — top-level + phases — feeds component / CrossRef validation.
+  const allParsed: ParsedSpec[] = [...parsed, ...phaseParse.parsed.values()];
+  const ctx: ResolveContext = { inventory, phases: phaseParse.parsed };
+
+  for (const spec of allParsed) {
     for (const comp of spec.components) {
       if (!isComponent(comp.name)) continue; // unknown / session-local component
-      // Warn on unparseable attributes — we can't validate them.
       for (const attrName of comp.unparsedAttributes) {
         issues.push({
           file: spec.filePath,
@@ -163,11 +249,10 @@ function validateSession(sessionDir: string): ValidationIssue[] {
           });
         }
       }
-      // CrossRef target resolution.
       if (comp.name === 'CrossRef') {
         const to = comp.attributes.to;
         if (typeof to === 'string') {
-          const result = resolveCrossRef(to, inventory);
+          const result = resolveCrossRef(to, ctx);
           if (!result.ok) {
             issues.push({
               file: spec.filePath,
@@ -176,6 +261,15 @@ function validateSession(sessionDir: string): ValidationIssue[] {
               component: 'CrossRef',
               severity: 'error',
               message: `CrossRef to="${to}" — ${result.reason}`,
+            });
+          } else if (result.warning) {
+            issues.push({
+              file: spec.filePath,
+              line: comp.line,
+              column: comp.column,
+              component: 'CrossRef',
+              severity: 'warning',
+              message: result.warning,
             });
           }
         }
