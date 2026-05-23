@@ -1,18 +1,25 @@
 ---
 description: Create a new Synergy MDX spec session and auto-open the preview
-argument-hint: <title> [--type feature|refactor|project]
+argument-hint: <title> [feature|refactor|project]
 ---
 
-Invoke the `create-spec` skill to author a new spec session.
+Invoke the `synergy:create-spec` skill to author a new spec session.
 
 The user's request: `$ARGUMENTS`
 
-Follow the create-spec workflow:
+There is **no `synergy spec` CLI command**. The `create-spec` skill owns
+the authoring path: it reads templates from
+`$CLAUDE_PLUGIN_ROOT/skills/create-spec/templates/`, substitutes
+placeholders, writes them into `.synergy/sessions/<YYYY-MM-DD-slug>/`,
+starts the preview server, and prints the URL.
 
-1. Restate the request in one sentence and confirm the work type if ambiguous (feature / refactor / project).
-2. Auto-generate the session name as `YYYY-MM-DD-<slug>` unless the user wants to override.
-3. Run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" spec "<title>" --type <type>` from the project root. The CLI creates the session, starts the preview server on port 4321, and opens the browser. If the CLI binary doesn't exist yet, run `/synergy-setup` first.
-4. Replace placeholder text in the generated MDX files with real content. Use spec-kit components (`<Status>`, `<Phase>`, `<Timeline>`, `<SubSpec>`, `<CrossRef>`, `<AgentAllocation>`, `<OpenQuestion>`, `<Risk>`, `<Chart>`, …) — see the create-spec skill for the full cheat sheet.
-5. Write `orchestrator.md`: dependency graph, parallel chunks, sub-agent vs team strategy, verification gates.
-6. Run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session-name>` and resolve any errors.
-7. Confirm the spec reflects the user's intent.
+Follow the skill's procedure:
+
+1. Decide the spec shape from the request — tiny, single-phase, or multi-phase. The skill's "Scope reasoning" table is the rubric.
+2. Pick a session slug (`YYYY-MM-DD-<kebab-slug>`, max 40 chars, `-<6-char-hash>` on collision) and any phase slugs you need.
+3. Create the session directory and copy the appropriate templates. Substitute `{{TITLE}}`, `{{TYPE}}`, `{{TODAY}}`, `{{PHASE_NUMBER}}`, `{{PHASE_TITLE}}`. Replace `<…-slug>` hint placeholders with real slugs.
+4. Run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview start` (idempotent). Print `http://localhost:4321/s/<session-name>/overview` for the user. Browser auto-open is best-effort.
+5. Fill in the placeholder content from the conversation.
+6. Run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session-name>` and resolve every error before declaring done.
+
+If the CLI binary doesn't exist yet, run `/synergy-setup` first.
