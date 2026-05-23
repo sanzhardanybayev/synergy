@@ -6,9 +6,9 @@ Markdown specs go stale in a terminal. Synergy gives agents a tight component vo
 
 ## Demo
 
-![Synergy preview rendering a refactor session](docs/screenshot.png)
+![Synergy preview: Implementation page with phases nested under Implementation in the sidebar and copy-path buttons in the page header](docs/screenshot.png)
 
-The preview at `http://localhost:4321` renders MDX with reusable spec components (`<Status>`, `<Phase>`, `<Chart>`, `<CrossRef>`, …), a session switcher, and an orchestrator panel. Hot-reloads as Claude Code edits the files.
+The preview at `http://localhost:4321` gives each MDX file its own route (`/s/<name>/overview`, `/architecture`, `/implementation`, `/phases/<slug>`), a hierarchical left sidebar (sessions dropdown, spec rows, phases nested under Implementation), and per-page copy-path buttons for the session dir, the current page, and the orchestrator. The orchestrator opens as a right-side slide-out drawer (ESC or backdrop to close) rendering `orchestrator.md`, and every page hot-reloads as Claude Code edits the MDX.
 
 ## Install
 
@@ -76,10 +76,10 @@ Imported from `@synergy/spec-kit`. Props are schema-validated; cross-references 
 | Component | Required props | One-line purpose |
 |---|---|---|
 | `<Status>` | `value` | Lifecycle badge: `draft`, `proposed`, `in-progress`, `blocked`, `done`, `shipped` |
-| `<Phase>` | `number`, `title` | Implementation phase block (optional `status`, `estimate`, `summary`) |
+| `<Phase>` | `number`, `title` | Phase summary card for the index in `02-implementation.mdx`; the real phase body lives in `phases/<NN>-<slug>/spec.mdx` |
 | `<Timeline>` | `milestones` | Ordered visual milestones with optional dates and statuses |
 | `<SubSpec>` | `slug`, `title` | Link card to a sibling spec file |
-| `<CrossRef>` | `to` | Inline reference; `to="<spec-slug>"` or `"<spec-slug>#<heading-slug>"` |
+| `<CrossRef>` | `to` | Inline reference; `to="<spec-slug>"`, `"<spec-slug>#<anchor>"`, or `"phases/<slug>"` for phase folders |
 | `<AgentAllocation>` | `entries` | Table of agents (`sub-agent`, `agent-team`, `human`) and ownership |
 | `<Team>` | `name`, `members` | Group of contributors with roles |
 | `<Reviewer>` | `name`, `role`, `scope` | Reviewer and their sign-off scope |
