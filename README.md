@@ -43,7 +43,7 @@ git clone https://github.com/sanzhardanybayev/synergy
 /synergy-validate                          # before commit
 ```
 
-That's the loop. The first command scaffolds `.synergy/sessions/` in your project. The second creates `.synergy/sessions/YYYY-MM-DD-add-rate-limiting/` with `00-overview.mdx`, `01-architecture.mdx`, `02-implementation.mdx`, and an `orchestrator.md` playbook — then opens your browser. The third checks schemas and cross-references before you ship.
+That's the loop. The first command scaffolds `.synergy/sessions/` in your project. The second invokes the `synergy:create-spec` skill — which reasons about scope, picks `.synergy/sessions/YYYY-MM-DD-add-rate-limiting/`, scaffolds the overview + optional architecture/implementation/phase folders, and opens your browser. The third checks schemas and cross-references before you ship.
 
 ## Reference
 
@@ -61,12 +61,11 @@ That's the loop. The first command scaffolds `.synergy/sessions/` in your projec
 
 ### CLI subcommands
 
-For terminal users — same surface, available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" ...` after `/synergy-setup`.
+For terminal users — available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" ...` after `/synergy-setup`. Spec authoring is a skill, not a CLI command — use `/synergy-spec` (which invokes the `synergy:create-spec` skill).
 
 | Command | Flags | Purpose |
 |---|---|---|
 | `synergy init` | `--root <dir>` | Scaffold `.synergy/` |
-| `synergy spec <title>` | `--type feature\|refactor\|project`, `--name`, `--no-preview`, `--no-open`, `--root` | Create a session |
 | `synergy preview <action>` | `--root`, `--port` (default 4321) | `start \| stop \| status` |
 | `synergy validate [session]` | `--root` | Validate sessions in `.synergy/sessions/` |
 
