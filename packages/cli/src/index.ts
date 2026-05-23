@@ -1,5 +1,4 @@
 export { initProject } from './init.js';
-export { createSpec, isSpecType, type SpecType, type SpecResult } from './spec.js';
 export {
   previewStart,
   previewStop,
