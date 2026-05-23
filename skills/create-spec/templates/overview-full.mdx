@@ -1,0 +1,70 @@
+---
+title: '{{TITLE}}'
+type: {{TYPE}}
+---
+
+import {
+  Status,
+  Timeline,
+  SubSpec,
+  CrossRef,
+  OpenQuestion,
+  Risk,
+} from '@synergy/spec-kit';
+
+# {{TITLE}}
+
+<Status value="draft" note="Scaffolded {{TODAY}}" />
+
+## Summary
+
+_One paragraph: what's being built and why._
+
+## Goals
+
+- _What success looks like._
+- _Out of scope: ..._
+
+## Tech stack
+
+- _Language / framework / key libraries._
+- _Anything load-bearing that constrains the design._
+
+## High-level plan
+
+The work breaks down into the phases below. Drill into each phase folder
+for the full task list, verification gate, and orchestrator.
+
+- <CrossRef to="phases/<first-phase-slug>" /> — _one-line summary of the phase._
+- <CrossRef to="phases/<second-phase-slug>" /> — _..._
+
+Delete this list or extend it once the phase count is decided.
+
+## Timeline
+
+<Timeline
+  milestones={[
+    { label: 'Plan approved', status: 'proposed' },
+    { label: 'Phase 1 complete', status: 'draft' },
+    { label: 'Ready to ship', status: 'draft' },
+  ]}
+/>
+
+## Sub-specs
+
+<SubSpec slug="01-architecture" title="Architecture" summary="System diagrams and component breakdown." />
+<SubSpec slug="02-implementation" title="Implementation plan" summary="Phase index, timeline, agent allocation." />
+
+See <CrossRef to="01-architecture" /> and <CrossRef to="02-implementation" />.
+
+## Open questions
+
+<OpenQuestion id="Q1" question="What is the primary constraint?">
+  _Document the unknown here, or delete this block if there are none._
+</OpenQuestion>
+
+## Risks
+
+<Risk id="R1" severity="medium" title="Scope creep">
+  Mitigation: cut scope ruthlessly in the implementation plan.
+</Risk>
