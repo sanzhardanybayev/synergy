@@ -1,5 +1,10 @@
 # Synergy
 
+[![License: MIT](https://img.shields.io/github/license/sanzhardanybayev/synergy)](LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-d97757?logo=anthropic)](https://www.claude.com/claude-code)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen?logo=node.js)](package.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.json)
+
 **Spec-driven planning for Claude Code.** Turn vague requests into MDX specifications with status badges, phase plans, agent allocations, charts, and cross-references — rendered live in your browser as you author them.
 
 Markdown specs go stale in a terminal. Synergy gives agents a tight component vocabulary, a validator that enforces it, and a Vite preview that hot-reloads on every save.
