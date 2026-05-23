@@ -1,8 +1,8 @@
+import { type SessionMeta, loaders, sessions } from 'virtual:synergy/sessions';
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { Outlet, useParams } from 'react-router-dom';
-import { loaders, sessions, type SessionMeta } from 'virtual:synergy/sessions';
 import { OrchestratorDrawer } from './OrchestratorDrawer.js';
-import { Sidebar, type OrchestratorTarget } from './Sidebar.js';
+import { type OrchestratorTarget, Sidebar } from './Sidebar.js';
 
 interface SessionContextValue {
   session: SessionMeta;
@@ -39,8 +39,7 @@ export function SessionShell() {
           <div className="empty">
             <h2>Unknown session</h2>
             <p>
-              No session named <code>{name ?? '(none)'}</code> was found in this
-              project.
+              No session named <code>{name ?? '(none)'}</code> was found in this project.
             </p>
           </div>
         </main>

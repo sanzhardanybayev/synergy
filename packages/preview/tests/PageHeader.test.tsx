@@ -47,14 +47,17 @@ describe('PageHeader', () => {
       ...baseProps,
       orchestratorPath: '/abs/sessions/foo/orchestrator.md',
     });
-    expect(
-      screen.getByRole('button', { name: /session path/i }),
-    ).toHaveAttribute('title', baseProps.sessionPath);
-    expect(
-      screen.getByRole('button', { name: /current page path/i }),
-    ).toHaveAttribute('title', baseProps.pagePath);
-    expect(
-      screen.getByRole('button', { name: /orchestrator path/i }),
-    ).toHaveAttribute('title', '/abs/sessions/foo/orchestrator.md');
+    expect(screen.getByRole('button', { name: /session path/i })).toHaveAttribute(
+      'title',
+      baseProps.sessionPath,
+    );
+    expect(screen.getByRole('button', { name: /current page path/i })).toHaveAttribute(
+      'title',
+      baseProps.pagePath,
+    );
+    expect(screen.getByRole('button', { name: /orchestrator path/i })).toHaveAttribute(
+      'title',
+      '/abs/sessions/foo/orchestrator.md',
+    );
   });
 });

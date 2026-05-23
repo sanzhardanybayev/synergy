@@ -10,9 +10,7 @@ vi.mock('../src/clipboard', () => ({
 import { OrchestratorDrawer } from '../src/OrchestratorDrawer';
 import { ToastProvider } from '../src/ToastProvider';
 
-function renderDrawer(
-  partial: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {},
-) {
+function renderDrawer(partial: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) {
   const props: React.ComponentProps<typeof OrchestratorDrawer> = {
     open: true,
     title: 'Orchestrator — Phase 2 — Core',
@@ -111,9 +109,7 @@ describe('OrchestratorDrawer', () => {
     // is reachable via the path button at minimum.
     renderDrawer({ loader: async () => ({ default: '## still valid' }) });
     await waitFor(() => {
-      expect(
-        screen.getByRole('heading', { level: 2, name: /still valid/i }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: /still valid/i })).toBeInTheDocument();
     });
   });
 });

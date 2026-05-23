@@ -55,6 +55,7 @@ export function OrchestratorDrawer({ open, title, path, loader, onClose }: Props
   if (!open) return null;
 
   return (
+    // biome-ignore lint/a11y/useSemanticElements: keep role=dialog for testing-library queries; <dialog> requires showModal() lifecycle we don't want here
     <div className="drawer" role="dialog" aria-modal="true" aria-label={title}>
       <button
         type="button"
@@ -67,12 +68,7 @@ export function OrchestratorDrawer({ open, title, path, loader, onClose }: Props
           <h2 className="drawer__title">{title}</h2>
           <div className="drawer__actions">
             <CopyButton label="Copy path" value={path} />
-            <button
-              type="button"
-              className="drawer__close"
-              aria-label="Close"
-              onClick={onClose}
-            >
+            <button type="button" className="drawer__close" aria-label="Close" onClick={onClose}>
               ✕
             </button>
           </div>
@@ -115,10 +111,7 @@ interface ErrorBoundaryProps {
   fallback: ReactNode;
 }
 
-class MarkdownErrorBoundary extends Component<
-  ErrorBoundaryProps,
-  { hasError: boolean }
-> {
+class MarkdownErrorBoundary extends Component<ErrorBoundaryProps, { hasError: boolean }> {
   override state = { hasError: false };
   static getDerivedStateFromError() {
     return { hasError: true };

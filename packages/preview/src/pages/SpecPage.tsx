@@ -1,5 +1,5 @@
-import { type ComponentType, type ReactNode, Suspense, lazy, useMemo } from 'react';
 import { loaders } from 'virtual:synergy/sessions';
+import { type ComponentType, type ReactNode, Suspense, lazy, useMemo } from 'react';
 import { PageHeader } from '../PageHeader.js';
 import { useSession } from '../SessionShell.js';
 

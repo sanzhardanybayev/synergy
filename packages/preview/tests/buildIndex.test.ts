@@ -77,9 +77,7 @@ describe('__buildIndex', () => {
       expect(s.specs).toEqual(['00-overview.mdx']);
       expect(s.hasOrchestrator).toBe(false);
       expect(s.phases).toEqual([]);
-      expect(s.paths.spec['00-overview.mdx']).toBe(
-        join(t.sessionsDir, 'tiny', '00-overview.mdx'),
-      );
+      expect(s.paths.spec['00-overview.mdx']).toBe(join(t.sessionsDir, 'tiny', '00-overview.mdx'));
       expect(s.paths.orchestrator).toBeUndefined();
       expect(s.paths.phaseSpec).toEqual({});
       expect(s.paths.phaseOrchestrator).toEqual({});
@@ -96,9 +94,7 @@ describe('__buildIndex', () => {
     try {
       const [s] = __buildIndex(t.sessionsDir);
       expect(s!.hasOrchestrator).toBe(true);
-      expect(s!.paths.orchestrator).toBe(
-        join(t.sessionsDir, 'session-a', 'orchestrator.md'),
-      );
+      expect(s!.paths.orchestrator).toBe(join(t.sessionsDir, 'session-a', 'orchestrator.md'));
       expect(s!.paths.session).toBe(join(t.sessionsDir, 'session-a'));
     } finally {
       t.cleanup();

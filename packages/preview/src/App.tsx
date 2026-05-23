@@ -1,5 +1,5 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
 import { sessions } from 'virtual:synergy/sessions';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { SessionShell } from './SessionShell.js';
 import { ArchitecturePage } from './pages/ArchitecturePage.js';
 import { ImplementationPage } from './pages/ImplementationPage.js';
@@ -12,9 +12,7 @@ export function App() {
     <Routes>
       <Route
         path="/"
-        element={
-          latest ? <Navigate to={`/s/${latest.name}/overview`} replace /> : <EmptyState />
-        }
+        element={latest ? <Navigate to={`/s/${latest.name}/overview`} replace /> : <EmptyState />}
       />
       <Route path="/s/:name" element={<SessionShell />}>
         <Route index element={<Navigate to="overview" replace />} />
@@ -34,8 +32,8 @@ function EmptyState() {
     <div className="empty">
       <h2>No sessions yet</h2>
       <p>
-        Use the <code>synergy:create-spec</code> Claude Code skill to scaffold one,
-        or run <code>synergy init</code> in your project root.
+        Use the <code>synergy:create-spec</code> Claude Code skill to scaffold one, or run{' '}
+        <code>synergy init</code> in your project root.
       </p>
     </div>
   );

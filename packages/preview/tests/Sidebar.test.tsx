@@ -1,9 +1,9 @@
+import type { SessionMeta } from 'virtual:synergy/sessions';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { Sidebar } from '../src/Sidebar';
-import type { SessionMeta } from 'virtual:synergy/sessions';
 
 function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   const name = overrides.name ?? 'demo';
@@ -24,12 +24,14 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   };
 }
 
-function renderSidebar(opts: {
-  sessions?: SessionMeta[];
-  currentSessionName?: string;
-  route?: string;
-  onOpenOrchestrator?: (target: 'root' | { phaseSlug: string }) => void;
-} = {}) {
+function renderSidebar(
+  opts: {
+    sessions?: SessionMeta[];
+    currentSessionName?: string;
+    route?: string;
+    onOpenOrchestrator?: (target: 'root' | { phaseSlug: string }) => void;
+  } = {},
+) {
   const sessions = opts.sessions ?? [makeSession()];
   const currentSessionName = opts.currentSessionName ?? sessions[0]!.name;
   const onOpenOrchestrator = opts.onOpenOrchestrator ?? vi.fn();
@@ -194,16 +196,24 @@ describe('Sidebar', () => {
 
   it('omits the root orchestrator entry when the session has none', () => {
     renderSidebar({
-      sessions: [makeSession({ hasOrchestrator: false, paths: { session: '/abs/demo', spec: { '00-overview.mdx': '/abs/demo/00-overview.mdx' }, phaseSpec: {}, phaseOrchestrator: {} } })],
+      sessions: [
+        makeSession({
+          hasOrchestrator: false,
+          paths: {
+            session: '/abs/demo',
+            spec: { '00-overview.mdx': '/abs/demo/00-overview.mdx' },
+            phaseSpec: {},
+            phaseOrchestrator: {},
+          },
+        }),
+      ],
     });
     expect(screen.queryByRole('button', { name: /orchestrator \(root\)/i })).toBeNull();
   });
 
   it('renders the root orchestrator entry when the session has one', () => {
     renderSidebar();
-    expect(
-      screen.getByRole('button', { name: /orchestrator \(root\)/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /orchestrator \(root\)/i })).toBeInTheDocument();
   });
 
   it('invokes onOpenOrchestrator with root when clicked', async () => {

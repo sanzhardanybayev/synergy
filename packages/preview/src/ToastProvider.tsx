@@ -63,6 +63,7 @@ function ToastItem({
     return () => clearTimeout(timer);
   }, [id, onExpire]);
   return (
+    // biome-ignore lint/a11y/useSemanticElements: role=status keeps the toast queryable via testing-library's getByRole('status')
     <div className="toast" role="status">
       {message}
     </div>

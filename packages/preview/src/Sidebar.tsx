@@ -1,6 +1,6 @@
+import type { PhaseMeta, SessionMeta } from 'virtual:synergy/sessions';
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import type { PhaseMeta, SessionMeta } from 'virtual:synergy/sessions';
 
 export type OrchestratorTarget = 'root' | { phaseSlug: string };
 
@@ -30,8 +30,7 @@ export function Sidebar({ sessions, currentSessionName, onOpenOrchestrator }: Pr
 
   // Phases auto-expand when on /implementation or any /phases/* route.
   const routeImpliesPhases =
-    /\/implementation\b/.test(location.pathname) ||
-    /\/phases\//.test(location.pathname);
+    /\/implementation\b/.test(location.pathname) || /\/phases\//.test(location.pathname);
   const [phasesExpanded, setPhasesExpanded] = useState(routeImpliesPhases);
   useEffect(() => {
     if (routeImpliesPhases) setPhasesExpanded(true);
@@ -128,9 +127,7 @@ export function Sidebar({ sessions, currentSessionName, onOpenOrchestrator }: Pr
                         <NavLink
                           to={`/s/${currentSessionName}/phases/${phase.slug}`}
                           className={({ isActive }) =>
-                            isActive
-                              ? 'sidebar__phase sidebar__phase--active'
-                              : 'sidebar__phase'
+                            isActive ? 'sidebar__phase sidebar__phase--active' : 'sidebar__phase'
                           }
                           title={phaseTooltip(phase)}
                         >
@@ -174,9 +171,10 @@ function Brand() {
 }
 
 function buildSpecRows(session: SessionMeta, sessionName: string): SpecRow[] {
-  return SPEC_ROW_DEFS.filter((def) => session.specs.includes(def.basename)).map(
-    (def) => ({ to: `/s/${sessionName}/${def.path}`, label: def.label }),
-  );
+  return SPEC_ROW_DEFS.filter((def) => session.specs.includes(def.basename)).map((def) => ({
+    to: `/s/${sessionName}/${def.path}`,
+    label: def.label,
+  }));
 }
 
 function phaseLabel(phase: PhaseMeta): string {

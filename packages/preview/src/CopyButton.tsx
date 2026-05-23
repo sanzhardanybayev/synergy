@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
-import { copyToClipboard } from './clipboard.js';
 import { useToast } from './ToastProvider.js';
+import { copyToClipboard } from './clipboard.js';
 
 interface Props {
   /** Human-readable label shown on the button. */

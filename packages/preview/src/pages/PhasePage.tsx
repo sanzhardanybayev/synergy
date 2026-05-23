@@ -1,6 +1,6 @@
+import { loaders } from 'virtual:synergy/sessions';
 import { type ComponentType, Suspense, lazy, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
-import { loaders } from 'virtual:synergy/sessions';
 import { PageHeader } from '../PageHeader.js';
 import { useSession } from '../SessionShell.js';
 
@@ -56,9 +56,7 @@ export function PhasePage() {
         orchestratorPath={orchestratorPath}
       />
       <div className="page__body mdx-body">
-        <Suspense
-          fallback={<div className="page__loading">Loading {relativePath}…</div>}
-        >
+        <Suspense fallback={<div className="page__loading">Loading {relativePath}…</div>}>
           <Lazy />
         </Suspense>
       </div>

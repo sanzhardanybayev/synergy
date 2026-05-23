@@ -60,8 +60,7 @@ function safeStat(path: string) {
 }
 
 function isDirectory(path: string): boolean {
-  const s = safeStat(path);
-  return s !== null && s.isDirectory();
+  return safeStat(path)?.isDirectory() ?? false;
 }
 
 function newestMtime(...paths: string[]): number {
@@ -95,10 +94,7 @@ export function parsePhaseTitle(source: string): string | undefined {
   const titleMatch = TITLE_RE.exec(block[1]!);
   if (!titleMatch) return undefined;
   let raw = titleMatch[1]!.trim();
-  if (
-    (raw.startsWith("'") && raw.endsWith("'")) ||
-    (raw.startsWith('"') && raw.endsWith('"'))
-  ) {
+  if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))) {
     raw = raw.slice(1, -1);
   }
   return raw || undefined;
@@ -123,9 +119,7 @@ export function __buildIndex(sessionsDir: string): SessionMeta[] {
     const phasesDir = join(dir, 'phases');
     const phases: PhaseMeta[] = [];
     if (isDirectory(phasesDir)) {
-      const phaseEntries = readdirSync(phasesDir).filter((p) =>
-        isDirectory(join(phasesDir, p)),
-      );
+      const phaseEntries = readdirSync(phasesDir).filter((p) => isDirectory(join(phasesDir, p)));
       for (const folder of phaseEntries) {
         const match = PHASE_FOLDER_RE.exec(folder);
         if (!match) continue;
@@ -168,11 +162,7 @@ export function __buildIndex(sessionsDir: string): SessionMeta[] {
     for (const phase of phases) {
       paths.phaseSpec[phase.slug] = join(phasesDir, phase.folder, 'spec.mdx');
       if (phase.hasOrchestrator) {
-        paths.phaseOrchestrator[phase.slug] = join(
-          phasesDir,
-          phase.folder,
-          'orchestrator.md',
-        );
+        paths.phaseOrchestrator[phase.slug] = join(phasesDir, phase.folder, 'orchestrator.md');
       }
     }
 
@@ -209,17 +199,13 @@ function emitIndexModule(sessionsDir: string): string {
     lines.push('    spec: {');
     for (const spec of session.specs) {
       const abs = session.paths.spec[spec]!.replace(/\\/g, '/');
-      lines.push(
-        `      ${JSON.stringify(spec)}: () => import(${JSON.stringify(`/@fs${abs}`)}),`,
-      );
+      lines.push(`      ${JSON.stringify(spec)}: () => import(${JSON.stringify(`/@fs${abs}`)}),`);
     }
     lines.push('    },');
 
     if (session.paths.orchestrator) {
       const abs = session.paths.orchestrator.replace(/\\/g, '/');
-      lines.push(
-        `    orchestrator: () => import(${JSON.stringify(`/@fs${abs}?raw`)}),`,
-      );
+      lines.push(`    orchestrator: () => import(${JSON.stringify(`/@fs${abs}?raw`)}),`);
     }
 
     lines.push('    phaseSpec: {');
