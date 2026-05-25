@@ -72,6 +72,11 @@ export function CommentLayer({ session, file, fileSource, onPosted }: CommentLay
   // -------------------------------------------------------------------------
 
   const handleSelectionChange = useCallback(() => {
+    // While the composer is open, focusing the textarea collapses the document
+    // selection. Ignore those changes so the composer (and its anchored
+    // selection) survives the focus shift.
+    if (composerOpen) return;
+
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
       setSelection(null);
@@ -141,7 +146,7 @@ export function CommentLayer({ session, file, fileSource, onPosted }: CommentLay
       rectLeft: rect.left + window.scrollX,
       rectRight: rect.right + window.scrollX,
     });
-  }, [fileSource]);
+  }, [fileSource, composerOpen]);
 
   useEffect(() => {
     document.addEventListener('selectionchange', handleSelectionChange);

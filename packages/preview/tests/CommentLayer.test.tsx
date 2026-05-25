@@ -180,6 +180,31 @@ describe('CommentLayer', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('keeps composer open when the selection collapses (e.g. focusing the textarea)', async () => {
+    const { block } = renderWithBlock();
+    simulateSelection(block, 21, 24);
+
+    const addBtn = await screen.findByRole('button', { name: /add comment/i });
+    await userEvent.click(addBtn);
+    expect(screen.getByRole('dialog', { name: /add comment/i })).toBeInTheDocument();
+
+    // Focusing the textarea collapses the document selection, firing
+    // selectionchange. The composer must survive this.
+    const collapsedSel = {
+      isCollapsed: true,
+      rangeCount: 0,
+      getRangeAt: vi.fn(),
+      toString: vi.fn(() => ''),
+      removeAllRanges: vi.fn(),
+    };
+    vi.spyOn(window, 'getSelection').mockReturnValue(collapsedSel as unknown as Selection);
+    act(() => {
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+
+    expect(screen.getByRole('dialog', { name: /add comment/i })).toBeInTheDocument();
+  });
+
   it('fires POST /api/feedback with correctly computed anchor on Send', async () => {
     const blockText = 'we sign users in via SSO and redirect';
     const { block } = renderWithBlock({}, blockText);
