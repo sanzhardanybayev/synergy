@@ -15,6 +15,17 @@ Markdown specs go stale in a terminal. Synergy gives agents a tight component vo
 
 The preview at `http://localhost:4321` gives each MDX file its own route (`/s/<name>/overview`, `/architecture`, `/implementation`, `/phases/<slug>`), a hierarchical left sidebar (sessions dropdown, spec rows, phases nested under Implementation), and per-page copy-path buttons for the session dir, the current page, and the orchestrator. The orchestrator opens as a right-side slide-out drawer (ESC or backdrop to close) rendering `orchestrator.md`, and every page hot-reloads as Claude Code edits the MDX.
 
+## Edit & review in the browser
+
+The preview isn't read-only — you can fix and annotate specs without a round-trip through Claude:
+
+- **Inline edits.** Prose blocks (paragraphs, list items, headings) are editable in place. Changes live in a browser-side buffer with an explicit **Apply** (writes the MDX file) or **Discard** per block — plus **Apply all / Discard all** in the top toolbar. Never auto-saves; an unload guard warns on unsaved edits.
+- **Comments.** Select any text, click the **+**, and leave a note for Claude. Each comment is a markdown file under `.synergy/feedback/<session>/` with a line/col + surrounding-context anchor so it survives later edits.
+- **Diff view.** Toggle **🔍 Diff** on any page to highlight what changed since you last reviewed the file (git-backed: committed + uncommitted), then **Mark as reviewed** to advance the cursor.
+- **Hand back to Claude.** Run `/synergy-feedback` — the `synergy:address-feedback` skill reads the open-comment queue for the browser-active session, edits each referenced location, and marks every comment resolved or rejected (never silently dropped).
+
+Edits, comments, and review state all persist to disk (MDX files, `.synergy/feedback/`, and a gitignored `review-state.json`) — git is the version history, so there's no database.
+
 ## Install
 
 Prerequisites: **Node ≥ 20**, **pnpm** (`corepack enable` if missing).
@@ -59,6 +70,7 @@ That's the loop. The first command scaffolds `.synergy/sessions/` in your projec
 | `/synergy-init` | Scaffold `.synergy/` in the current project. Once per project. |
 | `/synergy-spec "<title>"` | Create a new spec session (also auto-starts preview, opens browser). |
 | `/synergy-validate [session]` | Validate schemas + cross-refs. Zero errors before commit. |
+| `/synergy-feedback [session]` | Address browser-collected comments for the active session (edits specs, resolves/rejects each). |
 | `/synergy-preview-start` | Boot the preview server on port 4321. Idempotent. |
 | `/synergy-preview-stop` | Kill the preview server, remove PID file. |
 | `/synergy-preview-status` | Report running / stopped, pid, URL. |

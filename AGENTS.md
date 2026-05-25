@@ -121,6 +121,28 @@ Anchors are GitHub-style: lowercase, spaces → `-`, special chars stripped, ded
 | `<Mockup>` | `src`, `alt` | `src` is relative to session dir (use `./assets/...`) |
 | `<Chart>` | source (children or `source` prop) | Mermaid by default; `kind` informational |
 
+## Inline editing and feedback (v2)
+
+The preview at `http://localhost:4321` adds an edit and feedback layer on top of the
+read-only v1 preview. Agents interact with it via the feedback skill; the browser UI is
+for human reviewers.
+
+- **Apply / Discard buffer.** Prose blocks are contentEditable in the browser. Every edit is
+  held in memory until the human clicks **Apply** (flushes to the MDX file on disk) or
+  **Discard** (reverts). No auto-save. Phase status dropdowns use the same buffer.
+- **Selection comments.** A human selects text in the preview, clicks "+", leaves a note.
+  Each comment is a markdown file at `.synergy/feedback/<session>/<id>.md` with YAML
+  frontmatter carrying both line/col coordinates and a `before+selected+after` context
+  string for drift-tolerant re-anchoring.
+- **Diff view.** Top-toolbar toggle. Highlights committed and uncommitted changes since the
+  human's last "Mark as reviewed". Review state persists to `.synergy/review-state.json`.
+- **Pull-based handoff.** When the human runs `/synergy-feedback`, the
+  `synergy:address-feedback` skill reads `.synergy/active-session`, loads all
+  `status: open` comment files, edits the spec at each anchor, and PATCHes each comment
+  to `resolved` or `rejected`. Run `synergy validate <session>` before declaring done.
+- **Gitignored files.** `active-session` and `review-state.json` are per-machine state —
+  do not commit them. `sessions/` and `feedback/` remain tracked (they are spec content).
+
 ## CLI surface
 
 ```
@@ -130,6 +152,8 @@ synergy validate [session]            parser + cross-ref check
 ```
 
 That's the whole CLI. Spec creation and editing live in skills — there is no `synergy spec` or `synergy phase` command.
+
+Claude Code slash commands: `/synergy-spec`, `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback`.
 
 ## Don'ts
 

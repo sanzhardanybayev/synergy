@@ -33,6 +33,26 @@ Codex distribution is **not in v1**. Do not add Codex skill files yet.
 - **Session-specific components:** when a reusable shape doesn't exist in spec-kit, create one in the session's `_components/` directory rather than degrading to plain markdown.
 - **Orchestrator file:** every session must include an `orchestrator.md` (plain markdown, not MDX) with: Overview, Dependency Graph, Parallel Chunks, Agent Strategy (sub-agents vs teams), Verification Gates.
 
+## Inline editing and feedback (v2)
+
+The preview at `http://localhost:4321` supports direct editing without a Claude round-trip:
+
+- **Apply / Discard editing.** Prose blocks (paragraphs, list items, headings) are
+  contentEditable. Edits live in an in-browser buffer until explicitly applied via **Apply**
+  (writes to the MDX file) or discarded via **Discard** (reverts). Phase status dropdowns use
+  the same buffer pattern. There is no auto-save.
+- **Inline comments.** Select any text in the preview, click the "+" button, and leave a
+  note for Claude. Comments are stored as markdown files at
+  `.synergy/feedback/<session>/<id>.md` with a YAML frontmatter anchor (line/col + context).
+- **Diff view.** Top-toolbar toggle. Shows changes since the last "Mark as reviewed" action
+  (committed and uncommitted hunks). Reviewing syncs to `.synergy/review-state.json`.
+- **Feedback handoff.** Run `/synergy-feedback` in Claude Code. The `synergy:address-feedback`
+  skill reads the comment queue for the browser-active session, edits each referenced spec
+  location, and PATCHes each comment to resolved or rejected.
+- **New gitignored files.** `active-session` (tracks the currently-viewed session) and
+  `review-state.json` (per-user diff-review cursor) are gitignored. The `sessions/` and
+  `feedback/` directories remain tracked.
+
 ## Commands
 
 ```
@@ -43,7 +63,7 @@ synergy validate [session]            parser + cross-ref check
 
 Spec authoring is not a CLI command — invoke the `synergy:create-spec` skill (or `/synergy-spec` slash command, which dispatches to the skill).
 
-Claude Code slash commands: `/synergy-spec` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`.
+Claude Code slash commands: `/synergy-spec` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback` (skill).
 
 ## What not to do
 

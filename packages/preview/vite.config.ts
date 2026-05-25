@@ -5,6 +5,8 @@ import react from '@vitejs/plugin-react';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { defineConfig } from 'vite';
+import { rehypeSourceRange } from './src/rehype-source-range.js';
+import { synergyEditPlugin } from './vite-plugin-edit.js';
 import { synergySessionsPlugin } from './vite-plugin-sessions.js';
 
 const require = createRequire(import.meta.url);
@@ -43,11 +45,14 @@ export default defineConfig({
     {
       enforce: 'pre',
       ...mdx({
+        providerImportSource: '@mdx-js/react',
         remarkPlugins: [[remarkFrontmatter, ['yaml']], remarkGfm],
+        rehypePlugins: [rehypeSourceRange],
       }),
     },
     react(),
     synergySessionsPlugin({ sessionsDir }),
+    synergyEditPlugin({ sessionsDir, projectRoot }),
   ],
   define: {
     __SYNERGY_PORT__: JSON.stringify(port),

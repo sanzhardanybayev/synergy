@@ -1,5 +1,6 @@
 import '@synergy/spec-kit/styles.css';
 import './app.css';
+import './edit-ui.css';
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';

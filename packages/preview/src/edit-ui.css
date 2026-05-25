@@ -1,0 +1,789 @@
+/*
+ * edit-ui.css — styles for CommentLayer, CommentsPanel, DiffOverlay,
+ * and ActiveSessionPinger (renders nothing, no styles needed).
+ *
+ * imported by main.tsx by the integration agent
+ *
+ * Plain CSS only. Class names follow the app's descriptive kebab-case
+ * convention. Z-index layers: floating buttons 200, composer/panels 300.
+ */
+
+/* ---------------------------------------------------------------------------
+   CommentLayer — floating "+" button + composer
+   --------------------------------------------------------------------------- */
+
+.comment-layer__add-btn {
+  position: absolute;
+  z-index: 200;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  background: var(--app-bg);
+  color: var(--accent-fg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+  padding: 0;
+}
+
+.comment-layer__add-btn:hover {
+  background: var(--accent-bg);
+}
+
+.comment-layer__add-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.comment-layer__composer {
+  position: absolute;
+  z-index: 300;
+  width: 280px;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comment-layer__composer-textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--app-bg);
+  color: var(--app-fg);
+  min-height: 80px;
+}
+
+.comment-layer__composer-textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.comment-layer__composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.comment-layer__composer-cancel,
+.comment-layer__composer-send {
+  padding: 5px 12px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.comment-layer__composer-cancel {
+  background: transparent;
+  border: 1px solid var(--app-border);
+  color: var(--app-fg);
+}
+
+.comment-layer__composer-cancel:hover {
+  background: var(--code-bg);
+}
+
+.comment-layer__composer-send {
+  background: var(--accent);
+  border: 1px solid transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+.comment-layer__composer-send:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.comment-layer__composer-send:disabled,
+.comment-layer__composer-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   CommentsPanel
+   --------------------------------------------------------------------------- */
+
+.comments-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  min-width: 280px;
+}
+
+.comments-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.comments-panel__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comments-panel__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.comments-panel__toggle {
+  background: transparent;
+  border: none;
+  color: var(--app-fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.comments-panel__toggle:hover {
+  background: var(--code-bg);
+  color: var(--app-fg);
+}
+
+.comments-panel__loading,
+.comments-panel__empty {
+  color: var(--app-fg-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.comments-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Comment card */
+
+.comments-panel__card {
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: border-color 120ms;
+}
+
+.comments-panel__card:hover {
+  border-color: var(--app-border-strong);
+}
+
+.comments-panel__card--resolved {
+  opacity: 0.65;
+}
+
+.comments-panel__anchor {
+  font-size: 12px;
+  color: var(--app-fg-muted);
+  line-height: 1.4;
+}
+
+.comments-panel__anchor-selected {
+  color: var(--app-fg);
+  background: var(--accent-bg);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.comments-panel__body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.comments-panel__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--app-fg-subtle);
+}
+
+.comments-panel__file {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--code-bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.comments-panel__age {
+  flex-shrink: 0;
+}
+
+.comments-panel__actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.comments-panel__resolve-btn,
+.comments-panel__reject-btn {
+  padding: 3px 10px;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.comments-panel__resolve-btn {
+  background: transparent;
+  border: 1px solid #16a34a;
+  color: #16a34a;
+}
+
+.comments-panel__resolve-btn:hover:not(:disabled) {
+  background: rgba(22, 163, 74, 0.1);
+}
+
+.comments-panel__reject-btn {
+  background: transparent;
+  border: 1px solid var(--app-border);
+  color: var(--app-fg-muted);
+}
+
+.comments-panel__reject-btn:hover:not(:disabled) {
+  border-color: #dc2626;
+  color: #dc2626;
+}
+
+.comments-panel__resolve-btn:disabled,
+.comments-panel__reject-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.comments-panel__reject-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+}
+
+.comments-panel__reject-input {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12px;
+  background: var(--app-bg);
+  color: var(--app-fg);
+  min-width: 0;
+}
+
+.comments-panel__reject-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.comments-panel__reject-submit,
+.comments-panel__reject-cancel {
+  padding: 3px 8px;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.comments-panel__reject-submit {
+  background: #dc2626;
+  border: 1px solid transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+.comments-panel__reject-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.comments-panel__reject-cancel {
+  background: transparent;
+  border: 1px solid var(--app-border);
+  color: var(--app-fg-muted);
+}
+
+.comments-panel__resolution,
+.comments-panel__rejection {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-fg-muted);
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------------------
+   DiffOverlay
+   --------------------------------------------------------------------------- */
+
+.diff-overlay {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.diff-overlay__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.diff-overlay__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.diff-overlay__review-btn {
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.diff-overlay__review-btn:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.diff-overlay__review-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.diff-overlay__loading {
+  color: var(--app-fg-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.diff-overlay__unavailable {
+  color: var(--app-fg-muted);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.diff-overlay__files {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.diff-overlay__file-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diff-overlay__file-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.diff-overlay__file-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.diff-overlay__stats {
+  font-size: 13px;
+  color: var(--app-fg-muted);
+}
+
+.diff-overlay__added {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.diff-overlay__removed {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.diff-overlay__hunks {
+  color: var(--app-fg-muted);
+}
+
+.diff-overlay__no-changes {
+  font-size: 13px;
+  color: var(--app-fg-muted);
+}
+
+.diff-overlay__no-changes-text {
+  font-style: italic;
+}
+
+/* Hunk */
+
+.diff-overlay__hunks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.diff-overlay__hunk {
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.diff-overlay__hunk-header {
+  background: var(--code-bg);
+  color: var(--app-fg-muted);
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.diff-overlay__uncommitted-badge {
+  font-style: italic;
+  color: var(--accent-fg);
+}
+
+.diff-overlay__line {
+  display: flex;
+  align-items: baseline;
+  padding: 1px 10px;
+  line-height: 1.5;
+}
+
+/* Context lines */
+.diff-overlay__line--context {
+  background: transparent;
+  color: var(--app-fg-muted);
+}
+
+/* Committed add lines — dark green */
+.diff-overlay__line--add {
+  background: rgba(22, 163, 74, 0.15);
+  color: #14532d;
+}
+
+/* Uncommitted add lines — light green */
+.diff-overlay__line--add.diff-overlay__line--uncommitted {
+  background: rgba(22, 163, 74, 0.07);
+  color: #166534;
+}
+
+/* Committed remove lines — dark red + strikethrough */
+.diff-overlay__line--remove {
+  background: rgba(220, 38, 38, 0.12);
+  color: #991b1b;
+  text-decoration: line-through;
+}
+
+/* Uncommitted remove lines — lighter red */
+.diff-overlay__line--remove.diff-overlay__line--uncommitted {
+  background: rgba(220, 38, 38, 0.06);
+  color: #b91c1c;
+  text-decoration: line-through;
+}
+
+@media (prefers-color-scheme: dark) {
+  .diff-overlay__line--add {
+    background: rgba(22, 163, 74, 0.18);
+    color: #86efac;
+  }
+
+  .diff-overlay__line--add.diff-overlay__line--uncommitted {
+    background: rgba(22, 163, 74, 0.08);
+    color: #bbf7d0;
+  }
+
+  .diff-overlay__line--remove {
+    background: rgba(220, 38, 38, 0.18);
+    color: #fca5a5;
+  }
+
+  .diff-overlay__line--remove.diff-overlay__line--uncommitted {
+    background: rgba(220, 38, 38, 0.08);
+    color: #fecaca;
+  }
+}
+
+.diff-overlay__line-prefix {
+  width: 14px;
+  flex-shrink: 0;
+  user-select: none;
+  font-weight: 700;
+}
+
+.diff-overlay__line-text {
+  white-space: pre;
+  overflow-x: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   EditableBlock — inline Apply / Discard action row
+   --------------------------------------------------------------------------- */
+
+.editable-block__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+  /* contentEditable=false keeps this span outside the editable text */
+}
+
+.editable-block__apply-btn,
+.editable-block__discard-btn {
+  padding: 2px 10px;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.editable-block__apply-btn {
+  background: var(--accent);
+  border: 1px solid transparent;
+  color: #fff;
+}
+
+.editable-block__apply-btn:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.editable-block__apply-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.editable-block__discard-btn {
+  background: transparent;
+  border: 1px solid var(--app-border);
+  color: var(--app-fg-muted);
+}
+
+.editable-block__discard-btn:hover {
+  background: var(--code-bg);
+  color: var(--app-fg);
+}
+
+/* diff mode — only Discard visible */
+.editable-block__actions--diff .editable-block__discard-btn {
+  border-color: var(--app-border-strong);
+}
+
+/* ---------------------------------------------------------------------------
+   TopToolbar
+   --------------------------------------------------------------------------- */
+
+.top-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--app-border);
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--app-bg);
+}
+
+.top-toolbar__edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.top-toolbar__apply-btn,
+.top-toolbar__discard-btn {
+  padding: 4px 12px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.top-toolbar__apply-btn {
+  background: var(--accent);
+  border: 1px solid transparent;
+  color: #fff;
+}
+
+.top-toolbar__apply-btn:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.top-toolbar__apply-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.top-toolbar__discard-btn {
+  background: transparent;
+  border: 1px solid var(--app-border);
+  color: var(--app-fg-muted);
+}
+
+.top-toolbar__discard-btn:hover:not(:disabled) {
+  background: var(--code-bg);
+  color: var(--app-fg);
+  border-color: var(--app-border-strong);
+}
+
+.top-toolbar__discard-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.top-toolbar__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.top-toolbar__diff-toggle {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border);
+  background: transparent;
+  color: var(--app-fg-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.top-toolbar__diff-toggle:hover {
+  background: var(--code-bg);
+  color: var(--app-fg);
+  border-color: var(--app-border-strong);
+}
+
+.top-toolbar__diff-toggle--on {
+  background: var(--accent-bg);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.top-toolbar__comment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 12px;
+  background: var(--accent-bg);
+  color: var(--accent-fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+   Comments panel host — fixed-position collapsible panel
+   --------------------------------------------------------------------------- */
+
+.comments-panel-host {
+  position: fixed;
+  right: 0;
+  top: 80px;
+  z-index: 400;
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.comments-panel-host__toggle {
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  padding: 10px 8px;
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--app-fg-muted);
+  line-height: 1;
+  box-shadow: -2px 2px 8px rgba(15, 23, 42, 0.1);
+}
+
+.comments-panel-host__toggle:hover {
+  background: var(--code-bg);
+  color: var(--app-fg);
+}
+
+.comments-panel-host--open .comments-panel-host__toggle {
+  border-radius: 8px 0 0 0;
+}
+
+.comments-panel-host .comments-panel {
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-right: none;
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  width: 300px;
+  box-shadow: -4px 4px 20px rgba(15, 23, 42, 0.12);
+}
+
+/* source-error state */
+.page__source-error {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.08);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  margin: 0 0 12px;
+}

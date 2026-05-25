@@ -11,6 +11,7 @@
     "tests",
     "vite.config.ts",
     "vitest.config.ts",
-    "vite-plugin-sessions.ts"
+    "vite-plugin-sessions.ts",
+    "vite-plugin-edit.ts"
   ]
 }

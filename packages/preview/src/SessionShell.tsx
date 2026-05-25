@@ -1,8 +1,12 @@
 import { type SessionMeta, loaders, sessions } from 'virtual:synergy/sessions';
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { Outlet, useParams } from 'react-router-dom';
+import { ActiveSessionPinger } from './ActiveSessionPinger.js';
+import { CommentsPanel } from './CommentsPanel.js';
+import { EditBufferProvider, useEditBuffer } from './EditBuffer.js';
 import { OrchestratorDrawer } from './OrchestratorDrawer.js';
 import { type OrchestratorTarget, Sidebar } from './Sidebar.js';
+import { UnloadGuard } from './UnloadGuard.js';
 
 interface SessionContextValue {
   session: SessionMeta;
@@ -97,7 +101,40 @@ function ResolvedSessionShell({ session }: { session: SessionMeta }) {
   );
 
   return (
-    <SessionContext.Provider value={ctxValue}>
+    <EditBufferProvider>
+      <SessionContext.Provider value={ctxValue}>
+        {/* SessionInner can call useEditBuffer() since it's inside the provider. */}
+        <SessionInner
+          session={session}
+          drawer={drawer}
+          closeDrawer={closeDrawer}
+          openOrchestrator={openOrchestrator}
+        />
+      </SessionContext.Provider>
+    </EditBufferProvider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SessionInner — lives inside EditBufferProvider, can use useEditBuffer().
+// ---------------------------------------------------------------------------
+
+interface SessionInnerProps {
+  session: SessionMeta;
+  drawer: DrawerState | null;
+  closeDrawer: () => void;
+  openOrchestrator: (target: OrchestratorTarget) => void;
+}
+
+function SessionInner({ session, drawer, closeDrawer, openOrchestrator }: SessionInnerProps) {
+  const buffer = useEditBuffer();
+  const [commentsPanelOpen, setCommentsPanelOpen] = useState(false);
+
+  return (
+    <>
+      <UnloadGuard />
+      <ActiveSessionPinger session={session.name} />
+
       <div className="layout">
         <Sidebar
           sessions={sessions}
@@ -115,6 +152,30 @@ function ResolvedSessionShell({ session }: { session: SessionMeta }) {
           onClose={closeDrawer}
         />
       </div>
-    </SessionContext.Provider>
+
+      {/* Fixed-position comments panel — does not restructure .layout grid */}
+      <div
+        className={`comments-panel-host${commentsPanelOpen ? ' comments-panel-host--open' : ''}`}
+        aria-label="Comments panel"
+      >
+        <button
+          type="button"
+          className="comments-panel-host__toggle"
+          onClick={() => setCommentsPanelOpen((v) => !v)}
+          aria-expanded={commentsPanelOpen}
+          aria-label={commentsPanelOpen ? 'Close comments panel' : 'Open comments panel'}
+        >
+          {commentsPanelOpen ? '✕' : '\u{1F4AC}'}
+        </button>
+
+        {commentsPanelOpen && (
+          <CommentsPanel
+            session={session.name}
+            refreshKey={buffer.commentRefreshKey}
+            onCountChange={(n) => buffer.setOpenCommentCount(n)}
+          />
+        )}
+      </div>
+    </>
   );
 }

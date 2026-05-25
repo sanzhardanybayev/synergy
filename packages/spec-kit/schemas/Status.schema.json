@@ -9,8 +9,31 @@
           "$ref": "#/definitions/StatusValue"
         },
         "note": {
-          "type": "string",
-          "description": "Optional short note shown next to the badge."
+          "type": "string"
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "onChange": {
+          "$comment": "(next: StatusValue) => void",
+          "type": "object",
+          "properties": {
+            "namedArgs": {
+              "type": "object",
+              "properties": {
+                "next": {
+                  "$ref": "#/definitions/StatusValue"
+                }
+              },
+              "required": [
+                "next"
+              ],
+              "additionalProperties": false
+            }
+          }
         }
       },
       "required": [

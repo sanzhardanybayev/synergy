@@ -22,6 +22,30 @@
         "estimate": {
           "type": "string",
           "description": "Estimated effort: e.g. \"1d\", \"half day\"."
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "statusDirty": {
+          "type": "boolean"
+        },
+        "onStatusChange": {
+          "$comment": "(next: StatusValue) => void",
+          "type": "object",
+          "properties": {
+            "namedArgs": {
+              "type": "object",
+              "properties": {
+                "next": {
+                  "$ref": "#/definitions/StatusValue"
+                }
+              },
+              "required": [
+                "next"
+              ],
+              "additionalProperties": false
+            }
+          }
         }
       },
       "required": [
