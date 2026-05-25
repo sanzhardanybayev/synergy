@@ -10,6 +10,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { CommentHighlights } from '../CommentHighlights.js';
 import { CommentLayer } from '../CommentLayer.js';
 import { DiffOverlay } from '../DiffOverlay.js';
 import { useEditBuffer } from '../EditBuffer.js';
@@ -148,6 +149,14 @@ export function SpecPage({ basename, title }: Props) {
       </div>
 
       {diffOn && <DiffOverlay files={[sessionsDirRelativeFile]} />}
+
+      {fileSource && (
+        <CommentHighlights
+          session={session.name}
+          file={sessionRelativeFile}
+          fileSource={fileSource}
+        />
+      )}
 
       <CommentLayer
         session={session.name}

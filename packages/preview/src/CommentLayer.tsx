@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useToast } from './ToastProvider.js';
 import type { CommentAnchor } from './api.js';
 import { postFeedback } from './api.js';
@@ -48,7 +49,9 @@ export interface CommentLayerProps {
 
 interface SelectionState {
   anchor: CommentAnchor;
+  /** Viewport coordinates from getBoundingClientRect (for position: fixed). */
   rectTop: number;
+  rectBottom: number;
   rectLeft: number;
   rectRight: number;
 }
@@ -142,9 +145,10 @@ export function CommentLayer({ session, file, fileSource, onPosted }: CommentLay
         : new DOMRect(0, 0, 0, 0);
     setSelection({
       anchor,
-      rectTop: rect.top + window.scrollY,
-      rectLeft: rect.left + window.scrollX,
-      rectRight: rect.right + window.scrollX,
+      rectTop: rect.top,
+      rectBottom: rect.bottom,
+      rectLeft: rect.left,
+      rectRight: rect.right,
     });
   }, [fileSource, composerOpen]);
 
@@ -210,17 +214,16 @@ export function CommentLayer({ session, file, fileSource, onPosted }: CommentLay
 
   if (!selection) return null;
 
-  // Position the "+" button near the top-right of the selection.
-  const btnTop = selection.rectTop - 32;
-  const btnLeft = selection.rectRight + 8;
+  const addBtnPos = floatingAddButtonPosition(selection);
+  const composerPos = floatingComposerPosition(selection);
 
-  return (
-    <>
+  return createPortal(
+    <div className="comment-layer">
       {!composerOpen && (
         <button
           type="button"
           className="comment-layer__add-btn"
-          style={{ top: btnTop, left: btnLeft }}
+          style={{ top: addBtnPos.top, left: addBtnPos.left }}
           aria-label="Add comment"
           onMouseDown={(e) => {
             // Prevent the click from clearing the selection.
@@ -233,11 +236,11 @@ export function CommentLayer({ session, file, fileSource, onPosted }: CommentLay
       )}
 
       {composerOpen && (
-        // biome-ignore lint/a11y/useSemanticElements: <dialog> element would reset browser positioning; floating composer needs position:absolute
+        // biome-ignore lint/a11y/useSemanticElements: <dialog> element would reset browser positioning; floating composer needs position:fixed
         <div
           role="dialog"
           className="comment-layer__composer"
-          style={{ top: selection.rectTop, left: btnLeft }}
+          style={{ top: composerPos.top, left: composerPos.left }}
           aria-label="Add comment"
         >
           <textarea
@@ -276,8 +279,43 @@ export function CommentLayer({ session, file, fileSource, onPosted }: CommentLay
           </div>
         </div>
       )}
-    </>
+    </div>,
+    document.body,
   );
+}
+
+const ADD_BTN_SIZE = 28;
+const COMPOSER_WIDTH = 280;
+const COMPOSER_EST_HEIGHT = 180;
+
+function floatingAddButtonPosition(sel: SelectionState): { top: number; left: number } {
+  let top = sel.rectBottom + 6;
+  let left = sel.rectRight + 8;
+
+  if (top + ADD_BTN_SIZE > window.innerHeight - 8) {
+    top = sel.rectTop - ADD_BTN_SIZE - 6;
+  }
+  left = clamp(left, 8, window.innerWidth - ADD_BTN_SIZE - 8);
+  top = clamp(top, 8, window.innerHeight - ADD_BTN_SIZE - 8);
+
+  return { top, left };
+}
+
+function floatingComposerPosition(sel: SelectionState): { top: number; left: number } {
+  let top = sel.rectBottom + 8;
+  let left = sel.rectLeft;
+
+  if (top + COMPOSER_EST_HEIGHT > window.innerHeight - 8) {
+    top = sel.rectTop - COMPOSER_EST_HEIGHT - 8;
+  }
+  if (top < 8) top = 8;
+  left = clamp(left, 8, window.innerWidth - COMPOSER_WIDTH - 8);
+
+  return { top, left };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 // ---------------------------------------------------------------------------

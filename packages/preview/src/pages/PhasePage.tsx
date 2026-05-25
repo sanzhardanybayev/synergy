@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import { useParams } from 'react-router-dom';
+import { CommentHighlights } from '../CommentHighlights.js';
 import { CommentLayer } from '../CommentLayer.js';
 import { DiffOverlay } from '../DiffOverlay.js';
 import { useEditBuffer } from '../EditBuffer.js';
@@ -144,6 +145,14 @@ export function PhasePage() {
       </div>
 
       {diffOn && <DiffOverlay files={[sessionsDirRelativeFile]} />}
+
+      {sessionRelativeFile && fileSource && (
+        <CommentHighlights
+          session={session.name}
+          file={sessionRelativeFile}
+          fileSource={fileSource}
+        />
+      )}
 
       {sessionRelativeFile && (
         <CommentLayer

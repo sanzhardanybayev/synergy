@@ -41,6 +41,9 @@ export function EditBufferProvider({ children }: { children: ReactNode }) {
   const [openCommentCount, setOpenCommentCount] = useState(0);
   const [commentRefreshKey, setCommentRefreshKey] = useState(0);
   const bumpCommentRefresh = useCallback(() => setCommentRefreshKey((k) => k + 1), []);
+  const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
+  const focusComment = useCallback((id: string) => setFocusedCommentId(id), []);
+  const clearFocusedComment = useCallback(() => setFocusedCommentId(null), []);
 
   // -------------------------------------------------------------------------
   // Mutators
@@ -204,6 +207,9 @@ export function EditBufferProvider({ children }: { children: ReactNode }) {
       setOpenCommentCount,
       commentRefreshKey,
       bumpCommentRefresh,
+      focusedCommentId,
+      focusComment,
+      clearFocusedComment,
     }),
     // NOTE: useState setters (setDiffMode/setFileSource/setCurrentFile/
     // setOpenCommentCount) are intentionally omitted — they are stable, and
@@ -224,6 +230,9 @@ export function EditBufferProvider({ children }: { children: ReactNode }) {
       openCommentCount,
       commentRefreshKey,
       bumpCommentRefresh,
+      focusedCommentId,
+      focusComment,
+      clearFocusedComment,
     ],
   );
 

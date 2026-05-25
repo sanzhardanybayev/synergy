@@ -110,4 +110,12 @@ export interface EditBufferContextValue {
    */
   commentRefreshKey: number;
   bumpCommentRefresh: () => void;
+
+  /**
+   * When set (e.g. from CommentsPanel click), CommentHighlights scrolls to and
+   * pulses the matching inline highlight.
+   */
+  focusedCommentId: string | null;
+  focusComment: (id: string) => void;
+  clearFocusedComment: () => void;
 }

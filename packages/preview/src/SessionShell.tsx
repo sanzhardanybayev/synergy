@@ -1,6 +1,7 @@
 import { type SessionMeta, loaders, sessions } from 'virtual:synergy/sessions';
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { Outlet, useParams } from 'react-router-dom';
+import { Outlet, useNavigate, useParams } from 'react-router-dom';
+import type { Comment } from './api.js';
 import { ActiveSessionPinger } from './ActiveSessionPinger.js';
 import { CommentsPanel } from './CommentsPanel.js';
 import { EditBufferProvider, useEditBuffer } from './EditBuffer.js';
@@ -128,7 +129,17 @@ interface SessionInnerProps {
 
 function SessionInner({ session, drawer, closeDrawer, openOrchestrator }: SessionInnerProps) {
   const buffer = useEditBuffer();
+  const navigate = useNavigate();
   const [commentsPanelOpen, setCommentsPanelOpen] = useState(false);
+
+  const handleScrollToComment = useCallback(
+    (comment: Comment) => {
+      const routeSegment = commentFileToRouteSegment(session, comment.file);
+      navigate(`/s/${session.name}/${routeSegment}`);
+      buffer.focusComment(comment.id);
+    },
+    [session, navigate, buffer],
+  );
 
   return (
     <>
@@ -173,9 +184,26 @@ function SessionInner({ session, drawer, closeDrawer, openOrchestrator }: Sessio
             session={session.name}
             refreshKey={buffer.commentRefreshKey}
             onCountChange={(n) => buffer.setOpenCommentCount(n)}
+            onScrollToAnchor={handleScrollToComment}
           />
         )}
       </div>
     </>
   );
+}
+
+/** Map a session-relative feedback file path to an app route segment. */
+function commentFileToRouteSegment(session: SessionMeta, file: string): string {
+  if (file === '00-overview.mdx') return 'overview';
+  if (file === '01-architecture.mdx') return 'architecture';
+  if (file === '02-implementation.mdx') return 'implementation';
+
+  const match = file.match(/^phases\/([^/]+)\/spec\.mdx$/);
+  if (match) {
+    const folder = match[1]!;
+    const phase = session.phases.find((p) => p.folder === folder);
+    if (phase) return `phases/${phase.slug}`;
+  }
+
+  return 'overview';
 }
