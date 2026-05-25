@@ -60,8 +60,77 @@ let lastFocusedKey: string | null = null;
 // Helpers
 // ---------------------------------------------------------------------------
 
-function hasDescendantWithSourceCoords(el: Element): boolean {
-  return el.querySelector('[data-source-line-start]') !== null;
+/** Block-level editable tags. A block is a leaf unless it contains one of these. */
+const NESTED_BLOCK_SELECTOR = ['p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote']
+  .map((t) => `${t}[data-source-line-start]`)
+  .join(',');
+
+/**
+ * True only when the element contains another *block* prose element with source
+ * coords (e.g. blockquote > p, or li > p). Inline elements (code/strong/em/a)
+ * are NOT blocks — a paragraph that merely contains inline `code` is still a
+ * leaf and must remain editable.
+ */
+function hasDescendantBlock(el: Element): boolean {
+  return el.querySelector(NESTED_BLOCK_SELECTOR) !== null;
+}
+
+/**
+ * Serialize a contentEditable block back to its markdown source, preserving the
+ * inline formatting that is already present (code, bold, italic, links) while
+ * letting the user freely edit the surrounding text. WYSIWYG: the user never
+ * types or sees raw markdown markers.
+ *
+ * Returns `null` when the block contains an element we cannot safely round-trip
+ * (a <CrossRef> or any other custom component) — the caller then leaves the
+ * source untouched rather than corrupting it.
+ */
+function serializeInlineMarkdown(node: Node): string | null {
+  let out = '';
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      out += child.nodeValue ?? '';
+      continue;
+    }
+    if (child.nodeType !== Node.ELEMENT_NODE) continue;
+
+    const el = child as HTMLElement;
+    const tag = el.tagName;
+
+    if (tag === 'BR') {
+      out += '\n';
+      continue;
+    }
+    if (tag === 'CODE') {
+      // Inline code carries no nested markup; emit its text verbatim.
+      out += `\`${el.textContent ?? ''}\``;
+      continue;
+    }
+    if (tag === 'STRONG' || tag === 'B') {
+      const inner = serializeInlineMarkdown(el);
+      if (inner === null) return null;
+      out += `**${inner}**`;
+      continue;
+    }
+    if (tag === 'EM' || tag === 'I') {
+      const inner = serializeInlineMarkdown(el);
+      if (inner === null) return null;
+      out += `*${inner}*`;
+      continue;
+    }
+    if (tag === 'A') {
+      // CrossRef and other custom components render as <a data-crossref=…>;
+      // we cannot reconstruct their JSX, so bail out.
+      if (el.hasAttribute('data-crossref')) return null;
+      const inner = serializeInlineMarkdown(el);
+      if (inner === null) return null;
+      out += `[${inner}](${el.getAttribute('href') ?? ''})`;
+      continue;
+    }
+    // Unknown / custom element — refuse rather than risk corrupting source.
+    return null;
+  }
+  return out;
 }
 
 function getCaretOffset(el: HTMLElement): number {
@@ -121,6 +190,10 @@ export function EditableBlock({
   const { setDirtyProse, applyOne, discard, currentFile, diffMode } = buffer;
   const elRef = useRef<HTMLElement | null>(null);
   const [isDirtyLocal, setIsDirtyLocal] = useState(false);
+  // Bumped on Discard to remount the element, forcing React to re-render the
+  // original children (resets the user's contentEditable mutations cleanly,
+  // without writing raw markdown or innerHTML into the DOM).
+  const [revertNonce, setRevertNonce] = useState(0);
 
   // -------------------------------------------------------------------------
   // Source coordinate parsing
@@ -216,11 +289,16 @@ export function EditableBlock({
   const handleInput = useCallback(() => {
     if (!canEdit || !bufferKey || !elRef.current) return;
 
-    // Leaf guard: if this element now has child elements with source coords,
-    // bail — let the inner leaf own the edit.
-    if (hasDescendantWithSourceCoords(elRef.current)) return;
+    // Leaf guard: if this element contains another editable *block*, bail —
+    // let the inner block own the edit. Inline formatting does not count.
+    if (hasDescendantBlock(elRef.current)) return;
 
-    const newText = elRef.current.textContent ?? '';
+    // Reconstruct the markdown source, preserving existing inline formatting.
+    // null = the block holds something we can't round-trip (e.g. a CrossRef);
+    // leave the source untouched rather than corrupt it.
+    const newText = serializeInlineMarkdown(elRef.current);
+    if (newText === null) return;
+
     setIsDirtyLocal(true);
     setDirtyProse(bufferKey, {
       kind: 'prose',
@@ -249,12 +327,13 @@ export function EditableBlock({
   }, [bufferKey, diffMode, applyOne]);
 
   const handleDiscard = useCallback(() => {
-    if (!bufferKey || !elRef.current) return;
+    if (!bufferKey) return;
     discard(bufferKey);
     setIsDirtyLocal(false);
-    // Revert DOM to original children by re-setting innerHTML to the original text.
-    elRef.current.textContent = expectedText;
-  }, [bufferKey, discard, expectedText]);
+    // Remount the element so React re-renders the original (formatted) children,
+    // discarding the user's in-DOM edits.
+    setRevertNonce((n) => n + 1);
+  }, [bufferKey, discard]);
 
   // -------------------------------------------------------------------------
   // Enter key handling for <li>
@@ -357,6 +436,7 @@ export function EditableBlock({
   // satisfy the type checker without `as any`.
   type TagProps = React.HTMLAttributes<HTMLElement> & {
     ref: (node: HTMLElement | null) => void;
+    key?: string | number;
     'data-block-key'?: string;
     'data-source-line-start'?: string;
     'data-source-col-start'?: string;
@@ -368,7 +448,7 @@ export function EditableBlock({
     <>
       {createElement(
         Tag as unknown as string,
-        { ...blockProps, ref: refCallback } as TagProps,
+        { ...blockProps, ref: refCallback, key: revertNonce } as TagProps,
         children,
       )}
 

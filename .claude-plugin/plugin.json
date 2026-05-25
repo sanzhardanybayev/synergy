@@ -1,6 +1,6 @@
 {
   "name": "synergy",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "MDX spec authoring with live preview. Generate cross-referenced spec sessions in .synergy/sessions/, edit and comment on them in a browser at http://localhost:4321, and pull feedback back into Claude Code.",
   "author": {
     "name": "Sanzhar Danybayev",

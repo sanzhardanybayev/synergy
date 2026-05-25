@@ -245,6 +245,85 @@ describe('EditableBlock', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('registers edits on prose containing inline code and preserves backticks', async () => {
+    const source = 'Use the `schema` field today\n';
+    render(
+      <Wrapper fileSource={source} currentFile={FILE_NAME}>
+        <EditableBlock
+          as="p"
+          data-source-line-start="1"
+          data-source-col-start="0"
+          data-source-line-end="1"
+          data-source-col-end="28"
+        >
+          {'Use the '}
+          <code data-source-line-start="1" data-source-col-start="8">
+            schema
+          </code>
+          {' field today'}
+        </EditableBlock>
+      </Wrapper>,
+    );
+
+    const p = document.querySelector('p[data-block-key]') as HTMLElement;
+    expect(p).not.toBeNull();
+
+    // Edit only the trailing text node — the <code> element stays in the DOM.
+    act(() => {
+      const lastText = p.childNodes[p.childNodes.length - 1];
+      lastText.nodeValue = ' field tomorrow';
+      p.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // The edit must register even though the block contains an inline element.
+    await waitFor(() => screen.getByRole('button', { name: /apply/i }));
+
+    await act(async () => {
+      await userEvent.click(screen.getByRole('button', { name: /apply/i }));
+    });
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(opts.body as string) as Record<string, unknown>;
+    expect(body.expectedText).toBe('Use the `schema` field today');
+    // Backticks are preserved — the user only changed the visible text.
+    expect(body.newText).toBe('Use the `schema` field tomorrow');
+  });
+
+  it('does not register edits on prose containing a CrossRef (avoids corruption)', async () => {
+    const source = 'See <CrossRef to="x">the thing</CrossRef> now\n';
+    render(
+      <Wrapper fileSource={source} currentFile={FILE_NAME}>
+        <EditableBlock
+          as="p"
+          data-source-line-start="1"
+          data-source-col-start="0"
+          data-source-line-end="1"
+          data-source-col-end="45"
+        >
+          {'See '}
+          {/* biome-ignore lint/a11y/useValidAnchor: test fixture mimicking CrossRef output */}
+          <a href="#x" data-crossref="x">
+            the thing
+          </a>
+          {' now'}
+        </EditableBlock>
+      </Wrapper>,
+    );
+
+    const p = document.querySelector('p[data-block-key]') as HTMLElement;
+    act(() => {
+      const lastText = p.childNodes[p.childNodes.length - 1];
+      lastText.nodeValue = ' later';
+      p.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // No Apply button — the block can't be safely round-tripped, so the edit is
+    // intentionally not registered rather than corrupting the CrossRef.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole('button', { name: /apply/i })).toBeNull();
+  });
+
   it('renders without source coords as non-editable (no contentEditable)', () => {
     render(
       <Wrapper fileSource={FILE_SOURCE} currentFile={FILE_NAME}>
