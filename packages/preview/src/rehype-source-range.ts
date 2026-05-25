@@ -17,9 +17,10 @@
  * The plugin still recurses into their children.
  *
  * Position verification: the MDX pipeline via @mdx-js/mdx@3.x carries unified
- * AST positions through the rehype pass unchanged. Positions use `column`
- * (0-indexed) not `col`. Both confirmed by a live probe against the real
- * pipeline (see rehype-source-range.test.ts).
+ * AST positions through the rehype pass unchanged. Unified `column` is
+ * 1-indexed; anchor.ts expects 0-indexed `col`, so we subtract 1. The range is
+ * taken from the element's children so block markers ("# ", "- ", "> ") are
+ * excluded (see rehype-source-range.test.ts).
  */
 
 import { visit } from 'unist-util-visit';
@@ -80,18 +81,28 @@ export function rehypeSourceRange() {
 
       if (!LEAF_PROSE_TAGS.has(tagName)) return;
 
-      if (!position) return;
+      // Derive the range from the element's children (its text/inline content)
+      // rather than the element itself. The element position spans block markers
+      // like "# ", "- ", "> ", but the rendered/editable DOM text does not — so
+      // using the element span would clobber the marker on apply. The first and
+      // last positioned children bracket exactly the editable text. Empty
+      // elements fall back to the element's own position.
+      const childPositions = node.children
+        .map((c) => (c as HastElement).position)
+        .filter((p): p is HastPosition => p != null);
 
-      // unified positions use `column` (0-indexed). The spec and anchor.ts both
-      // use `col` (0-indexed). They are numerically identical — just rename here.
-      const { start, end } = position;
+      const start = childPositions[0]?.start ?? position?.start;
+      const end = childPositions[childPositions.length - 1]?.end ?? position?.end;
+
+      if (!start || !end) return;
 
       if (!node.properties) node.properties = {};
 
+      // unified positions use 1-indexed `column`; anchor.ts uses 0-indexed `col`.
       node.properties['data-source-line-start'] = start.line;
-      node.properties['data-source-col-start'] = start.column;
+      node.properties['data-source-col-start'] = start.column - 1;
       node.properties['data-source-line-end'] = end.line;
-      node.properties['data-source-col-end'] = end.column;
+      node.properties['data-source-col-end'] = end.column - 1;
     });
   };
 }

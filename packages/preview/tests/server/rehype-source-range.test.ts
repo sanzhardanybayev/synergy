@@ -151,4 +151,36 @@ describe('rehypeSourceRange', () => {
     const ulNodes = nodes.filter((n) => n.tag === 'ul' || n.tag === 'ol' || n.tag === 'div');
     expect(ulNodes).toHaveLength(0);
   });
+
+  it('annotated ranges slice the rendered text, excluding markdown markers', async () => {
+    const nodes = await compileAndCapture(SAMPLE_MDX);
+
+    // anchor.ts uses 1-indexed lines, 0-indexed columns. Replicate lineColToOffset.
+    const lineColToOffset = (text: string, line: number, col: number): number => {
+      let offset = 0;
+      let cur = 1;
+      while (cur < line) {
+        offset = text.indexOf('\n', offset) + 1;
+        cur++;
+      }
+      return offset + col;
+    };
+
+    const sliceOf = (n: CapturedNode) =>
+      SAMPLE_MDX.slice(
+        lineColToOffset(SAMPLE_MDX, n.lineStart!, n.colStart!),
+        lineColToOffset(SAMPLE_MDX, n.lineEnd!, n.colEnd!),
+      );
+
+    const h1 = nodes.find((n) => n.tag === 'h1')!;
+    // The editable range must be the heading text only — NOT "# Heading one".
+    expect(sliceOf(h1)).toBe('Heading one');
+
+    const p = nodes.find((n) => n.tag === 'p')!;
+    expect(sliceOf(p)).toBe('A paragraph with some text.');
+
+    const lis = nodes.filter((n) => n.tag === 'li');
+    expect(sliceOf(lis[0])).toBe('list item one');
+    expect(sliceOf(lis[1])).toBe('list item two');
+  });
 });
