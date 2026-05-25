@@ -9,7 +9,7 @@
       "name": "synergy",
       "source": "./",
       "description": "MDX spec authoring with live preview for Claude Code.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "homepage": "https://github.com/sanzhardanybayev/synergy"
     }
   ]
