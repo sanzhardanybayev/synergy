@@ -11,7 +11,7 @@ Markdown specs go stale in a terminal. Synergy gives agents a tight component vo
 
 ## Demo
 
-![Synergy preview: Implementation page with phases nested under Implementation in the sidebar and copy-path buttons in the page header](docs/screenshot.png)
+![Synergy preview: the refactor-auth overview spec at localhost:4321 showing the inline-edit toolbar (Apply all / Discard all / Diff toggle), the left sidebar, copy-path buttons, and a rendered Status badge over Summary, Goals, and Sub-specs](docs/screenshot.png)
 
 The preview at `http://localhost:4321` gives each MDX file its own route (`/s/<name>/overview`, `/architecture`, `/implementation`, `/phases/<slug>`), a hierarchical left sidebar (sessions dropdown, spec rows, phases nested under Implementation), and per-page copy-path buttons for the session dir, the current page, and the orchestrator. The orchestrator opens as a right-side slide-out drawer (ESC or backdrop to close) rendering `orchestrator.md`, and every page hot-reloads as Claude Code edits the MDX.
 
