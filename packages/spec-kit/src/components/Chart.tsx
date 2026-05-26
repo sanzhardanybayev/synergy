@@ -46,13 +46,20 @@ function extractSource(props: ChartProps): string {
 
 /**
  * Attach Mermaid-rendered SVG to a container by parsing it as a document and
- * cloning the <svg> root. Avoids innerHTML so we don't trip on any script
+ * extracting the <svg> root. Avoids innerHTML so we don't trip on any script
  * smuggling inside the rendered output.
+ *
+ * Parsed as `text/html`, not `image/svg+xml`: Mermaid 10+ renders any label
+ * containing a line break as an HTML `<foreignObject>` holding `<p>...<br>...</p>`
+ * with an unclosed `<br>`. Strict XML parsing rejects that and yields a
+ * `<parsererror>` root, silently breaking the page. The HTML parser is lenient
+ * about void elements and still produces a real, namespaced <svg> element.
  */
 function attachSvg(container: HTMLDivElement, svgString: string) {
   const parser = new DOMParser();
-  const doc = parser.parseFromString(svgString, 'image/svg+xml');
-  const svg = doc.documentElement;
+  const doc = parser.parseFromString(svgString, 'text/html');
+  const svg = doc.body.querySelector('svg');
+  if (!svg) throw new Error('Mermaid produced output without an <svg> element');
   // Strip any <script> elements as a belt-and-braces measure.
   for (const script of Array.from(svg.querySelectorAll('script'))) {
     script.remove();
