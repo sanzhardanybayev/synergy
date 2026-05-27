@@ -53,17 +53,47 @@ The preview at `http://localhost:4321` supports direct editing without a Claude 
   `review-state.json` (per-user diff-review cursor) are gitignored. The `sessions/` and
   `feedback/` directories remain tracked.
 
+## Execution state and hand-off (v3)
+
+Every session has a `.state/` sidecar **committed to git** — it is the shared hand-off record for agents and humans:
+
+- `progress.json` — phase list with per-phase statuses + the `resume` pointer. Overall progress is **derived** (never stored); the file is the source of truth.
+- `phases/<slug>.md` — per-phase journal written by `phase set --note` and `log --phase`.
+- `journal.md` — cross-cutting findings written by `log --global`.
+- `resume` in `progress.json` — the hand-off pointer (`nextPhase` + free-text `note`) a fresh agent reads first before touching anything else.
+
+Every `<Phase>` should carry a stable `id` (slug, e.g. `id="storage"`). Execution state keys on that slug. The validator emits a warning when `id` is absent.
+
+CLI commands:
+
+```
+synergy phase set <session> <phaseId> <status> [--note <text>]   record phase status + optional boundary note
+synergy log <session> <text> (--phase <id> | --global)           append a finding to a phase or global journal
+synergy resume <session> [--next <phaseId>] [--note <text>]      write the hand-off pointer
+synergy status <session>                                          print progress rollup (phases done / total)
+```
+
+Skills + slash commands:
+- `synergy:execute` (`/synergy-execute`) — disciplined execution loop; **mandatory state-write gate**: the skill calls `phase set` + `log` before it may proceed past a phase boundary. Accepts run-time directives (scope, model/effort overrides) after the session name; these layer above the stored plan and do NOT mutate it.
+- `synergy:resume` (`/synergy-resume`) — fresh-context entry point; reads the `resume` pointer first, then picks up from `nextPhase`. Also accepts run-time directives.
+
+`<AgentAllocation>` entries carry optional fan-out metadata (`model`, `effort`, `count`) the execute skill uses as defaults when spawning sub-agents or teams.
+
 ## Commands
 
 ```
 synergy init                          scaffold .synergy/ in the cwd
 synergy preview <start|stop|status>   long-running preview server (port 4321, PID-tracked)
 synergy validate [session]            parser + cross-ref check
+synergy phase set <session> <id> <status> [--note <text>]   record phase transition
+synergy log <session> <text> (--phase <id> | --global)      append finding to journal
+synergy resume <session> [--next <id>] [--note <text>]      write hand-off pointer
+synergy status <session>                                     print execution-state rollup
 ```
 
 Spec authoring is not a CLI command — invoke the `synergy:create-spec` skill (or `/synergy-spec` slash command, which dispatches to the skill).
 
-Claude Code slash commands: `/synergy-spec` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback` (skill).
+Claude Code slash commands: `/synergy-spec` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback` (skill), `/synergy-execute` (skill), `/synergy-resume` (skill).
 
 ## What not to do
 

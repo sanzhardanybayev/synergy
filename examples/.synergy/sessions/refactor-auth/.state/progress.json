@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "overallStatus": "in-progress",
+  "resume": {
+    "nextPhase": "cutover",
+    "note": "Phase 1 done; baseline p95 captured. Begin canary at 1% and watch latency."
+  },
+  "phases": [
+    {
+      "slug": "storage",
+      "status": "done",
+      "completedAt": "2026-05-27T15:49:02.024Z",
+      "updatedAt": "2026-05-27T15:49:02.024Z"
+    },
+    {
+      "slug": "cutover",
+      "status": "in-progress",
+      "startedAt": "2026-05-27T15:49:05.039Z",
+      "updatedAt": "2026-05-27T15:49:05.039Z"
+    },
+    {
+      "slug": "cleanup",
+      "status": "proposed",
+      "updatedAt": "2026-05-27T15:49:33.349Z"
+    }
+  ],
+  "updatedAt": "2026-05-27T15:49:33.349Z"
+}
