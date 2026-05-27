@@ -72,7 +72,7 @@ export function previewStart(opts: PreviewStartOptions = {}): PreviewStatus {
   const existing = previewStatus(paths.root, port);
   if (existing.running) {
     process.stdout.write(
-      yellow('!') + ` Preview already running (pid ${existing.pid}) at ${existing.url}\n`,
+      `${yellow('!')} Preview already running (pid ${existing.pid}) at ${existing.url}\n`,
     );
     return existing;
   }

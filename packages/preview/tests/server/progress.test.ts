@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setPhaseStatus, appendFinding } from '@synergy/state';
+import { appendFinding, setPhaseStatus } from '@synergy/state';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildProgressResponse } from '../../src/server/progress.js';
 

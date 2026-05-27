@@ -13,7 +13,9 @@ export interface ReviewerProps {
 export function Reviewer({ name, role, scope, handle, children }: ReviewerProps) {
   return (
     <div className="sk-reviewer">
-      <span className="sk-reviewer__icon" aria-hidden>👤</span>
+      <span className="sk-reviewer__icon" aria-hidden>
+        👤
+      </span>
       <div className="sk-reviewer__body">
         <div className="sk-reviewer__head">
           <strong className="sk-reviewer__name">{name}</strong>

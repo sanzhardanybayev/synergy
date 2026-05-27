@@ -24,7 +24,9 @@ export function CrossRef({ to, label, children }: CrossRefProps) {
   const text = children ?? label ?? to;
   return (
     <a className="sk-crossref" href={targetToHref(to)} data-crossref={to}>
-      <span className="sk-crossref__icon" aria-hidden>↗</span>
+      <span className="sk-crossref__icon" aria-hidden>
+        ↗
+      </span>
       <span className="sk-crossref__label">{text}</span>
     </a>
   );

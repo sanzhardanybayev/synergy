@@ -71,8 +71,6 @@ for (const issue of report.issues) {
 }
 
 const summary = `${bold(`${report.sessionsChecked} session(s)`)}, ${report.filesChecked} file(s), ${errors.length} error(s), ${warnings.length} warning(s)`;
-process.stdout.write(
-  `\n${errors.length === 0 ? green('✓') : red('✗')} ${summary}\n`,
-);
+process.stdout.write(`\n${errors.length === 0 ? green('✓') : red('✗')} ${summary}\n`);
 
 process.exit(errors.length > 0 ? 1 : 0);
