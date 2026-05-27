@@ -1,0 +1,30 @@
+{
+  "name": "@synergy/state",
+  "version": "0.2.4",
+  "type": "module",
+  "description": "Synergy execution-state layer: read/write/derive .state/ progress + journals.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@synergy/spec-kit": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.1",
+    "tsup": "8.3.5",
+    "typescript": "5.6.3",
+    "vitest": "2.1.5"
+  }
+}
