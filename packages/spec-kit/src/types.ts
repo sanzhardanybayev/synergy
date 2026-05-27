@@ -1,10 +1,4 @@
-export type StatusValue =
-  | 'draft'
-  | 'proposed'
-  | 'in-progress'
-  | 'blocked'
-  | 'done'
-  | 'shipped';
+export type StatusValue = 'draft' | 'proposed' | 'in-progress' | 'blocked' | 'done' | 'shipped';
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
 
@@ -16,14 +10,7 @@ export type RiskCategory =
   | 'process'
   | 'scope';
 
-export type ActorRole =
-  | 'designer'
-  | 'engineer'
-  | 'pm'
-  | 'reviewer'
-  | 'qa'
-  | 'sre'
-  | 'lead';
+export type ActorRole = 'designer' | 'engineer' | 'pm' | 'reviewer' | 'qa' | 'sre' | 'lead';
 
 export type AgentType = 'sub-agent' | 'agent-team' | 'human';
 
@@ -36,3 +23,6 @@ export type ChartKind =
   | 'gantt'
   | 'mindmap'
   | 'architecture';
+
+export type AgentModel = 'opus' | 'sonnet' | 'haiku';
+export type AgentEffort = 'low' | 'medium' | 'high' | 'max';
