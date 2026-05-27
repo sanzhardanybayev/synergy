@@ -8,7 +8,7 @@ import { Phase, Timeline, AgentAllocation, Status, CrossRef } from '@synergy/spe
 
 Phases land sequentially; chunks inside each phase may run in parallel — see <CrossRef to="00-overview#sub-specs">sub-specs</CrossRef> and the orchestrator file.
 
-<Phase number={1} title="Storage interface + dual write" status="proposed" estimate="2d" summary="Land the new TokenStore interface and dual-write to both stores.">
+<Phase number={1} id="storage" title="Storage interface + dual write" status="proposed" estimate="2d" summary="Land the new TokenStore interface and dual-write to both stores.">
   - Define and freeze `TokenStore`.
   - Implement `ComplianceStore` against the new backend.
   - Wire dual-write in `TokenService.put`; reads still hit the legacy store.
@@ -16,7 +16,7 @@ Phases land sequentially; chunks inside each phase may run in parallel — see <
   - Verification: writes land in both stores for 100% of new sessions.
 </Phase>
 
-<Phase number={2} title="Cutover reads + migration" status="proposed" estimate="3d" summary="Swap read path; migrate legacy rows.">
+<Phase number={2} id="cutover" title="Cutover reads + migration" status="proposed" estimate="3d" summary="Swap read path; migrate legacy rows.">
   - Add a feature flag to flip reads to the compliance store.
   - Backfill job: stream legacy rows → compliance store, idempotent.
   - Canary read traffic (1% → 10% → 100%), watching p95 latency.
@@ -24,7 +24,7 @@ Phases land sequentially; chunks inside each phase may run in parallel — see <
   - Verification: zero divergence between stores during read-canary; backfill drops to zero new rows.
 </Phase>
 
-<Phase number={3} title="Cleanup + audit" status="proposed" estimate="1d" summary="Delete the legacy store, finalize audit trail.">
+<Phase number={3} id="cleanup" title="Cleanup + audit" status="proposed" estimate="1d" summary="Delete the legacy store, finalize audit trail.">
   - Remove dual-write paths.
   - Decommission `LegacyStore`.
   - Compliance audit packet: structured logs + design doc + migration receipts.
@@ -36,12 +36,12 @@ Phases land sequentially; chunks inside each phase may run in parallel — see <
 <AgentAllocation
   context="Phase 1 and 3 are bounded enough for sub-agents. Phase 2 has live-traffic risk and runs as an agent team with human-in-the-loop at every canary step."
   entries={[
-    { name: 'storage-impl', type: 'sub-agent', responsibility: 'Implement TokenStore + ComplianceStore', phases: [1] },
-    { name: 'service-wiring', type: 'sub-agent', responsibility: 'Wire dual-write, instrumentation', phases: [1] },
-    { name: 'migration-team', type: 'agent-team', responsibility: 'Read cutover + backfill, with canary supervision', phases: [2] },
-    { name: 'audit-prep', type: 'sub-agent', responsibility: 'Compliance audit packet', phases: [3] },
-    { name: 'avery', type: 'human', responsibility: 'Approve each phase boundary', phases: [1, 2, 3] },
-    { name: 'riya', type: 'human', responsibility: 'Compliance sign-off after Phase 3', phases: [3] }
+    { name: 'storage-impl', type: 'sub-agent', responsibility: 'Implement TokenStore + ComplianceStore', phases: ['storage'], model: 'opus', effort: 'high', count: 1 },
+    { name: 'service-wiring', type: 'sub-agent', responsibility: 'Wire dual-write, instrumentation', phases: ['storage'], model: 'opus', effort: 'high' },
+    { name: 'migration-team', type: 'agent-team', responsibility: 'Read cutover + backfill, with canary supervision', phases: ['cutover'], model: 'opus', effort: 'max' },
+    { name: 'audit-prep', type: 'sub-agent', responsibility: 'Compliance audit packet', phases: ['cleanup'], model: 'sonnet', effort: 'medium' },
+    { name: 'avery', type: 'human', responsibility: 'Approve each phase boundary', phases: ['storage', 'cutover', 'cleanup'] },
+    { name: 'riya', type: 'human', responsibility: 'Compliance sign-off after Phase 3', phases: ['cleanup'] },
   ]}
 />
 

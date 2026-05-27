@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { validate } from '@synergy/validator';
 import cac from 'cac';
 import { bold, dim, green, red, yellow } from 'kleur/colors';
+import { logFinding, phaseSet, printProgress, resumeSet } from './execstate.js';
 import { initProject } from './init.js';
 import { previewStart, previewStatus, previewStop, printStatus } from './preview.js';
 
@@ -29,7 +30,9 @@ cli
     } else if (action === 'status') {
       printStatus(previewStatus(flags.root, Number(flags.port)));
     } else {
-      process.stderr.write(red('Error:') + ` unknown action "${action}" — use start | stop | status\n`);
+      process.stderr.write(
+        red('Error:') + ` unknown action "${action}" — use start | stop | status\n`,
+      );
       process.exit(2);
     }
   });
@@ -52,6 +55,77 @@ cli
     const summary = `${bold(`${report.sessionsChecked} session(s)`)}, ${report.filesChecked} file(s), ${errors.length} error(s), ${warnings.length} warning(s)`;
     process.stdout.write(`\n${errors.length === 0 ? green('✓') : red('✗')} ${summary}\n`);
     process.exit(errors.length > 0 ? 1 : 0);
+  });
+
+cli
+  .command('phase <action> <session> <phaseId> [status]', 'Set a phase status (action: set)')
+  .option('--root <dir>', 'Project root (default: cwd)')
+  .option('--note <text>', 'Boundary note appended to the phase journal')
+  .action(
+    (
+      action: string,
+      session: string,
+      phaseId: string,
+      status: string | undefined,
+      flags: { root?: string; note?: string },
+    ) => {
+      if (action !== 'set') {
+        process.stderr.write(red('Error:') + ` unknown phase action "${action}" — use set\n`);
+        process.exit(2);
+      }
+      if (!status) {
+        process.stderr.write(red('Error:') + ' phase set requires a <status> argument\n');
+        process.exit(2);
+      }
+      try {
+        phaseSet({ root: flags.root, session, phaseId, status: status as never, note: flags.note });
+      } catch (err) {
+        process.stderr.write(red('Error:') + ` ${(err as Error).message}\n`);
+        process.exit(1);
+      }
+    },
+  );
+
+cli
+  .command('log <session> <text>', 'Append a finding to a phase journal or the global journal')
+  .option('--root <dir>', 'Project root (default: cwd)')
+  .option('--phase <id>', 'Phase slug to attach the finding to')
+  .option('--global', 'Record a cross-cutting finding in journal.md')
+  .action(
+    (session: string, text: string, flags: { root?: string; phase?: string; global?: boolean }) => {
+      try {
+        logFinding({ root: flags.root, session, text, phase: flags.phase, global: flags.global });
+      } catch (err) {
+        process.stderr.write(red('Error:') + ` ${(err as Error).message}\n`);
+        process.exit(1);
+      }
+    },
+  );
+
+cli
+  .command('resume <session>', 'Set the resume pointer (where a fresh agent should start)')
+  .option('--root <dir>', 'Project root (default: cwd)')
+  .option('--next <phaseId>', 'Phase slug to resume from')
+  .option('--note <text>', 'Free-text start-here note')
+  .action((session: string, flags: { root?: string; next?: string; note?: string }) => {
+    try {
+      resumeSet({ root: flags.root, session, next: flags.next, note: flags.note });
+    } catch (err) {
+      process.stderr.write(red('Error:') + ` ${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  });
+
+cli
+  .command('status <session>', 'Print the execution-state rollup for a session')
+  .option('--root <dir>', 'Project root (default: cwd)')
+  .action((session: string, flags: { root?: string }) => {
+    try {
+      process.stdout.write(`${printProgress({ root: flags.root, session })}\n`);
+    } catch (err) {
+      process.stderr.write(red('Error:') + ` ${(err as Error).message}\n`);
+      process.exit(1);
+    }
   });
 
 cli.parse();

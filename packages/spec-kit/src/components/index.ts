@@ -31,3 +31,9 @@ export type {
   AgentType,
   ChartKind,
 } from '../types.js';
+
+export {
+  ExecutionStateProvider,
+  useExecutionState,
+} from '../ExecutionState.js';
+export type { ExecutionStateView, ExecutionPhaseView } from '../ExecutionState.js';

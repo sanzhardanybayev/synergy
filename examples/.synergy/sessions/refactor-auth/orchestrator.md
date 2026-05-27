@@ -3,6 +3,8 @@
 > **Read this first** before implementing any of the specs in this session.
 > Session: `refactor-auth`. Type: `refactor`.
 
+> **Live progress:** run `synergy status refactor-auth` or open the 📊 Progress drawer in the preview.
+
 ## Overview
 
 Replace the legacy auth token store with a compliance-approved store. The public middleware API stays the same; the swap is invisible to downstream services. The rollout uses dual-write → canary reads → cleanup to keep the migration safe under load.

@@ -290,3 +290,43 @@ Some content with no summary or goals heading.
     expect(report.issues.filter((i) => i.severity === 'error')).toEqual([]);
   });
 });
+
+describe('validate — Phase id discipline', () => {
+  it('warns when an inline <Phase> has no id', () => {
+    const root = project({
+      [`${SESSION_REL}/00-overview.mdx`]: minimalOverview('phased'),
+      [`${SESSION_REL}/02-implementation.mdx`]: `---
+title: 'Impl'
+---
+import { Phase } from '@synergy/spec-kit';
+
+# Impl
+
+<Phase number={1} title="Storage" />
+`,
+    });
+    const report = validate({ projectRoot: root });
+    const warn = report.issues.find(
+      (i) => i.severity === 'warning' && i.component === 'Phase' && /\bid\b/.test(i.message),
+    );
+    expect(warn).toBeDefined();
+  });
+
+  it('does not warn when <Phase> has an id', () => {
+    const root = project({
+      [`${SESSION_REL}/00-overview.mdx`]: minimalOverview('phased'),
+      [`${SESSION_REL}/02-implementation.mdx`]: `---
+title: 'Impl'
+---
+import { Phase } from '@synergy/spec-kit';
+
+# Impl
+
+<Phase id="storage" number={1} title="Storage" />
+`,
+    });
+    const report = validate({ projectRoot: root });
+    const warn = report.issues.find((i) => i.component === 'Phase' && /\bid\b/.test(i.message));
+    expect(warn).toBeUndefined();
+  });
+});

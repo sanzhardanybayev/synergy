@@ -130,6 +130,13 @@
   color: var(--sk-fg-muted);
   margin: 0 0 8px;
 }
+.sk-phase__finding {
+  margin: 0.25rem 0 0;
+  font-size: 0.85em;
+  color: var(--sk-muted, #6b7280);
+  border-left: 2px solid var(--sk-accent, #6366f1);
+  padding-left: 0.5rem;
+}
 .sk-phase__body {
   font-size: 14px;
 }

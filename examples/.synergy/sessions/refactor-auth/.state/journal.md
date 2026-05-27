@@ -1,0 +1,1 @@
+- 2026-05-27T15:49:08.791Z: Auth cache TTL is undocumented = 300s; affects canary read validation.

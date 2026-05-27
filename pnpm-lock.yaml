@@ -23,6 +23,9 @@ importers:
       '@synergy/spec-kit':
         specifier: workspace:*
         version: link:../spec-kit
+      '@synergy/state':
+        specifier: workspace:*
+        version: link:../state
       '@synergy/validator':
         specifier: workspace:*
         version: link:../validator
@@ -60,6 +63,9 @@ importers:
       '@synergy/spec-kit':
         specifier: workspace:*
         version: link:../spec-kit
+      '@synergy/state':
+        specifier: workspace:*
+        version: link:../state
       '@vitejs/plugin-react':
         specifier: 4.3.4
         version: 4.3.4(vite@5.4.11(@types/node@22.10.1))
@@ -177,11 +183,33 @@ importers:
         specifier: 2.1.5
         version: 2.1.5(@types/node@22.10.1)(jsdom@25.0.1)
 
+  packages/state:
+    dependencies:
+      '@synergy/spec-kit':
+        specifier: workspace:*
+        version: link:../spec-kit
+    devDependencies:
+      '@types/node':
+        specifier: 22.10.1
+        version: 22.10.1
+      tsup:
+        specifier: 8.3.5
+        version: 8.3.5(postcss@8.5.15)(tsx@4.19.2)(typescript@5.6.3)
+      typescript:
+        specifier: 5.6.3
+        version: 5.6.3
+      vitest:
+        specifier: 2.1.5
+        version: 2.1.5(@types/node@22.10.1)(jsdom@25.0.1)
+
   packages/validator:
     dependencies:
       '@synergy/spec-kit':
         specifier: workspace:*
         version: link:../spec-kit
+      '@synergy/state':
+        specifier: workspace:*
+        version: link:../state
       ajv:
         specifier: 8.17.1
         version: 8.17.1

@@ -4,6 +4,7 @@ import { type ComponentName, componentNames, schemas } from '@synergy/spec-kit';
 import Ajv, { type ValidateFunction } from 'ajv';
 import { type ParsedSpec, parseSpec } from './parse.js';
 import { listPhases, resolvePhaseCrossRef, validatePhaseStructure } from './phase.js';
+import { validateStateForSession } from './state.js';
 import type {
   SessionInventory,
   ValidateOptions,
@@ -234,6 +235,17 @@ function validateSession(sessionDir: string): ValidationIssue[] {
           message: `Attribute \`${attrName}\` is a non-literal expression; cannot validate against schema`,
         });
       }
+      if (comp.name === 'Phase' && comp.attributes.id === undefined) {
+        issues.push({
+          file: spec.filePath,
+          line: comp.line,
+          column: comp.column,
+          component: 'Phase',
+          severity: 'warning',
+          message:
+            'Phase has no `id` — add a stable slug (e.g. id="storage") so execution state survives renumbering.',
+        });
+      }
       const validate = validators.get(comp.name)!;
       const ok = validate(comp.attributes);
       if (!ok) {
@@ -276,6 +288,17 @@ function validateSession(sessionDir: string): ValidationIssue[] {
       }
     }
   }
+
+  // Collect known phase ids: folder slugs + inline <Phase id="..."> values.
+  const knownPhaseIds = new Set<string>(phaseParse.parsed.keys());
+  for (const spec of allParsed) {
+    for (const comp of spec.components) {
+      if (comp.name === 'Phase' && typeof comp.attributes.id === 'string') {
+        knownPhaseIds.add(comp.attributes.id);
+      }
+    }
+  }
+  issues.push(...validateStateForSession(sessionDir, knownPhaseIds));
 
   return issues;
 }
