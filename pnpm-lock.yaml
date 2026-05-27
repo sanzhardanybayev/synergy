@@ -204,6 +204,9 @@ importers:
       '@synergy/spec-kit':
         specifier: workspace:*
         version: link:../spec-kit
+      '@synergy/state':
+        specifier: workspace:*
+        version: link:../state
       ajv:
         specifier: 8.17.1
         version: 8.17.1

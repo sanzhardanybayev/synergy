@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@synergy/spec-kit": "workspace:*",
+    "@synergy/state": "workspace:*",
     "ajv": "8.17.1",
     "github-slugger": "2.0.0",
     "json5": "2.2.3",
