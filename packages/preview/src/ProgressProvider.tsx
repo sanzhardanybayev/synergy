@@ -1,6 +1,6 @@
 import { ExecutionStateProvider, type ExecutionStateView } from '@synergy/spec-kit';
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { getProgress, type ProgressDto } from './api.js';
+import { type ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { type ProgressDto, getProgress } from './api.js';
 
 const ProgressDataContext = createContext<ProgressDto | null>(null);
 export function useProgressData(): ProgressDto | null {

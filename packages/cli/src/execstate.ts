@@ -1,12 +1,12 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  type StatusValue,
   appendFinding,
   deriveProgress,
   readProgress,
   setPhaseStatus,
   setResume,
-  type StatusValue,
 } from '@synergy/state';
 import { bold, dim, green } from 'kleur/colors';
 import { resolveProjectPaths } from './paths.js';

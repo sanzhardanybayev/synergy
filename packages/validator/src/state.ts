@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { progressJsonSchema, progressPath, type ProgressFile } from '@synergy/state';
+import { type ProgressFile, progressJsonSchema, progressPath } from '@synergy/state';
 import Ajv from 'ajv';
 import type { ValidationIssue } from './types.js';
 

@@ -5,14 +5,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useEditBuffer } from './EditBuffer.js';
 import type { Comment } from './api.js';
 import { listFeedback } from './api.js';
-import {
-  getMarkerPosition,
-  getRangeClientRects,
-  locateCommentInDom,
-} from './commentDom.js';
-import { useEditBuffer } from './EditBuffer.js';
+import { getMarkerPosition, getRangeClientRects, locateCommentInDom } from './commentDom.js';
 
 export interface CommentHighlightsProps {
   session: string;
@@ -46,6 +42,7 @@ export function CommentHighlights({ session, file, fileSource }: CommentHighligh
     }
   }, [session, file]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: commentRefreshKey is an intentional re-fetch trigger, not used inside the effect body.
   useEffect(() => {
     void fetchComments();
   }, [fetchComments, commentRefreshKey]);
@@ -166,7 +163,6 @@ function CommentHighlightItem({ layout, expanded, pulsing, onToggle, onClose }: 
     <>
       {highlightRects.map((rect, i) => (
         <div
-          // biome-ignore lint/suspicious/noArrayIndexKey: rects lack stable ids
           key={`${comment.id}-hl-${i}`}
           className={`comment-highlight__range${pulsing ? ' comment-highlight__range--pulse' : ''}`}
           style={{
@@ -200,6 +196,7 @@ function CommentHighlightItem({ layout, expanded, pulsing, onToggle, onClose }: 
         </button>
 
         {expanded && (
+          // biome-ignore lint/a11y/useSemanticElements: role="region" on a div is intentional; no native element fits this inline popover.
           <div className="comment-highlight__popover" role="region" aria-label="Comment details">
             <p className="comment-highlight__body">{comment.body}</p>
             <button type="button" className="comment-highlight__close" onClick={onClose}>

@@ -2,13 +2,7 @@
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "organizeImports": { "enabled": true },
   "files": {
-    "ignore": [
-      "**/dist/**",
-      "**/node_modules/**",
-      "**/.synergy/**",
-      "**/schemas/**",
-      "**/*.mdx"
-    ]
+    "ignore": ["**/dist/**", "**/node_modules/**", "**/.synergy/**", "**/schemas/**", "**/*.mdx"]
   },
   "formatter": {
     "enabled": true,
@@ -35,5 +29,11 @@
       "semicolons": "always",
       "trailingCommas": "all"
     }
-  }
+  },
+  "overrides": [
+    {
+      "include": ["packages/spec-kit/src/schemas-index.ts"],
+      "organizeImports": { "enabled": false }
+    }
+  ]
 }

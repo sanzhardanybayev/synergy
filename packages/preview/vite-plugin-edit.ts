@@ -19,9 +19,9 @@ import {
   handleFeedbackPost,
 } from './src/server/feedback.js';
 import { sendJson } from './src/server/http.js';
+import { handleProgress } from './src/server/progress.js';
 import { handleReview } from './src/server/review.js';
 import { handleSource } from './src/server/source.js';
-import { handleProgress } from './src/server/progress.js';
 import { handleStatus } from './src/server/status.js';
 
 interface PluginOptions {

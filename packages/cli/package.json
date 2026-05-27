@@ -15,10 +15,7 @@
   "bin": {
     "synergy": "./dist/cli.js"
   },
-  "files": [
-    "dist",
-    "templates"
-  ],
+  "files": ["dist", "templates"],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

@@ -302,7 +302,6 @@ describe('EditableBlock', () => {
           data-source-col-end="45"
         >
           {'See '}
-          {/* biome-ignore lint/a11y/useValidAnchor: test fixture mimicking CrossRef output */}
           <a href="#x" data-crossref="x">
             the thing
           </a>

@@ -1,7 +1,6 @@
 import { type SessionMeta, loaders, sessions } from 'virtual:synergy/sessions';
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { Outlet, useNavigate, useParams } from 'react-router-dom';
-import type { Comment } from './api.js';
 import { ActiveSessionPinger } from './ActiveSessionPinger.js';
 import { CommentsPanel } from './CommentsPanel.js';
 import { EditBufferProvider, useEditBuffer } from './EditBuffer.js';
@@ -10,6 +9,7 @@ import { ProgressDrawer } from './ProgressDrawer.js';
 import { ProgressProvider, useProgressData } from './ProgressProvider.js';
 import { type OrchestratorTarget, Sidebar } from './Sidebar.js';
 import { UnloadGuard } from './UnloadGuard.js';
+import type { Comment } from './api.js';
 
 interface SessionContextValue {
   session: SessionMeta;
