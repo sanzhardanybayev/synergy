@@ -234,6 +234,17 @@ function validateSession(sessionDir: string): ValidationIssue[] {
           message: `Attribute \`${attrName}\` is a non-literal expression; cannot validate against schema`,
         });
       }
+      if (comp.name === 'Phase' && comp.attributes.id === undefined) {
+        issues.push({
+          file: spec.filePath,
+          line: comp.line,
+          column: comp.column,
+          component: 'Phase',
+          severity: 'warning',
+          message:
+            'Phase has no `id` — add a stable slug (e.g. id="storage") so execution state survives renumbering.',
+        });
+      }
       const validate = validators.get(comp.name)!;
       const ok = validate(comp.attributes);
       if (!ok) {
