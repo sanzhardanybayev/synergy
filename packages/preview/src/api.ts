@@ -350,3 +350,35 @@ export async function postActiveSession(session: string): Promise<void> {
     throw new Error(`POST /api/active-session failed (${res.status}): ${text}`);
   }
 }
+
+// ---------------------------------------------------------------------------
+// GET /api/progress
+// ---------------------------------------------------------------------------
+
+export interface PhaseStateDto {
+  slug: string;
+  status: string;
+  startedAt?: string;
+  completedAt?: string;
+  updatedAt?: string;
+}
+export interface ProgressDto {
+  progress: {
+    version: 1;
+    overallStatus: string;
+    resume: { nextPhase?: string; note?: string };
+    phases: PhaseStateDto[];
+  };
+  derived: { done: number; total: number; percent: number };
+  phaseJournals: Record<string, string>;
+  globalJournal: string | null;
+}
+
+export async function getProgress(session: string): Promise<ProgressDto> {
+  const res = await fetch(`/api/progress?session=${encodeURIComponent(session)}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`GET /api/progress failed (${res.status}): ${text}`);
+  }
+  return (await res.json()) as ProgressDto;
+}
