@@ -29,5 +29,11 @@
       "semicolons": "always",
       "trailingCommas": "all"
     }
-  }
+  },
+  "overrides": [
+    {
+      "include": ["packages/spec-kit/src/schemas-index.ts"],
+      "organizeImports": { "enabled": false }
+    }
+  ]
 }

@@ -163,7 +163,6 @@ function CommentHighlightItem({ layout, expanded, pulsing, onToggle, onClose }: 
     <>
       {highlightRects.map((rect, i) => (
         <div
-          // biome-ignore lint/suspicious/noArrayIndexKey: rects lack stable ids
           key={`${comment.id}-hl-${i}`}
           className={`comment-highlight__range${pulsing ? ' comment-highlight__range--pulse' : ''}`}
           style={{
