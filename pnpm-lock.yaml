@@ -23,6 +23,9 @@ importers:
       '@synergy/spec-kit':
         specifier: workspace:*
         version: link:../spec-kit
+      '@synergy/state':
+        specifier: workspace:*
+        version: link:../state
       '@synergy/validator':
         specifier: workspace:*
         version: link:../validator
