@@ -11,17 +11,19 @@
         "title": {
           "type": "string"
         },
+        "id": {
+          "type": "string",
+          "description": "Stable slug used to key execution state, e.g. \"storage\"."
+        },
         "status": {
           "$ref": "#/definitions/StatusValue",
-          "description": "Optional status badge for this phase."
+          "description": "Authored status badge; overridden by live execution state when present."
         },
         "summary": {
-          "type": "string",
-          "description": "Short summary shown under the heading."
+          "type": "string"
         },
         "estimate": {
-          "type": "string",
-          "description": "Estimated effort: e.g. \"1d\", \"half day\"."
+          "type": "string"
         },
         "editable": {
           "type": "boolean"

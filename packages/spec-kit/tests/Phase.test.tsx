@@ -1,6 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { ExecutionStateProvider } from '../src/ExecutionState.js';
 import { Phase } from '../src/components/Phase.js';
 
 describe('Phase — default render', () => {
@@ -103,5 +104,33 @@ describe('Phase — statusDirty', () => {
   it('does not show the pending indicator when statusDirty is false', () => {
     render(<Phase number={1} title="Core" status="draft" editable statusDirty={false} />);
     expect(screen.queryByLabelText('pending change')).toBeNull();
+  });
+});
+
+describe('Phase live overlay', () => {
+  it('shows the authored status when no execution state is present', () => {
+    render(<Phase id="storage" number={1} title="Storage" status="proposed" />);
+    expect(screen.getByText('Proposed')).toBeTruthy();
+  });
+
+  it('overlays the live status from execution state by id', () => {
+    render(
+      <ExecutionStateProvider value={{ phases: { storage: { status: 'done' } } }}>
+        <Phase id="storage" number={1} title="Storage" status="proposed" />
+      </ExecutionStateProvider>,
+    );
+    expect(screen.getByText('Done')).toBeTruthy();
+    expect(screen.queryByText('Proposed')).toBeNull();
+  });
+
+  it('renders the latest finding peek when present', () => {
+    render(
+      <ExecutionStateProvider
+        value={{ phases: { storage: { status: 'in-progress', latestFinding: 'cache TTL 300s' } } }}
+      >
+        <Phase id="storage" number={1} title="Storage" status="proposed" />
+      </ExecutionStateProvider>,
+    );
+    expect(screen.getByText(/cache TTL 300s/)).toBeTruthy();
   });
 });
