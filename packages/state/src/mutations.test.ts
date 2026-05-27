@@ -65,4 +65,16 @@ describe('setResume', () => {
       note: 'begin canary 1%',
     });
   });
+
+  it('merges — updating only the note preserves an existing nextPhase', () => {
+    setResume(sessionDir, { nextPhase: 'cutover', note: 'canary 1%' }, now);
+    setResume(sessionDir, { note: 'canary 10%' }, now);
+    expect(readProgress(sessionDir).resume).toEqual({ nextPhase: 'cutover', note: 'canary 10%' });
+  });
+
+  it('merges — updating only nextPhase preserves an existing note', () => {
+    setResume(sessionDir, { nextPhase: 'cutover', note: 'canary 1%' }, now);
+    setResume(sessionDir, { nextPhase: 'cleanup' }, now);
+    expect(readProgress(sessionDir).resume).toEqual({ nextPhase: 'cleanup', note: 'canary 1%' });
+  });
 });

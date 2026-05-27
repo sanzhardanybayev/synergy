@@ -61,14 +61,17 @@ export function appendFinding(
   appendTo(path, `- ${stamp}: ${text}\n`);
 }
 
-/** Set the resume pointer a fresh agent reads first. */
+/** Set the resume pointer a fresh agent reads first. Merges: only provided fields overwrite. */
 export function setResume(
   sessionDir: string,
   resume: ResumePointer,
   now: NowFn = defaultNow,
 ): void {
   const progress = readProgress(sessionDir);
-  progress.resume = resume;
+  const merged: ResumePointer = { ...progress.resume };
+  if (resume.nextPhase !== undefined) merged.nextPhase = resume.nextPhase;
+  if (resume.note !== undefined) merged.note = resume.note;
+  progress.resume = merged;
   progress.updatedAt = now();
   writeProgress(sessionDir, progress);
 }
