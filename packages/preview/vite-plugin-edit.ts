@@ -21,6 +21,7 @@ import {
 import { sendJson } from './src/server/http.js';
 import { handleReview } from './src/server/review.js';
 import { handleSource } from './src/server/source.js';
+import { handleProgress } from './src/server/progress.js';
 import { handleStatus } from './src/server/status.js';
 
 interface PluginOptions {
@@ -91,6 +92,12 @@ export function synergyEditPlugin(options: PluginOptions): Plugin {
           // GET /api/diff
           if (method === 'GET' && pathname === '/api/diff') {
             handleDiff(req, res, sessionsDir, projectRoot);
+            return;
+          }
+
+          // GET /api/progress
+          if (method === 'GET' && pathname === '/api/progress') {
+            handleProgress(req, res, sessionsDir);
             return;
           }
 

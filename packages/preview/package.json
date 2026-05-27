@@ -18,6 +18,7 @@
     "@mdx-js/react": "^3.1.0",
     "@mdx-js/rollup": "3.1.0",
     "@synergy/spec-kit": "workspace:*",
+    "@synergy/state": "workspace:*",
     "@vitejs/plugin-react": "4.3.4",
     "gray-matter": "^4.0.3",
     "mermaid": "11.4.1",

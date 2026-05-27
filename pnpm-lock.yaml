@@ -63,6 +63,9 @@ importers:
       '@synergy/spec-kit':
         specifier: workspace:*
         version: link:../spec-kit
+      '@synergy/state':
+        specifier: workspace:*
+        version: link:../state
       '@vitejs/plugin-react':
         specifier: 4.3.4
         version: 4.3.4(vite@5.4.11(@types/node@22.10.1))
