@@ -6,6 +6,8 @@ import { ActiveSessionPinger } from './ActiveSessionPinger.js';
 import { CommentsPanel } from './CommentsPanel.js';
 import { EditBufferProvider, useEditBuffer } from './EditBuffer.js';
 import { OrchestratorDrawer } from './OrchestratorDrawer.js';
+import { ProgressDrawer } from './ProgressDrawer.js';
+import { ProgressProvider, useProgressData } from './ProgressProvider.js';
 import { type OrchestratorTarget, Sidebar } from './Sidebar.js';
 import { UnloadGuard } from './UnloadGuard.js';
 
@@ -131,6 +133,7 @@ function SessionInner({ session, drawer, closeDrawer, openOrchestrator }: Sessio
   const buffer = useEditBuffer();
   const navigate = useNavigate();
   const [commentsPanelOpen, setCommentsPanelOpen] = useState(false);
+  const [progressOpen, setProgressOpen] = useState(false);
 
   const handleScrollToComment = useCallback(
     (comment: Comment) => {
@@ -146,23 +149,36 @@ function SessionInner({ session, drawer, closeDrawer, openOrchestrator }: Sessio
       <UnloadGuard />
       <ActiveSessionPinger session={session.name} />
 
-      <div className="layout">
-        <Sidebar
-          sessions={sessions}
-          currentSessionName={session.name}
-          onOpenOrchestrator={openOrchestrator}
-        />
-        <main className="layout__main">
-          <Outlet />
-        </main>
-        <OrchestratorDrawer
-          open={drawer !== null}
-          title={drawer?.title ?? ''}
-          path={drawer?.path ?? ''}
-          loader={drawer?.loader ?? (async () => ({ default: '' }))}
-          onClose={closeDrawer}
-        />
-      </div>
+      <ProgressProvider session={session.name}>
+        <div className="layout">
+          <Sidebar
+            sessions={sessions}
+            currentSessionName={session.name}
+            onOpenOrchestrator={openOrchestrator}
+          />
+          <main className="layout__main">
+            <Outlet />
+          </main>
+          <OrchestratorDrawer
+            open={drawer !== null}
+            title={drawer?.title ?? ''}
+            path={drawer?.path ?? ''}
+            loader={drawer?.loader ?? (async () => ({ default: '' }))}
+            onClose={closeDrawer}
+          />
+          <ProgressDrawerHost open={progressOpen} onClose={() => setProgressOpen(false)} />
+        </div>
+
+        <button
+          type="button"
+          className="progress-toggle"
+          onClick={() => setProgressOpen((v) => !v)}
+          aria-expanded={progressOpen}
+          aria-label={progressOpen ? 'Close progress' : 'Open progress'}
+        >
+          {progressOpen ? '✕' : '📊'}
+        </button>
+      </ProgressProvider>
 
       {/* Fixed-position comments panel — does not restructure .layout grid */}
       <div
@@ -190,6 +206,11 @@ function SessionInner({ session, drawer, closeDrawer, openOrchestrator }: Sessio
       </div>
     </>
   );
+}
+
+function ProgressDrawerHost({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const data = useProgressData();
+  return <ProgressDrawer open={open} data={data} onClose={onClose} />;
 }
 
 /** Map a session-relative feedback file path to an app route segment. */
