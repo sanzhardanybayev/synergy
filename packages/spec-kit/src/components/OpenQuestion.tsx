@@ -16,7 +16,9 @@ export function OpenQuestion({ id, question, owner, resolveBy, children }: OpenQ
   return (
     <aside className="sk-question" data-question-id={id ?? ''}>
       <header className="sk-question__header">
-        <span className="sk-question__icon" aria-hidden>❓</span>
+        <span className="sk-question__icon" aria-hidden>
+          ❓
+        </span>
         {id ? <span className="sk-question__id">{id}</span> : null}
         <span className="sk-question__text">{question}</span>
       </header>

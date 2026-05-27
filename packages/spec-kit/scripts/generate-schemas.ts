@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createGenerator, type Config } from 'ts-json-schema-generator';
+import { type Config, createGenerator } from 'ts-json-schema-generator';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(__dirname, '..');
@@ -38,6 +38,7 @@ function stripChildrenAndPrune(schema: Record<string, unknown>) {
   for (const def of Object.values(definitions)) {
     if (def.properties && typeof def.properties === 'object') {
       const props = def.properties as Record<string, unknown>;
+      // biome-ignore lint/performance/noDelete: the key must be removed entirely — an undefined-valued `children` would still serialize into the generated schema.
       delete props.children;
     }
     if (Array.isArray(def.required)) {
@@ -65,6 +66,7 @@ function stripChildrenAndPrune(schema: Record<string, unknown>) {
     if (!reachable.has(key)) delete definitions[key];
   }
   if (Object.keys(definitions).length === 0) {
+    // biome-ignore lint/performance/noDelete: removing the empty `definitions` key keeps it out of the emitted schema; an undefined value would serialize.
     delete (schema as Record<string, unknown>).definitions;
   }
 }

@@ -1,12 +1,12 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import {
+  type DerivedProgress,
+  type ProgressFile,
   deriveProgress,
   readGlobalJournal,
   readPhaseJournal,
   readProgress,
-  type DerivedProgress,
-  type ProgressFile,
 } from '@synergy/state';
 import { sendJson } from './http.js';
 

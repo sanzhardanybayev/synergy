@@ -31,7 +31,7 @@ cli
       printStatus(previewStatus(flags.root, Number(flags.port)));
     } else {
       process.stderr.write(
-        red('Error:') + ` unknown action "${action}" — use start | stop | status\n`,
+        `${red('Error:')} unknown action "${action}" — use start | stop | status\n`,
       );
       process.exit(2);
     }
@@ -70,17 +70,17 @@ cli
       flags: { root?: string; note?: string },
     ) => {
       if (action !== 'set') {
-        process.stderr.write(red('Error:') + ` unknown phase action "${action}" — use set\n`);
+        process.stderr.write(`${red('Error:')} unknown phase action "${action}" — use set\n`);
         process.exit(2);
       }
       if (!status) {
-        process.stderr.write(red('Error:') + ' phase set requires a <status> argument\n');
+        process.stderr.write(`${red('Error:')} phase set requires a <status> argument\n`);
         process.exit(2);
       }
       try {
         phaseSet({ root: flags.root, session, phaseId, status: status as never, note: flags.note });
       } catch (err) {
-        process.stderr.write(red('Error:') + ` ${(err as Error).message}\n`);
+        process.stderr.write(`${red('Error:')} ${(err as Error).message}\n`);
         process.exit(1);
       }
     },
@@ -96,7 +96,7 @@ cli
       try {
         logFinding({ root: flags.root, session, text, phase: flags.phase, global: flags.global });
       } catch (err) {
-        process.stderr.write(red('Error:') + ` ${(err as Error).message}\n`);
+        process.stderr.write(`${red('Error:')} ${(err as Error).message}\n`);
         process.exit(1);
       }
     },
@@ -111,7 +111,7 @@ cli
     try {
       resumeSet({ root: flags.root, session, next: flags.next, note: flags.note });
     } catch (err) {
-      process.stderr.write(red('Error:') + ` ${(err as Error).message}\n`);
+      process.stderr.write(`${red('Error:')} ${(err as Error).message}\n`);
       process.exit(1);
     }
   });
@@ -123,7 +123,7 @@ cli
     try {
       process.stdout.write(`${printProgress({ root: flags.root, session })}\n`);
     } catch (err) {
-      process.stderr.write(red('Error:') + ` ${(err as Error).message}\n`);
+      process.stderr.write(`${red('Error:')} ${(err as Error).message}\n`);
       process.exit(1);
     }
   });

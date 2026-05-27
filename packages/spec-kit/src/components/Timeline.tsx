@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
 import clsx from 'clsx';
+import type { ReactNode } from 'react';
 import type { StatusValue } from '../types.js';
 
 export interface TimelineMilestone {
@@ -33,9 +33,7 @@ export function Timeline({ milestones, caption, children }: TimelineProps) {
                 <strong className="sk-timeline__label">{m.label}</strong>
                 {m.when ? <span className="sk-timeline__when">{m.when}</span> : null}
               </div>
-              {m.description ? (
-                <p className="sk-timeline__description">{m.description}</p>
-              ) : null}
+              {m.description ? <p className="sk-timeline__description">{m.description}</p> : null}
             </div>
           </li>
         ))}

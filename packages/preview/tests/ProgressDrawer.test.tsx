@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { ProgressDto } from '../src/api.js';
 import { ProgressDrawer } from '../src/ProgressDrawer.js';
+import type { ProgressDto } from '../src/api.js';
 
 const data: ProgressDto = {
   progress: {
