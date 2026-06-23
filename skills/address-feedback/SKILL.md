@@ -56,35 +56,50 @@ d. If both checks fail, mark the comment as **STALE** in the final summary and s
    do not guess.
 e. Apply the edit using the **Edit tool** (never write the full file). Follow the
    `synergy:spec-authoring` rules for the specific change (prose edit, status flip, etc.).
-f. PATCH the comment to resolved:
-   ```bash
-   curl -sS -X PATCH http://localhost:4321/api/feedback/<id> \
-     -H 'content-type: application/json' \
-     -d '{"status":"resolved","resolution":"<one-line description of change>"}'
-   ```
-   The `resolution` must describe what was actually changed (not just "done").
+   Record the decision (resolved or rejected) in-memory; you will flush all decisions in
+   step 4 as a single batch call.
 
 **Rejecting:**
 
 a. Decide to reject when the request is out of scope for the current spec, contradicts a
    hard design decision, or is not actionable.
-b. PATCH the comment to rejected:
-   ```bash
-   curl -sS -X PATCH http://localhost:4321/api/feedback/<id> \
-     -H 'content-type: application/json' \
-     -d '{"status":"rejected","rejection_reason":"<reason>"}'
-   ```
+b. Record the rejection decision in-memory (reason required). It will be flushed in step 4.
    The `rejection_reason` must be explicit — never silently ignore a comment.
 
 **4. After the loop**
 
-- Run `synergy validate <session>` to catch any cross-ref breakage introduced by edits:
-  ```bash
-  node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session>
-  ```
-- Print a concise summary:
-  > Addressed N, rejected M, skipped K (stale anchor). Validate: clean / failing.
-  If validate is failing, list the errors and fix them before declaring done.
+After all edits are applied, flush every decision in **one** batch call (prefer the daemon;
+fall back to per-comment on-disk frontmatter edits when the server is down):
+
+```bash
+curl -sS -X POST http://localhost:4321/api/feedback/resolve-batch \
+  -H 'content-type: application/json' \
+  -d '{"items":[
+        {"id":"<id1>","status":"resolved","resolution":"<what changed>"},
+        {"id":"<id2>","status":"rejected","rejection_reason":"<why>"}
+      ]}'
+```
+
+Every comment must end as `resolved` or `rejected` — never silently skipped. Check the
+returned `results` array: any item with `ok: false` must be retried or its error surfaced.
+
+Then validate to catch any cross-ref breakage introduced by edits (prefer the daemon
+endpoint; fall back to the CLI when the preview is not running):
+
+```bash
+# Fast path (daemon running):
+curl -sS "http://localhost:4321/api/validate?session=<session>"
+
+# Fallback (preview not running):
+node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session>
+```
+
+Parse the JSON `issues` array from the daemon response: any item with `severity: "error"`
+must be fixed before declaring done.
+
+Print a concise summary:
+> Addressed N, rejected M, skipped K (stale anchor). Validate: clean / failing.
+If validate is failing, list the errors and fix them before declaring done.
 
 ---
 
@@ -92,13 +107,13 @@ b. PATCH the comment to rejected:
 
 **Empty queue.** If step 2 finds zero open comments, print "No open feedback. Exiting." and stop.
 
-**Preview server not running.** The PATCH calls will fail with `ECONNREFUSED`. When this
-happens, print:
-> "Preview server is not running. Start it with `synergy preview start`, then retry `/synergy-feedback`."
-As a fallback, you MAY update the comment file's frontmatter directly on disk (they are plain
-markdown files) instead of calling the API. Set `status: resolved` (or `rejected`), add
-`resolved_at` / `rejected_at` (ISO 8601), and `resolution` / `rejection_reason`. This is
-equivalent to the PATCH but bypasses the live server. Note in the summary which method was used.
+**Preview server not running.** The `POST /api/feedback/resolve-batch` call will fail with
+`ECONNREFUSED`. When this happens, update each comment file's frontmatter directly on disk
+(they are plain markdown files). Set `status: resolved` (or `rejected`), add `resolved_at` /
+`rejected_at` (ISO 8601), and `resolution` / `rejection_reason`. This is equivalent to the
+batch call but bypasses the live server. Note in the summary which method was used. Also use
+`node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session>` instead of the
+daemon endpoint for the final validation step.
 
 **Line/col drift.** Always try the exact span first; fall back to the `before+selected+after`
 context string. If neither locates a unique, unambiguous match, mark as STALE and skip — do

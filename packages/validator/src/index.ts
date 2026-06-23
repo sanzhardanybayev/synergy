@@ -1,5 +1,6 @@
 export { validate } from './validate.js';
 export { parseSpec } from './parse.js';
+export { parseSpecCached, clearParseCache } from './cache.js';
 export type {
   SessionInventory,
   ValidateOptions,

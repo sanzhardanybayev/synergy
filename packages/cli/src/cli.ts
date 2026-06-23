@@ -1,6 +1,8 @@
 import { resolve } from 'node:path';
+import type { ValidationReport } from '@synergy/validator';
 import cac from 'cac';
 import { bold, dim, green, red, yellow } from 'kleur/colors';
+import { tryDaemon } from './daemon.js';
 import { logFinding, phaseSet, printProgress, resumeSet } from './execstate.js';
 import { initProject } from './init.js';
 import { previewStart, previewStatus, previewStop, printStatus } from './preview.js';
@@ -41,10 +43,23 @@ cli
   .option('--root <dir>', 'Project root (default: cwd)')
   .action(async (session: string | undefined, flags: { root?: string }) => {
     const projectRoot = resolve(flags.root ?? process.cwd());
-    // Lazy import: only the `validate` command needs the MDX parser + Ajv schema
-    // stack. Loading it here keeps init/preview/phase/log/resume/status cold-starts cheap.
-    const { validate } = await import('@synergy/validator');
-    const report = validate({ projectRoot, session });
+    // Prefer the warm preview daemon (incremental, cached) when it's running;
+    // otherwise lazy-load the validator and run it in-process.
+    const query = session ? `?session=${encodeURIComponent(session)}` : '';
+    let report: ValidationReport | null = null;
+    try {
+      const fromDaemon = await tryDaemon(flags.root, 'GET', `/api/validate${query}`);
+      // Only trust a well-formed report; anything else falls back in-process.
+      if (fromDaemon && Array.isArray((fromDaemon as ValidationReport).issues)) {
+        report = fromDaemon as ValidationReport;
+      }
+    } catch {
+      // Daemon is up but errored — fall back to the in-process validator below.
+    }
+    if (!report) {
+      const { validate } = await import('@synergy/validator');
+      report = validate({ projectRoot, session });
+    }
     const errors = report.issues.filter((i) => i.severity === 'error');
     const warnings = report.issues.filter((i) => i.severity === 'warning');
 
@@ -64,7 +79,7 @@ cli
   .option('--root <dir>', 'Project root (default: cwd)')
   .option('--note <text>', 'Boundary note appended to the phase journal')
   .action(
-    (
+    async (
       action: string,
       session: string,
       phaseId: string,
@@ -80,7 +95,25 @@ cli
         process.exit(2);
       }
       try {
-        phaseSet({ root: flags.root, session, phaseId, status: status as never, note: flags.note });
+        const viaDaemon = await tryDaemon(flags.root, 'POST', '/api/phase', {
+          session,
+          phaseId,
+          status,
+          note: flags.note,
+        });
+        if (viaDaemon) {
+          process.stdout.write(
+            `${green('✓')} ${session} ${dim('›')} phase ${bold(phaseId)} → ${status}\n`,
+          );
+        } else {
+          phaseSet({
+            root: flags.root,
+            session,
+            phaseId,
+            status: status as never,
+            note: flags.note,
+          });
+        }
       } catch (err) {
         process.stderr.write(`${red('Error:')} ${(err as Error).message}\n`);
         process.exit(1);
@@ -94,9 +127,25 @@ cli
   .option('--phase <id>', 'Phase slug to attach the finding to')
   .option('--global', 'Record a cross-cutting finding in journal.md')
   .action(
-    (session: string, text: string, flags: { root?: string; phase?: string; global?: boolean }) => {
+    async (
+      session: string,
+      text: string,
+      flags: { root?: string; phase?: string; global?: boolean },
+    ) => {
       try {
-        logFinding({ root: flags.root, session, text, phase: flags.phase, global: flags.global });
+        const viaDaemon = await tryDaemon(flags.root, 'POST', '/api/log', {
+          session,
+          text,
+          phase: flags.phase,
+          global: flags.global,
+        });
+        if (viaDaemon) {
+          process.stdout.write(
+            `${green('✓')} logged finding to ${dim(flags.global ? 'global' : `phase ${flags.phase}`)}\n`,
+          );
+        } else {
+          logFinding({ root: flags.root, session, text, phase: flags.phase, global: flags.global });
+        }
       } catch (err) {
         process.stderr.write(`${red('Error:')} ${(err as Error).message}\n`);
         process.exit(1);
@@ -109,9 +158,18 @@ cli
   .option('--root <dir>', 'Project root (default: cwd)')
   .option('--next <phaseId>', 'Phase slug to resume from')
   .option('--note <text>', 'Free-text start-here note')
-  .action((session: string, flags: { root?: string; next?: string; note?: string }) => {
+  .action(async (session: string, flags: { root?: string; next?: string; note?: string }) => {
     try {
-      resumeSet({ root: flags.root, session, next: flags.next, note: flags.note });
+      const viaDaemon = await tryDaemon(flags.root, 'POST', '/api/resume', {
+        session,
+        next: flags.next,
+        note: flags.note,
+      });
+      if (viaDaemon) {
+        process.stdout.write(`${green('✓')} resume → ${bold(flags.next ?? '(unset)')}\n`);
+      } else {
+        resumeSet({ root: flags.root, session, next: flags.next, note: flags.note });
+      }
     } catch (err) {
       process.stderr.write(`${red('Error:')} ${(err as Error).message}\n`);
       process.exit(1);

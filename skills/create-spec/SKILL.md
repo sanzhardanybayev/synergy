@@ -70,14 +70,43 @@ CrossRef placeholders like `<first-phase-slug>`, `<prev-phase-slug>` are hints t
 ## Scaffolding procedure
 
 1. **Confirm intent.** Restate the user's ask in one sentence. Decide tiny / single-phase / multi-phase per the scope table. Ask one clarifying question only if the shape is ambiguous.
-2. **Init if needed.** If `.synergy/sessions/` does not exist, run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" init` from the project root.
+2. **Init if needed.** If `.synergy/` does not exist in the project root, run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" init` once. If `.synergy/` already exists, skip this — the scaffold call in step 4 creates the session directory automatically.
 3. **Pick the session slug** (`YYYY-MM-DD-<slug>`, max 40 chars in the slug part, `-<6-char-hash>` suffix on collision).
-4. **Create directories** — `mkdir -p .synergy/sessions/<name>/{_components,assets}` plus `phases/<NN>-<slug>/` for each phase you decided on.
-5. **Copy templates** into the session per the scope table. Read each template, substitute placeholders, write to the destination. Replace `<…-slug>` hint placeholders with the real slugs.
-6. **Start the preview** by running `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview start`. It is idempotent — safe to call when already running.
-7. **Print the URL** for the user: `http://localhost:4321/s/<session-name>/overview`. This is the contract. Browser auto-open is best-effort and OS-dependent — try it but don't fail the flow on it.
-8. **Fill the templates.** Open the written files and replace the placeholder body text (`_..._` blocks, example phases, sample components) with content derived from the conversation.
-9. **Validate.** Run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session-name>`. Fix every error before declaring done.
+4. **Scaffold the session in one call.** Read each template from `$CLAUDE_PLUGIN_ROOT/skills/create-spec/templates/` with the `Read` tool, substitute all placeholders in-memory, then write the entire session with a single daemon call (prefer the fast path; fall back to per-file writes when the preview is not running):
+
+   ```bash
+   # Fast path (daemon running on port 4321):
+   curl -sS -X POST http://localhost:4321/api/scaffold \
+     -H 'content-type: application/json' \
+     -d '{"session":"<YYYY-MM-DD-slug>",
+          "dirs":["_components","assets","phases/01-<slug>"],
+          "files":[
+            {"path":"orchestrator.md","content":"<filled>"},
+            {"path":"00-overview.mdx","content":"<filled>"},
+            {"path":"phases/01-<slug>/spec.mdx","content":"<filled>"}
+          ]}'
+
+   # Fallback (preview not yet running — use init + per-file writes as before):
+   node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" init   # only if .synergy/ absent
+   # then Write each file individually
+   ```
+
+   Template **reading** is always local (the `Read` tool against `$CLAUDE_PLUGIN_ROOT/skills/create-spec/templates/`). Replace `<…-slug>` hint placeholders with the real slugs before sending.
+
+5. **Start the preview** by running `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview start`. It is idempotent — safe to call when already running.
+6. **Print the URL** for the user: `http://localhost:4321/s/<session-name>/overview`. This is the contract. Browser auto-open is best-effort and OS-dependent — try it but don't fail the flow on it.
+7. **Fill the templates.** Open the written files and replace the placeholder body text (`_..._` blocks, example phases, sample components) with content derived from the conversation.
+8. **Validate.** Prefer the daemon endpoint; fall back to the CLI when the preview is not running:
+
+   ```bash
+   # Fast path (daemon running):
+   curl -sS "http://localhost:4321/api/validate?session=<session-name>"
+
+   # Fallback:
+   node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session-name>
+   ```
+
+   Parse the JSON `issues` array from the daemon response: any item with `severity: "error"` must be fixed. Fix every error before declaring done.
 
 ## Component cheat sheet
 
@@ -110,6 +139,6 @@ Done when **all** of these are true:
 
 - The session directory exists under `.synergy/sessions/<YYYY-MM-DD-slug>/`.
 - All `{{PLACEHOLDER}}` substitutions are complete and all `<…-slug>` hints are replaced with real slugs.
-- `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session-name>` returns zero errors.
+- `curl -sS "http://localhost:4321/api/validate?session=<session-name>"` (or the CLI fallback) returns zero errors.
 - `orchestrator.md` describes the actual execution strategy (dependency graph, parallel chunks, agent strategy, verification gates) — not template boilerplate.
 - The user confirms the session reflects their intent.

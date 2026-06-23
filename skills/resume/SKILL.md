@@ -14,7 +14,17 @@ CLI base: `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js"`.
 **1. Resolve the session + directives** — same as `synergy:execute` step 1 (`$ARGUMENTS`; fall back to `.synergy/active-session`).
 
 **2. Load the hand-off (state first)**
-- `synergy status <session>` — read the rollup and the **resume pointer** (`next` + note). This is your starting instruction.
+- Read the rollup and the **resume pointer** (`next` + note) — this is your starting instruction.
+  Prefer the daemon endpoint; fall back when the preview is not running:
+  ```bash
+  # Fast path (daemon running):
+  curl -sS "http://localhost:4321/api/progress?session=<session>"
+  # The response contains progress.resume.nextPhase and progress.resume.note.
+
+  # Fallback (preview not running):
+  # Read .synergy/sessions/<session>/.state/progress.json directly, or run:
+  node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" status <session>
+  ```
 - Read `.synergy/sessions/<session>/.state/phases/<nextPhase>.md` and any prior phases' boundary notes.
 - Read `.synergy/sessions/<session>/.state/journal.md` (cross-cutting findings).
 

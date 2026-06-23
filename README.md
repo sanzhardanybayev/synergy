@@ -103,6 +103,23 @@ For terminal users — available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist
 | `synergy resume <session>` | `--root`, `--next <id>`, `--note` | Write the hand-off pointer a fresh agent reads first |
 | `synergy status <session>` | `--root` | Print the execution-state rollup (phases done / total) |
 
+### Daemon HTTP API (performance path)
+
+When the preview server is running on port 4321, skills and agents use these HTTP endpoints
+instead of spawning a fresh `node cli.js` process (~55 ms each). They hit the warm, cached
+server (~5 ms) and write the same git-committed `.state/` files as the CLI. The CLI remains
+the offline fallback when the preview is not running.
+
+| Method + path | Replaces | Body / query |
+|---|---|---|
+| `POST /api/phase` | `synergy phase set` | `{session, phaseId, status, note?}` |
+| `POST /api/log` | `synergy log` | `{session, text, phase?, global?}` |
+| `POST /api/resume` | `synergy resume` | `{session, next?, note?}` |
+| `GET /api/validate?session=` | `synergy validate` | — (returns ValidationReport JSON) |
+| `GET /api/progress?session=` | `synergy status` | — |
+| `POST /api/scaffold` | per-file mkdir/write | `{session, dirs?, files:[{path,content}]}` |
+| `POST /api/feedback/resolve-batch` | per-comment PATCH loop | `{items:[{id,status,resolution?,rejection_reason?}]}` |
+
 ### Spec-kit components
 
 Imported from `@synergy/spec-kit`. Props are schema-validated; cross-references are link-checked.

@@ -2,7 +2,8 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { type ComponentName, componentNames, schemas } from '@synergy/spec-kit';
 import Ajv, { type ValidateFunction } from 'ajv';
-import { type ParsedSpec, parseSpec } from './parse.js';
+import { parseSpecCached } from './cache.js';
+import type { ParsedSpec } from './parse.js';
 import { listPhases, resolvePhaseCrossRef, validatePhaseStructure } from './phase.js';
 import { validateStateForSession } from './state.js';
 import type {
@@ -159,7 +160,7 @@ interface ParseAttempt {
 
 function tryParse(file: string): ParseAttempt {
   try {
-    return { parsed: parseSpec(file) };
+    return { parsed: parseSpecCached(file) };
   } catch (err) {
     const e = err as { line?: number; column?: number; reason?: string; message?: string };
     return {
