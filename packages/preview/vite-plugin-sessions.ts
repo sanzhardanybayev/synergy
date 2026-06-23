@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
 
 export interface PhaseMeta {
@@ -50,6 +50,9 @@ const MODULE_ID = 'virtual:synergy/sessions';
 const RESOLVED_ID = `\0${MODULE_ID}`;
 
 const PHASE_FOLDER_RE = /^(\d{1,3})-([a-z0-9-]+)$/i;
+
+/** Coalesce filesystem-event bursts (e.g. multi-file scaffolds) into one reload. */
+const RELOAD_DEBOUNCE_MS = 50;
 
 function safeStat(path: string) {
   try {
@@ -250,14 +253,28 @@ export function synergySessionsPlugin(options: PluginOptions): Plugin {
     configureServer(devServer) {
       server = devServer;
       devServer.watcher.add(sessionsDir);
+      let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+      const scheduleReload = () => {
+        if (reloadTimer) return;
+        reloadTimer = setTimeout(() => {
+          reloadTimer = null;
+          server!.ws.send({ type: 'full-reload' });
+        }, RELOAD_DEBOUNCE_MS);
+      };
       const reload = (event: string, path: string) => {
         if (!path.startsWith(sessionsDir)) return;
         const rel = relative(sessionsDir, path);
         if (rel === '' || rel.startsWith('..')) return;
+        // Ignore dotfiles and atomic-write temp files (e.g. `.123.tmp` from edit.ts):
+        // they fire add+unlink bursts that would each trigger a redundant full reload.
+        if (basename(path).startsWith('.')) return;
         const mod = server!.moduleGraph.getModuleById(RESOLVED_ID);
         if (mod) server!.moduleGraph.invalidateModule(mod);
+        // Only structural changes (new/removed spec or phase) need a full reload to
+        // regenerate the virtual session index. Content edits to existing `.mdx` files
+        // surface a `change` event handled by Vite's default MDX HMR.
         if (event === 'add' || event === 'unlink' || event === 'addDir' || event === 'unlinkDir') {
-          server!.ws.send({ type: 'full-reload' });
+          scheduleReload();
         }
       };
       devServer.watcher.on('add', (p) => reload('add', p));
