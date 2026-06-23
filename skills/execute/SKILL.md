@@ -26,13 +26,45 @@ CLI base: `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js"`.
 
 **4. Implement the phase**
 - Fan out per the `<AgentAllocation>` entries for this phase: spawn the specified agent `type`, `count`, `model`, and `effort`. Run-time directives override these for THIS run only — never rewrite `<AgentAllocation>`.
-- As you discover anything surprising or reusable, record it: `synergy log <session> "<finding>" --phase <phaseId>` (or `--global` for cross-cutting findings).
+- As you discover anything surprising or reusable, record it (prefer the daemon; fall back to the CLI):
+  ```bash
+  # Fast path:
+  curl -sS -X POST http://localhost:4321/api/log \
+    -H 'content-type: application/json' \
+    -d '{"session":"<session>","text":"<finding>","phase":"<phaseId>"}'
+  # For cross-cutting findings use "global":true instead of "phase":"..."
+
+  # Fallback:
+  node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" log <session> "<finding>" --phase <phaseId>
+  ```
 - Run the phase's verification gate (from orchestrator.md).
 
 **5. [MANDATORY GATE] Close out the phase before moving on**
 You may NOT start the next phase until all three are done:
-- `synergy phase set <session> <phaseId> done --note "<terse boundary note: what changed, deviations>"`
-- `synergy resume <session> --next <nextPhaseId> --note "<where the next agent should start>"`
+
+- Write the phase status (prefer the daemon; fall back to the CLI on `ECONNREFUSED`):
+  ```bash
+  # Fast path (daemon running):
+  curl -sS -X POST http://localhost:4321/api/phase \
+    -H 'content-type: application/json' \
+    -d '{"session":"<session>","phaseId":"<phaseId>","status":"done","note":"<terse boundary note: what changed, deviations>"}'
+
+  # Fallback (preview not running):
+  node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" phase set <session> <phaseId> done --note "<boundary note>"
+  ```
+  The gate is **not satisfied** until the phase status is confirmed written.
+
+- Write the resume pointer:
+  ```bash
+  # Fast path:
+  curl -sS -X POST http://localhost:4321/api/resume \
+    -H 'content-type: application/json' \
+    -d '{"session":"<session>","next":"<nextPhaseId>","note":"<where the next agent should start>"}'
+
+  # Fallback:
+  node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" resume <session> --next <nextPhaseId> --note "<note>"
+  ```
+
 - Stop for the human checkpoint defined at this phase boundary.
 
 **6. Repeat** from step 3 until all phases are done (or the scope directive's stopping point is reached). Then print the final `synergy status <session>`.

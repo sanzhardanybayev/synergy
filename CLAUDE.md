@@ -79,6 +79,25 @@ Skills + slash commands:
 
 `<AgentAllocation>` entries carry optional fan-out metadata (`model`, `effort`, `count`) the execute skill uses as defaults when spawning sub-agents or teams.
 
+## Daemon HTTP API (performance path)
+
+When the preview server is running (port 4321), agents and skills SHOULD use these
+endpoints instead of spawning `node cli.js` (~55 ms/call) — they reuse the warm process
+and a mtime-keyed parse cache:
+
+| Method + path | Replaces | Body / query |
+|---|---|---|
+| `POST /api/phase` | `synergy phase set` | `{session, phaseId, status, note?}` |
+| `POST /api/log` | `synergy log` | `{session, text, phase?, global?}` |
+| `POST /api/resume` | `synergy resume` | `{session, next?, note?}` |
+| `GET /api/validate?session=` | `synergy validate` | — (returns ValidationReport JSON) |
+| `GET /api/progress?session=` | `synergy status` | — |
+| `POST /api/scaffold` | per-file mkdir/write in create-spec | `{session, dirs?, files:[{path,content}]}` |
+| `POST /api/feedback/resolve-batch` | per-comment PATCH loop | `{items:[{id,status,resolution?,rejection_reason?}]}` |
+
+All endpoints write the SAME git-committed `.state/` and `feedback/` files as the CLI.
+When the preview is down, fall back to the `node cli.js …` command.
+
 ## Commands
 
 ```

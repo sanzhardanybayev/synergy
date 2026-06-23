@@ -249,6 +249,76 @@ export function handleFeedbackGet(
 }
 
 /**
+ * Pure mutator: rewrite a comment file's frontmatter to resolved or rejected.
+ *
+ * Scans all session subdirectories of `feedbackDir` to locate `<id>.md`.
+ * Throws if the file is not found.
+ */
+export function patchComment(
+  feedbackDir: string,
+  id: string,
+  patch: { status: 'resolved' | 'rejected'; resolution?: string; rejection_reason?: string },
+): void {
+  // Guard the id at the core so both the single PATCH and the batch path are safe:
+  // it is interpolated into a filename and joined onto disk paths.
+  if (!id || id.includes('/') || id.includes('\\') || id.includes('..') || id.includes('\0')) {
+    throw new Error(`invalid comment id: ${id}`);
+  }
+  const filename = `${id}.md`;
+  let absPath: string | null = null;
+
+  if (existsSync(feedbackDir)) {
+    const sessions = readdirSync(feedbackDir);
+    for (const session of sessions) {
+      const candidate = join(feedbackDir, session, filename);
+      if (existsSync(candidate)) {
+        absPath = candidate;
+        break;
+      }
+    }
+  }
+
+  if (!absPath) {
+    throw new Error(`comment not found: ${id}`);
+  }
+
+  const raw = readFileSync(absPath, 'utf8');
+  const parsed = matter(raw);
+  const data = parsed.data as Record<string, unknown>;
+
+  const now = new Date().toISOString();
+
+  if (patch.status === 'resolved') {
+    data.status = 'resolved';
+    data.resolved_at = now;
+    if (patch.resolution !== undefined) {
+      data.resolution = patch.resolution;
+    }
+    // Remove rejection fields if any. `delete` (not `= undefined`) so the keys
+    // are absent from the serialized YAML frontmatter, not emitted as null.
+    // biome-ignore lint/performance/noDelete: key must be removed from YAML output, not nulled
+    delete data.rejected_at;
+    // biome-ignore lint/performance/noDelete: key must be removed from YAML output, not nulled
+    delete data.rejection_reason;
+  } else {
+    data.status = 'rejected';
+    data.rejected_at = now;
+    if (patch.rejection_reason !== undefined) {
+      data.rejection_reason = patch.rejection_reason;
+    }
+    // Remove resolution fields if any (see note above on `delete`).
+    // biome-ignore lint/performance/noDelete: key must be removed from YAML output, not nulled
+    delete data.resolved_at;
+    // biome-ignore lint/performance/noDelete: key must be removed from YAML output, not nulled
+    delete data.resolution;
+  }
+
+  // Reconstruct: write frontmatter back with gray-matter stringify, preserve body.
+  const newContent = matter.stringify(parsed.content, data);
+  atomicWrite(absPath, newContent);
+}
+
+/**
  * PATCH /api/feedback/:id — resolve or reject a comment.
  *
  * Rewrites only the frontmatter fields; the markdown body is preserved.
@@ -281,64 +351,15 @@ export async function handleFeedbackPatch(
     return;
   }
 
-  // Locate the file by scanning all session directories.
-  const filename = `${id}.md`;
-  let absPath: string | null = null;
-
-  if (existsSync(feedbackDir)) {
-    const sessions = readdirSync(feedbackDir);
-    for (const session of sessions) {
-      const candidate = join(feedbackDir, session, filename);
-      if (existsSync(candidate)) {
-        absPath = candidate;
-        break;
-      }
-    }
-  }
-
-  if (!absPath) {
-    sendJson(res, 404, { error: 'not_found' });
-    return;
-  }
-
-  const raw = readFileSync(absPath, 'utf8');
-  const parsed = matter(raw);
-  const data = parsed.data as Record<string, unknown>;
-
-  const now = new Date().toISOString();
-
-  if (body.status === 'resolved') {
-    data.status = 'resolved';
-    data.resolved_at = now;
-    if (body.resolution !== undefined) {
-      data.resolution = body.resolution;
-    }
-    // Remove rejection fields if any. `delete` (not `= undefined`) so the keys
-    // are absent from the serialized YAML frontmatter, not emitted as null.
-    // biome-ignore lint/performance/noDelete: key must be removed from YAML output, not nulled
-    delete data.rejected_at;
-    // biome-ignore lint/performance/noDelete: key must be removed from YAML output, not nulled
-    delete data.rejection_reason;
-  } else {
-    data.status = 'rejected';
-    data.rejected_at = now;
-    if (body.rejection_reason !== undefined) {
-      data.rejection_reason = body.rejection_reason;
-    }
-    // Remove resolution fields if any (see note above on `delete`).
-    // biome-ignore lint/performance/noDelete: key must be removed from YAML output, not nulled
-    delete data.resolved_at;
-    // biome-ignore lint/performance/noDelete: key must be removed from YAML output, not nulled
-    delete data.resolution;
-  }
-
-  // Reconstruct: write frontmatter back with gray-matter stringify, preserve body.
-  const newContent = matter.stringify(parsed.content, data);
-
   try {
-    atomicWrite(absPath, newContent);
+    patchComment(feedbackDir, id, body);
   } catch (err) {
-    sendJson(res, 500, { error: 'write_failed', detail: String(err) });
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('not found')) {
+      sendJson(res, 404, { error: 'not_found' });
+    } else {
+      sendJson(res, 500, { error: 'write_failed', detail: msg });
+    }
     return;
   }
 
