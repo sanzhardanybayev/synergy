@@ -12,11 +12,22 @@ import type {
   ValidationReport,
 } from './types.js';
 
-const ajv = new Ajv({ allErrors: true, strict: false });
+let validatorsCache: Map<ComponentName, ValidateFunction> | null = null;
 
-const validators: Map<ComponentName, ValidateFunction> = new Map();
-for (const name of componentNames) {
-  validators.set(name, ajv.compile(schemas[name] as object));
+/**
+ * Compile component schemas on first use, not at module load. Importing this module
+ * (e.g. for {@link parseSpec}) no longer pays the Ajv compilation cost, so CLI commands
+ * that don't validate stay cheap.
+ */
+function getValidators(): Map<ComponentName, ValidateFunction> {
+  if (validatorsCache) return validatorsCache;
+  const ajv = new Ajv({ allErrors: true, strict: false });
+  const map: Map<ComponentName, ValidateFunction> = new Map();
+  for (const name of componentNames) {
+    map.set(name, ajv.compile(schemas[name] as object));
+  }
+  validatorsCache = map;
+  return map;
 }
 
 const REQUIRED_OVERVIEW_HEADINGS = ['summary', 'goals'] as const;
@@ -188,9 +199,8 @@ function parsePhases(sessionDir: string): PhaseParseResult {
   return { parsed, issues };
 }
 
-function validateSession(sessionDir: string): ValidationIssue[] {
+function validateSession(sessionDir: string, files = listMdxFiles(sessionDir)): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const files = listMdxFiles(sessionDir);
   if (files.length === 0) {
     issues.push({
       file: sessionDir,
@@ -246,7 +256,7 @@ function validateSession(sessionDir: string): ValidationIssue[] {
             'Phase has no `id` — add a stable slug (e.g. id="storage") so execution state survives renumbering.',
         });
       }
-      const validate = validators.get(comp.name)!;
+      const validate = getValidators().get(comp.name)!;
       const ok = validate(comp.attributes);
       if (!ok) {
         for (const err of validate.errors ?? []) {
@@ -323,8 +333,9 @@ export function validate(options: ValidateOptions): ValidationReport {
       continue;
     }
     sessionsChecked++;
-    filesChecked += listMdxFiles(sessionDir).length;
-    allIssues.push(...validateSession(sessionDir));
+    const files = listMdxFiles(sessionDir);
+    filesChecked += files.length;
+    allIssues.push(...validateSession(sessionDir, files));
   }
   return { issues: allIssues, filesChecked, sessionsChecked };
 }

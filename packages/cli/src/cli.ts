@@ -1,5 +1,4 @@
 import { resolve } from 'node:path';
-import { validate } from '@synergy/validator';
 import cac from 'cac';
 import { bold, dim, green, red, yellow } from 'kleur/colors';
 import { logFinding, phaseSet, printProgress, resumeSet } from './execstate.js';
@@ -40,8 +39,11 @@ cli
 cli
   .command('validate [session]', 'Validate one or all sessions')
   .option('--root <dir>', 'Project root (default: cwd)')
-  .action((session: string | undefined, flags: { root?: string }) => {
+  .action(async (session: string | undefined, flags: { root?: string }) => {
     const projectRoot = resolve(flags.root ?? process.cwd());
+    // Lazy import: only the `validate` command needs the MDX parser + Ajv schema
+    // stack. Loading it here keeps init/preview/phase/log/resume/status cold-starts cheap.
+    const { validate } = await import('@synergy/validator');
     const report = validate({ projectRoot, session });
     const errors = report.issues.filter((i) => i.severity === 'error');
     const warnings = report.issues.filter((i) => i.severity === 'warning');
