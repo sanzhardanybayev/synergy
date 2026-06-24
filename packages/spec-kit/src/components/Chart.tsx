@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChartKind } from '../types.js';
 
 export interface ChartProps {
@@ -33,6 +33,41 @@ function loadMermaid(): Promise<MermaidApi> {
     return api;
   });
   return mermaidPromise;
+}
+
+/**
+ * Module-level cache: mermaid source → promise of its rendered SVG string.
+ * It survives component remounts and route navigation, and dedupes in-flight
+ * renders of identical sources — so revisiting a spec (or a duplicated chart)
+ * never re-runs the expensive `mermaid.render()`.
+ */
+const renderCache = new Map<string, Promise<string>>();
+
+/** Clear the chart render cache. Exposed for test isolation. */
+export function __clearChartCache(): void {
+  renderCache.clear();
+}
+
+/** djb2 hash → a stable, deterministic render id for a given source. */
+function hashSource(src: string): string {
+  let h = 5381;
+  for (let i = 0; i < src.length; i++) h = (h * 33) ^ src.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+
+/** Render `source` to an SVG string, memoized (and in-flight-deduped) by source. */
+function renderToSvg(source: string): Promise<string> {
+  let cached = renderCache.get(source);
+  if (!cached) {
+    const renderId = `sk-chart-${hashSource(source)}`;
+    cached = loadMermaid()
+      .then((mermaid) => mermaid.render(renderId, source))
+      .then(({ svg }) => svg);
+    // Evict on failure so a later mount can retry instead of replaying the error.
+    cached.catch(() => renderCache.delete(source));
+    renderCache.set(source, cached);
+  }
+  return cached;
 }
 
 function extractSource(props: ChartProps): string {
@@ -70,19 +105,42 @@ function attachSvg(container: HTMLDivElement, svgString: string) {
 
 export function Chart(props: ChartProps) {
   const { kind, caption } = props;
-  const id = useId().replace(/[^a-zA-Z0-9-]/g, '');
+  const figureRef = useRef<HTMLElement | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [visible, setVisible] = useState(false);
   const source = extractSource(props).trim();
 
+  // Defer rendering until the chart is near the viewport, so a chart-heavy spec
+  // doesn't run every diagram up-front. Falls back to immediate render where
+  // IntersectionObserver is unavailable (tests, SSR).
   useEffect(() => {
+    const el = figureRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!source || !visible) return;
     let cancelled = false;
-    if (!source) return;
-    loadMermaid()
-      .then((mermaid) => mermaid.render(`sk-chart-${id}`, source))
-      .then(({ svg }) => {
+    renderToSvg(source)
+      .then((svg) => {
         if (cancelled || !ref.current) return;
         attachSvg(ref.current, svg);
+        setError(null);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -90,10 +148,10 @@ export function Chart(props: ChartProps) {
     return () => {
       cancelled = true;
     };
-  }, [id, source]);
+  }, [source, visible]);
 
   return (
-    <figure className="sk-chart" data-kind={kind ?? 'flow'}>
+    <figure ref={figureRef} className="sk-chart" data-kind={kind ?? 'flow'}>
       <div ref={ref} className="sk-chart__svg" />
       {error ? (
         <pre className="sk-chart__error">
