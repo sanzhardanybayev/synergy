@@ -31,6 +31,7 @@ const components: ComponentEntry[] = [
   { name: 'Risk', file: 'src/components/Risk.tsx', type: 'RiskProps' },
   { name: 'Mockup', file: 'src/components/Mockup.tsx', type: 'MockupProps' },
   { name: 'Chart', file: 'src/components/Chart.tsx', type: 'ChartProps' },
+  { name: 'AgentTree', file: 'src/components/AgentTree.tsx', type: 'AgentTreeProps' },
 ];
 
 function stripChildrenAndPrune(schema: Record<string, unknown>) {

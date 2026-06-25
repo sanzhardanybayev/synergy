@@ -24,7 +24,11 @@
     },
     "./templates/*": "./templates/*"
   },
-  "files": ["dist", "schemas", "templates"],
+  "files": [
+    "dist",
+    "schemas",
+    "templates"
+  ],
   "scripts": {
     "build": "pnpm run gen:schemas && tsup",
     "gen:schemas": "tsx scripts/generate-schemas.ts",
@@ -35,11 +39,13 @@
     "clsx": "2.1.1"
   },
   "peerDependencies": {
-    "react": ">=18",
-    "mermaid": ">=11"
+    "mermaid": ">=11",
+    "react": ">=18"
   },
   "peerDependenciesMeta": {
-    "mermaid": { "optional": true }
+    "mermaid": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@testing-library/jest-dom": "6.6.3",
@@ -48,6 +54,7 @@
     "@types/node": "22.10.1",
     "@types/react": "18.3.12",
     "@vitejs/plugin-react": "4.3.4",
+    "ajv": "8.17.1",
     "jsdom": "25.0.1",
     "mermaid": "11.4.1",
     "react": "18.3.1",
