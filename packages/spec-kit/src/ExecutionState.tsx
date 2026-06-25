@@ -8,15 +8,31 @@ export interface ExecutionPhaseView {
   latestFinding?: string;
 }
 
-export interface ExecutionStateView {
-  phases: Record<string, ExecutionPhaseView>;
+/** One ordered step in the phase-driven timeline / right rail. */
+export interface ExecutionRosterEntry {
+  number: number;
+  slug: string;
+  title: string;
+  status: StatusValue;
 }
 
-const EMPTY: ExecutionStateView = { phases: {} };
+export interface ExecutionStateView {
+  phases: Record<string, ExecutionPhaseView>;
+  /** Ordered phase roster (from phase folders + live status). */
+  roster?: ExecutionRosterEntry[];
+  /** Derived rollup matching the roster. */
+  derived?: { done: number; total: number; percent: number };
+}
+
+const EMPTY: ExecutionStateView = {
+  phases: {},
+  roster: [],
+  derived: { done: 0, total: 0, percent: 0 },
+};
 
 const ExecutionStateContext = createContext<ExecutionStateView>(EMPTY);
 
-/** Consumed by <Phase> to overlay live status. Defaults to empty (no overlay). */
+/** Consumed by <Phase>/<Timeline> to overlay live status. Defaults to empty (no overlay). */
 export function useExecutionState(): ExecutionStateView {
   return useContext(ExecutionStateContext);
 }

@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { listPhases, validatePhaseStructure } from '../src/phase.js';
 import { makeTempProject, minimalPhaseSpec } from './helpers.js';
 
@@ -159,5 +162,36 @@ describe('validatePhaseStructure', () => {
     const malformed = issues.find((i) => /name|format|match/i.test(i.message));
     expect(malformed).toBeDefined();
     expect(malformed?.severity).toBe('error');
+  });
+});
+
+let sessionDir: string;
+beforeEach(() => {
+  sessionDir = mkdtempSync(join(tmpdir(), 'synergy-phase-'));
+});
+afterEach(() => {
+  rmSync(sessionDir, { recursive: true, force: true });
+});
+
+function phase(nn: string, slug: string, body: string) {
+  const dir = join(sessionDir, 'phases', `${nn}-${slug}`);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'spec.mdx'), body, 'utf8');
+  writeFileSync(join(dir, 'orchestrator.md'), '# orch\n', 'utf8');
+}
+
+describe('validatePhaseStructure — title warning', () => {
+  it('warns when a phase spec.mdx has no frontmatter title', () => {
+    phase('01', 'storage', '---\norder: 1\n---\n# storage\n');
+    const issues = validatePhaseStructure(sessionDir);
+    expect(
+      issues.some((i) => i.severity === 'warning' && /missing a `title`/.test(i.message)),
+    ).toBe(true);
+  });
+
+  it('does not warn when a title is present', () => {
+    phase('01', 'storage', "---\ntitle: 'Storage layer'\norder: 1\n---\n# storage\n");
+    const issues = validatePhaseStructure(sessionDir);
+    expect(issues.some((i) => /missing a `title`/.test(i.message))).toBe(false);
   });
 });

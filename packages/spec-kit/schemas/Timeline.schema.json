@@ -9,16 +9,14 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/TimelineMilestone"
-          }
+          },
+          "description": "Legacy static milestones. Omit for the phase-driven live form."
         },
         "caption": {
           "type": "string",
           "description": "Optional caption above the timeline."
         }
       },
-      "required": [
-        "milestones"
-      ],
       "additionalProperties": false
     },
     "TimelineMilestone": {

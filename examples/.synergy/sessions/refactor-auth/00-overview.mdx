@@ -3,7 +3,7 @@ title: 'Refactor auth middleware'
 type: refactor
 ---
 
-import { Status, SubSpec, CrossRef, OpenQuestion, Risk, Team, Reviewer } from '@synergy/spec-kit';
+import { Status, SubSpec, CrossRef, OpenQuestion, Risk, Team, Reviewer, Timeline } from '@synergy/spec-kit';
 
 # Refactor auth middleware
 
@@ -28,6 +28,10 @@ The current auth middleware stores session tokens in a way that doesn't meet our
 <SubSpec slug="02-implementation" title="Implementation plan" status="proposed" summary="Three phases, sub-agents per phase, blue/green rollout." />
 
 See also: <CrossRef to="01-architecture#token-flow">the new token flow</CrossRef> and <CrossRef to="02-implementation#timeline">the rollout timeline</CrossRef>.
+
+## Timeline
+
+<Timeline />
 
 ## Team
 

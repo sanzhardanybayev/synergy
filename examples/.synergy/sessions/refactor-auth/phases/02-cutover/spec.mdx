@@ -1,0 +1,30 @@
+---
+title: 'Cutover reads + migration'
+order: 2
+---
+
+import { CrossRef } from '@synergy/spec-kit';
+
+# Cutover reads + migration
+
+## Goal
+
+Swap the read path to the compliance store behind a feature flag and migrate legacy
+rows, canarying read traffic while watching latency.
+
+## Tasks
+
+- Add a feature flag to flip reads to the compliance store.
+- Run an idempotent backfill job: stream legacy rows → compliance store.
+- Canary read traffic (1% → 10% → 100%), watching p95 latency.
+- Stop dual-write once reads have been at 100% for 24h.
+
+## Verification
+
+- Zero divergence between stores during the read canary.
+- Backfill converges to zero new rows.
+
+## Dependencies
+
+Depends on <CrossRef to="phases/storage" /> — dual-write must be live before reads
+can flip.

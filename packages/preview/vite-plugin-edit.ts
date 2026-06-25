@@ -22,6 +22,7 @@ import {
   handleFeedbackPost,
 } from './src/server/feedback.js';
 import { readJsonBody, sendJson } from './src/server/http.js';
+import { handleProgressStream } from './src/server/progress-stream.js';
 import { handleProgress } from './src/server/progress.js';
 import { handleReview } from './src/server/review.js';
 import { handleScaffold } from './src/server/scaffold.js';
@@ -124,6 +125,12 @@ export function synergyEditPlugin(options: PluginOptions): Plugin {
           // GET /api/diff
           if (method === 'GET' && pathname === '/api/diff') {
             handleDiff(req, res, sessionsDir, projectRoot);
+            return;
+          }
+
+          // GET /api/progress/stream (SSE)
+          if (method === 'GET' && pathname === '/api/progress/stream') {
+            handleProgressStream(req, res, sessionsDir);
             return;
           }
 
