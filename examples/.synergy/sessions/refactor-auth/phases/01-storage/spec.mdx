@@ -1,0 +1,31 @@
+---
+title: 'Storage interface + dual write'
+order: 1
+---
+
+import { CrossRef } from '@synergy/spec-kit';
+
+# Storage interface + dual write
+
+## Goal
+
+Land the new `TokenStore` interface and a `ComplianceStore` implementation, and
+dual-write every new session to both the legacy and compliance stores. Reads still
+hit the legacy store in this phase.
+
+## Tasks
+
+- Define and freeze the `TokenStore` interface.
+- Implement `ComplianceStore` against the compliance-approved backend.
+- Wire dual-write into `TokenService.put`; the read path is unchanged.
+- Add structured logging at every store operation.
+
+## Verification
+
+- Writes land in both stores for 100% of new sessions.
+- p95 write latency on the compliance store is benchmarked and within budget before
+  any read cutover.
+
+## Dependencies
+
+First phase — no upstream dependencies.

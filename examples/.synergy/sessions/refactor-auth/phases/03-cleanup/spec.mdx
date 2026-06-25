@@ -1,0 +1,30 @@
+---
+title: 'Cleanup + audit'
+order: 3
+---
+
+import { CrossRef } from '@synergy/spec-kit';
+
+# Cleanup + audit
+
+## Goal
+
+Remove the dual-write paths, decommission the legacy store, and assemble the
+compliance audit packet.
+
+## Tasks
+
+- Remove dual-write paths from `TokenService`.
+- Decommission `LegacyStore`.
+- Assemble the compliance audit packet: structured logs + design doc + migration
+  receipts.
+
+## Verification
+
+- Riya signs off on the audit packet.
+- The legacy store is deleted.
+
+## Dependencies
+
+Depends on <CrossRef to="phases/cutover" /> — reads must be fully on the compliance
+store before the legacy store is removed.
