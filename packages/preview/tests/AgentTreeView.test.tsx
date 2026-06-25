@@ -6,6 +6,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentTreeNode } from '@synergy/spec-kit';
+import { AgentTree } from '@synergy/spec-kit';
 import { AgentTreeView } from '../src/AgentTreeView.js';
 import { EditBufferProvider } from '../src/EditBuffer.js';
 import { ToastProvider } from '../src/ToastProvider.js';
@@ -135,5 +136,17 @@ describe('AgentTreeView', () => {
     fireEvent.change(effortSel, { target: { value: 'low' } });
 
     expect(screen.getByRole('button', { name: /save/i })).toBeTruthy();
+  });
+
+  it('renders read-only AgentTree when editable without a file (empty currentFile)', () => {
+    render(
+      <Wrapper>
+        <AgentTree nodes={nodes} />
+      </Wrapper>,
+    );
+
+    // Read-only AgentTree should have no editable controls
+    const effortSelects = screen.queryAllByRole('combobox', { hidden: true });
+    expect(effortSelects).toHaveLength(0);
   });
 });

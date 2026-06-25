@@ -11,6 +11,7 @@
 
 import type React from 'react';
 import type { AgentTreeNode } from '@synergy/spec-kit';
+import { AgentTree } from '@synergy/spec-kit';
 import { AgentTreeView } from './AgentTreeView.js';
 import { EditableBlock } from './EditableBlock.js';
 import { useEditBuffer } from './EditBuffer.js';
@@ -21,7 +22,9 @@ type MdxComponentsMap = Record<string, React.ElementType>;
 
 function AgentTreeBound(props: { nodes: AgentTreeNode[] }) {
   const buffer = useEditBuffer();
-  return <AgentTreeView nodes={props.nodes} file={buffer.currentFile} />;
+  return buffer.currentFile
+    ? <AgentTreeView nodes={props.nodes} file={buffer.currentFile} />
+    : <AgentTree nodes={props.nodes} />;
 }
 
 export const mdxComponents: MdxComponentsMap = {
