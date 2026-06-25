@@ -8,3 +8,5 @@ export type {
   ValidationReport,
 } from './types.js';
 export type { ParsedComponent, ParsedSpec } from './parse.js';
+export { listPhases } from './phase.js';
+export type { PhaseFolder } from './phase.js';

@@ -14,6 +14,7 @@ const data: ProgressDto = {
     ],
   },
   derived: { done: 1, total: 2, percent: 50 },
+  roster: [],
   phaseJournals: { storage: '\n## done — T\ndual-write live\n' },
   globalJournal: '- T: cache TTL 300s\n',
 };
@@ -31,5 +32,30 @@ describe('ProgressDrawer', () => {
     expect(screen.getByText('cutover')).toBeTruthy();
     expect(screen.getByText(/begin canary 1%/)).toBeTruthy();
     expect(screen.getByText(/cache TTL 300s/)).toBeTruthy();
+  });
+});
+
+const rosterData: ProgressDto = {
+  progress: {
+    version: 1,
+    overallStatus: 'in-progress',
+    resume: {},
+    phases: [{ slug: 'storage', status: 'done' }],
+  },
+  derived: { done: 1, total: 2, percent: 50 },
+  roster: [
+    { number: 1, slug: 'storage', title: 'Storage layer', status: 'done' },
+    { number: 2, slug: 'cutover', title: 'Cutover', status: 'proposed' },
+  ],
+  phaseJournals: {},
+  globalJournal: null,
+};
+
+describe('ProgressDrawer roster', () => {
+  it('renders roster titles and the derived rollup', () => {
+    render(<ProgressDrawer open data={rosterData} onClose={() => {}} />);
+    expect(screen.getByText('Storage layer')).toBeTruthy();
+    expect(screen.getByText('Cutover')).toBeTruthy();
+    expect(screen.getByText(/1 \/ 2 phases done \(50%\)/)).toBeTruthy();
   });
 });

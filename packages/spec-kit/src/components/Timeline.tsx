@@ -1,6 +1,8 @@
 import clsx from 'clsx';
 import type { ReactNode } from 'react';
+import { useExecutionState } from '../ExecutionState.js';
 import type { StatusValue } from '../types.js';
+import { Status } from './Status.js';
 
 export interface TimelineMilestone {
   label: string;
@@ -11,13 +13,51 @@ export interface TimelineMilestone {
 }
 
 export interface TimelineProps {
-  milestones: TimelineMilestone[];
+  /** Legacy static milestones. Omit for the phase-driven live form. */
+  milestones?: TimelineMilestone[];
   /** Optional caption above the timeline. */
   caption?: string;
   children?: ReactNode;
 }
 
 export function Timeline({ milestones, caption, children }: TimelineProps) {
+  const { roster = [], derived } = useExecutionState();
+
+  // Phase-driven form: no authored milestones -> render the live roster.
+  if (!milestones) {
+    if (roster.length === 0) return null;
+    const percent = derived?.percent ?? 0;
+    return (
+      <figure className="sk-timeline sk-timeline--phases">
+        {caption ? <figcaption className="sk-timeline__caption">{caption}</figcaption> : null}
+        <div className="sk-timeline__bar" aria-hidden="true">
+          <div
+            className="sk-timeline__fill"
+            data-testid="timeline-bar-fill"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+        <p className="sk-timeline__rollup">
+          {derived?.done ?? 0} / {derived?.total ?? roster.length} phases ({percent}%)
+        </p>
+        <ol className="sk-timeline__steps">
+          {roster.map((step) => (
+            <li
+              key={step.slug}
+              className={clsx('sk-timeline__step', `sk-timeline__step--${step.status}`)}
+            >
+              <span className="sk-timeline__step-num">{step.number}</span>
+              <span className="sk-timeline__step-title">{step.title}</span>
+              <Status value={step.status} />
+            </li>
+          ))}
+        </ol>
+        {children}
+      </figure>
+    );
+  }
+
+  // Legacy static milestone form.
   return (
     <figure className="sk-timeline">
       {caption ? <figcaption className="sk-timeline__caption">{caption}</figcaption> : null}

@@ -1,7 +1,20 @@
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ParsedSpec } from './parse.js';
 import type { ValidationIssue } from './types.js';
+
+/** True when the file's leading frontmatter block declares a non-empty `title:`. */
+function hasFrontmatterTitle(specPath: string): boolean {
+  let raw: string;
+  try {
+    raw = readFileSync(specPath, 'utf8');
+  } catch {
+    return false;
+  }
+  const fm = /^---\n([\s\S]*?)\n---/.exec(raw);
+  if (!fm) return false;
+  return /^title:\s*\S/m.test(fm[1]!);
+}
 
 /** Slug constraints derived from the spec. */
 const MAX_SLUG_LENGTH = 40;
@@ -122,6 +135,14 @@ export function validatePhaseStructure(sessionDir: string): ValidationIssue[] {
         file: phase.dir,
         severity: 'error',
         message: `Phase folder "${phase.folderName}" is missing required file \`spec.mdx\``,
+      });
+    }
+    const specPath = join(phase.dir, 'spec.mdx');
+    if (existsSync(specPath) && !hasFrontmatterTitle(specPath)) {
+      issues.push({
+        file: specPath,
+        severity: 'warning',
+        message: `Phase folder "${phase.folderName}" spec.mdx is missing a \`title\` (needed for the live timeline label)`,
       });
     }
     if (!existsSync(join(phase.dir, 'orchestrator.md'))) {

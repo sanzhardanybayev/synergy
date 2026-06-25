@@ -40,6 +40,12 @@ Codex distribution is **not in v1**. Do not add Codex skill files yet.
   no model/effort/count). `<Phase>` references agents by name; look up effort in the tree.
   The preview lets you edit effort (inheriting) and model (per-node) and **Save** writes
   back into the `<AgentTree>` source. Use `subAgents` (not `children`) for nesting nodes.
+- **Live-bound status:** components that show execution status must read it from
+  live state, never hardcode it. `<Timeline />` (no `milestones`) renders the
+  phase roster and progress bar from execution state — the same source the
+  right-rail progress drawer uses, so the two never diverge. `<Phase id="…">`
+  overlays live status the same way. Only use the legacy `<Timeline milestones={…}>`
+  form for documentation timelines that are not tied to phases.
 
 ## Inline editing and feedback (v2)
 

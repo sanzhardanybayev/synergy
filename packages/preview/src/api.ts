@@ -390,6 +390,7 @@ export interface ProgressDto {
     phases: PhaseStateDto[];
   };
   derived: { done: number; total: number; percent: number };
+  roster: { number: number; slug: string; title: string; status: string }[];
   phaseJournals: Record<string, string>;
   globalJournal: string | null;
 }
