@@ -40,4 +40,8 @@ export {
   ExecutionStateProvider,
   useExecutionState,
 } from '../ExecutionState.js';
-export type { ExecutionStateView, ExecutionPhaseView } from '../ExecutionState.js';
+export type {
+  ExecutionStateView,
+  ExecutionPhaseView,
+  ExecutionRosterEntry,
+} from '../ExecutionState.js';
