@@ -23,6 +23,12 @@ Rules for editing existing Synergy specs. The `create-spec` skill is for new ses
 - Agent rosters use `<AgentTree>` (hierarchy + model/effort; effort inherits, model is
   per-node) as the source of truth; `<AgentAllocation>` maps agents to phases by name
   only. Never put model/effort on `<AgentAllocation>` or inline on `<Phase>`.
+- **Timeline is phase-driven.** Use `<Timeline />` (no props) in the overview — it
+  renders the live phase roster + progress bar from execution state. Do not
+  reintroduce a hand-authored `milestones={[…]}` list for the phase timeline; it
+  drifts from the right rail. Each `phases/<NN>-<slug>/spec.mdx` must have a
+  frontmatter `title` (the timeline step label); the validator warns when it is
+  missing.
 
 ## Cross-references
 
