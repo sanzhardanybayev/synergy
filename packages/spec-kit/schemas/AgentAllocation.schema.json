@@ -41,18 +41,6 @@
             ]
           },
           "description": "Phases this agent touches — slugs (preferred) or legacy numbers."
-        },
-        "model": {
-          "$ref": "#/definitions/AgentModel",
-          "description": "Default model for fan-out, e.g. \"opus\". Overridable per run by the execute skill."
-        },
-        "effort": {
-          "$ref": "#/definitions/AgentEffort",
-          "description": "Default thinking effort for fan-out."
-        },
-        "count": {
-          "type": "number",
-          "description": "How many parallel instances to spawn."
         }
       },
       "required": [
@@ -68,23 +56,6 @@
         "sub-agent",
         "agent-team",
         "human"
-      ]
-    },
-    "AgentModel": {
-      "type": "string",
-      "enum": [
-        "opus",
-        "sonnet",
-        "haiku"
-      ]
-    },
-    "AgentEffort": {
-      "type": "string",
-      "enum": [
-        "low",
-        "medium",
-        "high",
-        "max"
       ]
     }
   }
