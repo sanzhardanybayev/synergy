@@ -55,4 +55,25 @@ describe('AgentTree validation', () => {
     });
     expect(messages(root).some((m) => /unknown agent.*ghost/i.test(m))).toBe(true);
   });
+
+  it('resolves cross-file agent references (no false warning)', () => {
+    const root = scaffold({
+      '00-tree.mdx': `# Tree
+<AgentTree nodes={[{ name: 'impl', type: 'sub-agent', model: 'opus', effort: 'high' }]} />
+`,
+      '01-phases.mdx': `# Phases
+<Phase number={1} title="Build" id="build" agents={['impl']} />
+`,
+    });
+    expect(messages(root).some((m) => /unknown agent/i.test(m))).toBe(false);
+  });
+
+  it('warns with empty hint when no AgentTree exists', () => {
+    const root = scaffold({
+      '00-phases.mdx': `# Phases
+<Phase number={1} title="Build" id="build" agents={['ghost']} />
+`,
+    });
+    expect(messages(root).some((m) => /unknown agent.*ghost/i.test(m))).toBe(true);
+  });
 });

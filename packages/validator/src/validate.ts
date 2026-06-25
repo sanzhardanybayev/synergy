@@ -340,10 +340,10 @@ function validateSession(sessionDir: string, files = listMdxFiles(sessionDir)): 
         }
       }
       if (comp.name === 'Phase' && Array.isArray(comp.attributes.agents)) {
+        const known = [...knownAgentNames];
+        const hint = known.length ? ` (known agents: ${known.join(', ')})` : '';
         for (const ref of comp.attributes.agents as unknown[]) {
           if (typeof ref === 'string' && !knownAgentNames.has(ref)) {
-            const known = [...knownAgentNames];
-            const hint = known.length ? ` (known agents: ${known.join(', ')})` : '';
             issues.push({
               file: spec.filePath,
               line: comp.line,
