@@ -12,6 +12,7 @@ interface ComponentEntry {
   name: string;
   file: string;
   type: string;
+  omit?: string[];
 }
 
 const components: ComponentEntry[] = [
@@ -31,8 +32,20 @@ const components: ComponentEntry[] = [
   { name: 'Risk', file: 'src/components/Risk.tsx', type: 'RiskProps' },
   { name: 'Mockup', file: 'src/components/Mockup.tsx', type: 'MockupProps' },
   { name: 'Chart', file: 'src/components/Chart.tsx', type: 'ChartProps' },
-  { name: 'AgentTree', file: 'src/components/AgentTree.tsx', type: 'AgentTreeProps' },
+  {
+    name: 'AgentTree',
+    file: 'src/components/AgentTree.tsx',
+    type: 'AgentTreeProps',
+    omit: ['editable', 'dirty', 'onEffortChange', 'onModelChange'],
+  },
 ];
+
+function omitProps(schema: Record<string, unknown>, typeName: string, names: string[]) {
+  const def = (schema.definitions as Record<string, any> | undefined)?.[typeName];
+  if (!def?.properties) return;
+  for (const n of names) delete def.properties[n];
+  if (Array.isArray(def.required)) def.required = def.required.filter((r: string) => !names.includes(r));
+}
 
 function stripChildrenAndPrune(schema: Record<string, unknown>) {
   const definitions = (schema.definitions ?? {}) as Record<string, Record<string, unknown>>;
@@ -74,7 +87,7 @@ function stripChildrenAndPrune(schema: Record<string, unknown>) {
 
 const tsconfig = resolve(pkgRoot, 'tsconfig.json');
 
-for (const { name, file, type } of components) {
+for (const { name, file, type, omit } of components) {
   const config: Config = {
     path: resolve(pkgRoot, file),
     type,
@@ -85,6 +98,7 @@ for (const { name, file, type } of components) {
   };
   const generator = createGenerator(config);
   const schema = generator.createSchema(type) as Record<string, unknown>;
+  if (omit) omitProps(schema, type, omit);
   stripChildrenAndPrune(schema);
   const outPath = resolve(outDir, `${name}.schema.json`);
   writeFileSync(outPath, `${JSON.stringify(schema, null, 2)}\n`);

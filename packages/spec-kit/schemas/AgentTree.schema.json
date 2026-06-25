@@ -13,64 +13,6 @@
         },
         "context": {
           "type": "string"
-        },
-        "editable": {
-          "type": "boolean"
-        },
-        "dirty": {
-          "type": "boolean"
-        },
-        "onEffortChange": {
-          "$comment": "(name: string, effort: AgentEffort | null) => void",
-          "type": "object",
-          "properties": {
-            "namedArgs": {
-              "type": "object",
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "effort": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/definitions/AgentEffort"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "name",
-                "effort"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "description": "effort === null means \"clear override, inherit from ancestor\"."
-        },
-        "onModelChange": {
-          "$comment": "(name: string, model: AgentModel) => void",
-          "type": "object",
-          "properties": {
-            "namedArgs": {
-              "type": "object",
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "model": {
-                  "$ref": "#/definitions/AgentModel"
-                }
-              },
-              "required": [
-                "name",
-                "model"
-              ],
-              "additionalProperties": false
-            }
-          }
         }
       },
       "required": [
