@@ -25,7 +25,11 @@ CLI base: `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js"`.
 - `synergy phase set <session> <phaseId> in-progress`
 
 **4. Implement the phase**
-- Fan out per the `<AgentAllocation>` entries for this phase: spawn the specified agent `type`, `count`, `model`, and `effort`. Run-time directives override these for THIS run only — never rewrite `<AgentAllocation>`.
+- Fan out per the phase's agent references: each `<Phase>` names its agents; look those
+  names up in the session's `<AgentTree>` to get each agent's **model** and **effort**
+  (effort inherits from the nearest ancestor; model is per-node). Spawn the specified
+  `type` and `count` (count, if any, stays on the tree node) at that model/effort.
+  **Run-time directives override these for THIS run only — never rewrite the `<AgentTree>`.**
 - As you discover anything surprising or reusable, record it (prefer the daemon; fall back to the CLI):
   ```bash
   # Fast path:
@@ -72,5 +76,5 @@ You may NOT start the next phase until all three are done:
 ## Don'ts
 - Don't hand-edit `.state/` JSON or journals — always go through the CLI.
 - Don't skip the boundary note or resume pointer — that's the hand-off a fresh agent depends on.
-- Don't let a run directive ("use sonnet") mutate the stored `<AgentAllocation>` plan.
+- Don't let a run directive ("use sonnet") mutate the stored `<AgentTree>` plan.
 - Don't mark a phase `done` if its verification gate failed — use `blocked` and log why.

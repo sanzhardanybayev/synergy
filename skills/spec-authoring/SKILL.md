@@ -20,6 +20,9 @@ Rules for editing existing Synergy specs. The `create-spec` skill is for new ses
 - Always prefer spec-kit components over raw markdown for structured content (status badges, phases, risks, allocations, timelines, charts).
 - If the structure you need doesn't exist in spec-kit, build a session-local component in `_components/` rather than dropping back to ad-hoc markdown.
 - Charts default to `<Chart>` (Mermaid). For visuals beyond Mermaid, import a chart library (recharts, visx, etc.) inside a session-local component.
+- Agent rosters use `<AgentTree>` (hierarchy + model/effort; effort inherits, model is
+  per-node) as the source of truth; `<AgentAllocation>` maps agents to phases by name
+  only. Never put model/effort on `<AgentAllocation>` or inline on `<Phase>`.
 
 ## Cross-references
 
