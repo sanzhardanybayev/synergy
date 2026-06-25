@@ -194,4 +194,10 @@ describe('validatePhaseStructure — title warning', () => {
     const issues = validatePhaseStructure(sessionDir);
     expect(issues.some((i) => /missing a `title`/.test(i.message))).toBe(false);
   });
+
+  it('does not warn when a CRLF spec.mdx has a title', () => {
+    phase('01', 'storage', "---\r\ntitle: 'Storage layer'\r\norder: 1\r\n---\r\n# storage\r\n");
+    const issues = validatePhaseStructure(sessionDir);
+    expect(issues.some((i) => /missing a `title`/.test(i.message))).toBe(false);
+  });
 });

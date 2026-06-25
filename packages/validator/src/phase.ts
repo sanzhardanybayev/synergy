@@ -11,7 +11,7 @@ function hasFrontmatterTitle(specPath: string): boolean {
   } catch {
     return false;
   }
-  const fm = /^---\n([\s\S]*?)\n---/.exec(raw);
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
   if (!fm) return false;
   return /^title:\s*\S/m.test(fm[1]!);
 }
