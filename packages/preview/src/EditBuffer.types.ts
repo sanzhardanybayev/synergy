@@ -5,6 +5,7 @@
  * can be imported without importing the full context (e.g. in tests).
  */
 
+import type { AgentTreeNode } from '@synergy/spec-kit';
 import type { LineCol } from './api.js';
 
 // ---------------------------------------------------------------------------
@@ -38,7 +39,16 @@ export interface StatusEditEntry {
   currentStatus: string;
 }
 
-export type BufferEntry = ProseEditEntry | StatusEditEntry;
+/** An agent-tree edit (PUT /api/agent-tree). */
+export interface AgentTreeEditEntry {
+  readonly kind: 'agent-tree';
+  /** sessionsDir-relative file path. */
+  readonly file: string;
+  readonly originalTree: AgentTreeNode[];
+  currentTree: AgentTreeNode[];
+}
+
+export type BufferEntry = ProseEditEntry | StatusEditEntry | AgentTreeEditEntry;
 
 /**
  * Stable key for a buffer entry.
@@ -60,6 +70,9 @@ export interface EditBufferContextValue {
 
   /** Mark a status dirty (or update currentStatus). */
   setDirtyStatus: (key: BufferKey, entry: StatusEditEntry) => void;
+
+  /** Mark an agent-tree dirty (or update currentTree). */
+  setDirtyAgentTree: (key: BufferKey, entry: AgentTreeEditEntry) => void;
 
   /** Discard a single entry (no network call). */
   discard: (key: BufferKey) => void;

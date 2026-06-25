@@ -12,6 +12,7 @@
 
 import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type {
+  AgentTreeEditEntry,
   BufferEntry,
   BufferKey,
   EditBufferContextValue,
@@ -19,7 +20,7 @@ import type {
   StatusEditEntry,
 } from './EditBuffer.types.js';
 import { useToast } from './ToastProvider.js';
-import { patchStatus, putEdit } from './api.js';
+import { patchStatus, putAgentTree, putEdit } from './api.js';
 
 // ---------------------------------------------------------------------------
 // Context
@@ -69,6 +70,19 @@ export function EditBufferProvider({ children }: { children: ReactNode }) {
       const existing = next.get(key);
       if (existing && existing.kind === 'status') {
         next.set(key, { ...existing, currentStatus: entry.currentStatus });
+      } else {
+        next.set(key, entry);
+      }
+      return next;
+    });
+  }, []);
+
+  const setDirtyAgentTree = useCallback((key: BufferKey, entry: AgentTreeEditEntry) => {
+    setEntries((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(key);
+      if (existing && existing.kind === 'agent-tree') {
+        next.set(key, { ...existing, currentTree: entry.currentTree });
       } else {
         next.set(key, entry);
       }
@@ -146,6 +160,18 @@ export function EditBufferProvider({ children }: { children: ReactNode }) {
           showToast(`Status write failed: ${result.detail ?? 'unknown error'}`);
           return false;
         }
+
+        if (entry.kind === 'agent-tree') {
+          const result = await putAgentTree({ file: entry.file, tree: entry.currentTree });
+
+          if (result.ok) {
+            discard(key);
+            return true;
+          }
+
+          showToast(`Agent-tree write failed: ${result.reason}${result.detail ? ` — ${result.detail}` : ''}`);
+          return false;
+        }
       } catch (err) {
         showToast(err instanceof Error ? err.message : 'Unknown write error');
         return false;
@@ -191,6 +217,7 @@ export function EditBufferProvider({ children }: { children: ReactNode }) {
       entries,
       setDirtyProse,
       setDirtyStatus,
+      setDirtyAgentTree,
       discard,
       applyOne,
       applyAll,
@@ -218,6 +245,7 @@ export function EditBufferProvider({ children }: { children: ReactNode }) {
       entries,
       setDirtyProse,
       setDirtyStatus,
+      setDirtyAgentTree,
       discard,
       applyOne,
       applyAll,
@@ -253,6 +281,7 @@ export function useEditBuffer(): EditBufferContextValue {
 
 // Re-export types for convenience.
 export type {
+  AgentTreeEditEntry,
   BufferEntry,
   BufferKey,
   ProseEditEntry,
