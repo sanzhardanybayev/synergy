@@ -76,6 +76,10 @@ export function AgentTree({
                 <span className="sk-agent-tree__model">{resolvedModel ?? '—'}</span>
               )}
 
+              {node.count !== undefined && node.count > 1 ? (
+                <span className="sk-agent-tree__count">×{node.count}</span>
+              ) : null}
+
               {editable ? (
                 <select
                   data-field="effort"

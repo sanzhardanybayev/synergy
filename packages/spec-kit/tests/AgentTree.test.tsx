@@ -50,4 +50,26 @@ describe('AgentTree', () => {
     fireEvent.change(modelSelect, { target: { value: 'haiku' } });
     expect(onModelChange).toHaveBeenCalledWith('storage-impl', 'haiku');
   });
+
+  it('renders count ×N when node.count > 1', () => {
+    const withCount: AgentTreeNode[] = [
+      {
+        name: 'orchestrator',
+        type: 'orchestrator',
+        effort: 'high',
+        model: 'opus',
+        subAgents: [{ name: 'worker', type: 'sub-agent', model: 'sonnet', count: 3 }],
+      },
+    ];
+    render(<AgentTree nodes={withCount} />);
+    const row = screen.getByText('worker').closest('[data-agent-name]') as HTMLElement;
+    expect(row.textContent).toContain('×3');
+    expect(row.querySelector('.sk-agent-tree__count')).toBeTruthy();
+  });
+
+  it('does not render a count span when count is absent', () => {
+    render(<AgentTree nodes={nodes} />);
+    const row = screen.getByText('storage-impl').closest('[data-agent-name]') as HTMLElement;
+    expect(row.querySelector('.sk-agent-tree__count')).toBeNull();
+  });
 });
