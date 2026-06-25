@@ -42,10 +42,7 @@ function serializeNode(n: AgentTreeNodeLike): string {
     );
   }
 
-  const parts: string[] = [
-    `name: ${JSON.stringify(n.name)}`,
-    `type: '${n.type}'`,
-  ];
+  const parts: string[] = [`name: ${JSON.stringify(n.name)}`, `type: '${n.type}'`];
 
   if (n.teamName !== undefined) {
     if (typeof n.teamName !== 'string') {
@@ -102,7 +99,7 @@ export function serializeTree(nodes: AgentTreeNodeLike[]): string {
 
 export async function handleAgentTreePut(
   sessionsDir: string,
-  body: { file: string; tree: AgentTreeNodeLike[] },
+  body: { file: string; tree: unknown },
 ): Promise<Result> {
   if (!Array.isArray(body.tree)) {
     return { ok: false, reason: 'invalid', detail: 'body.tree must be an array' };
@@ -122,10 +119,18 @@ export async function handleAgentTreePut(
   let attrStart: number | null = null;
   let attrEnd: number | null = null;
 
-  visit(ast, 'mdxJsxFlowElement', (node: any) => {
-    if (node.name !== 'AgentTree' || attrStart !== null) return;
-    const attr = (node.attributes ?? []).find(
-      (a: any) => a.type === 'mdxJsxAttribute' && a.name === 'nodes',
+  visit(ast, 'mdxJsxFlowElement', (node: unknown) => {
+    const el = node as {
+      name?: string;
+      attributes?: Array<{
+        type: string;
+        name?: string;
+        value?: { type?: string; data?: { estree?: { range?: number[] } } };
+      }>;
+    };
+    if (el.name !== 'AgentTree' || attrStart !== null) return;
+    const attr = (el.attributes ?? []).find(
+      (a) => a.type === 'mdxJsxAttribute' && a.name === 'nodes',
     );
     if (attr?.value?.type !== 'mdxJsxAttributeValueExpression') return;
     // attr.value.position is undefined in remark-mdx 3.x; use the estree Program range instead.
@@ -141,7 +146,7 @@ export async function handleAgentTreePut(
 
   let serialized: string;
   try {
-    serialized = serializeTree(body.tree);
+    serialized = serializeTree(body.tree as AgentTreeNodeLike[]);
   } catch (err) {
     return {
       ok: false,

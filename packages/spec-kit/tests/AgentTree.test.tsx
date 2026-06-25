@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { AgentTree } from '../src/components/AgentTree.js';
 import type { AgentTreeNode } from '../src/agent-tree.js';
+import { AgentTree } from '../src/components/AgentTree.js';
 
 const nodes: AgentTreeNode[] = [
   {

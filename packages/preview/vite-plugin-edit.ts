@@ -64,7 +64,10 @@ export function synergyEditPlugin(options: PluginOptions): Plugin {
           // PUT /api/agent-tree
           if (method === 'PUT' && pathname === '/api/agent-tree') {
             const body = await readJsonBody(req);
-            const result = await handleAgentTreePut(sessionsDir, body as any);
+            const result = await handleAgentTreePut(
+              sessionsDir,
+              body as { file: string; tree: unknown },
+            );
             res.setHeader('content-type', 'application/json');
             res.statusCode = result.ok
               ? 200

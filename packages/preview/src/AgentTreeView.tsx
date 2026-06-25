@@ -48,17 +48,7 @@ export function AgentTreeView({ nodes, file }: AgentTreeViewProps) {
           setTree(mapNodes(currentTree, name, (n) => ({ ...n, model })))
         }
         onEffortChange={(name, effort) =>
-          setTree(
-            mapNodes(currentTree, name, (n) => {
-              const next = { ...n };
-              if (effort === null) {
-                delete next.effort;
-              } else {
-                next.effort = effort;
-              }
-              return next;
-            }),
-          )
+          setTree(mapNodes(currentTree, name, (n) => ({ ...n, effort: effort ?? undefined })))
         }
       />
       {dirty ? (

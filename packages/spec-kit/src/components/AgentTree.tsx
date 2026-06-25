@@ -87,12 +87,13 @@ export function AgentTree({
                   className="sk-agent-tree__select"
                   value={ownEffort ?? ''}
                   onChange={(e) =>
-                    onEffortChange?.(node.name, e.target.value === '' ? null : (e.target.value as AgentEffort))
+                    onEffortChange?.(
+                      node.name,
+                      e.target.value === '' ? null : (e.target.value as AgentEffort),
+                    )
                   }
                 >
-                  <option value="">
-                    inherit{resolvedEffort ? ` (${resolvedEffort})` : ''}
-                  </option>
+                  <option value="">inherit{resolvedEffort ? ` (${resolvedEffort})` : ''}</option>
                   {EFFORTS.map((ef) => (
                     <option key={ef} value={ef}>
                       {ef}

@@ -169,7 +169,9 @@ export function EditBufferProvider({ children }: { children: ReactNode }) {
             return true;
           }
 
-          showToast(`Agent-tree write failed: ${result.reason}${result.detail ? ` — ${result.detail}` : ''}`);
+          showToast(
+            `Agent-tree write failed: ${result.reason}${result.detail ? ` — ${result.detail}` : ''}`,
+          );
           return false;
         }
       } catch (err) {

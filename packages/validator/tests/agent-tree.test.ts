@@ -15,8 +15,7 @@ function scaffold(files: Record<string, string>): string {
   return root;
 }
 
-const messages = (root: string) =>
-  validate({ projectRoot: root }).issues.map((i) => i.message);
+const messages = (root: string) => validate({ projectRoot: root }).issues.map((i) => i.message);
 
 describe('AgentTree validation', () => {
   it('warns when a node has no resolvable effort', () => {

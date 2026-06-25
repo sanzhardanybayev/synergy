@@ -2,11 +2,11 @@
  * Tests for AgentTreeView — the EditBuffer-wired wrapper around AgentTree.
  */
 
+import type { AgentTreeNode } from '@synergy/spec-kit';
+import { AgentTree } from '@synergy/spec-kit';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentTreeNode } from '@synergy/spec-kit';
-import { AgentTree } from '@synergy/spec-kit';
 import { AgentTreeView } from '../src/AgentTreeView.js';
 import { EditBufferProvider } from '../src/EditBuffer.js';
 import { ToastProvider } from '../src/ToastProvider.js';
@@ -82,9 +82,7 @@ describe('AgentTreeView', () => {
   });
 
   it('save button calls PUT /api/agent-tree', async () => {
-    mockFetch.mockResolvedValueOnce(
-      new Response(JSON.stringify({ ok: true }), { status: 200 }),
-    );
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
 
     render(
       <Wrapper>

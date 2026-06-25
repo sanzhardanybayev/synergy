@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import remarkMdx from 'remark-mdx';
@@ -66,9 +66,7 @@ describe('handleAgentTreePut', () => {
     expect(out).toContain('"avery\'s agent"');
     expect(out).toContain('"audit\'s packet"');
     // Re-parse must not throw
-    expect(() =>
-      unified().use(remarkParse).use(remarkMdx).parse(out),
-    ).not.toThrow();
+    expect(() => unified().use(remarkParse).use(remarkMdx).parse(out)).not.toThrow();
   });
 
   it('returns invalid for an unknown model enum value', async () => {
@@ -85,7 +83,7 @@ describe('handleAgentTreePut', () => {
     const sessionsDir = session(SRC);
     const res = await handleAgentTreePut(sessionsDir, {
       file: 'demo/00-plan.mdx',
-      tree: [{ name: 'root', type: 'orchestrator', count: Infinity }],
+      tree: [{ name: 'root', type: 'orchestrator', count: Number.POSITIVE_INFINITY }],
     });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe('invalid');
@@ -95,7 +93,7 @@ describe('handleAgentTreePut', () => {
     const sessionsDir = session(SRC);
     const res = await handleAgentTreePut(sessionsDir, {
       file: 'demo/00-plan.mdx',
-      tree: 'not-an-array' as any,
+      tree: 'not-an-array',
     });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe('invalid');

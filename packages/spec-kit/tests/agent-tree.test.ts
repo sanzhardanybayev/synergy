@@ -36,16 +36,21 @@ describe('flattenAgentTree', () => {
 
     expect(byName['storage-impl'].resolvedEffort).toBe('high'); // inherited
     expect(byName['storage-impl'].resolvedModel).toBe('sonnet'); // own
-    expect(byName['verifier'].resolvedEffort).toBe('max'); // inherited from team
-    expect(byName['verifier'].resolvedModel).toBe('opus'); // own
-    expect(byName['scout'].resolvedEffort).toBe('low'); // own override
+    expect(byName.verifier.resolvedEffort).toBe('max'); // inherited from team
+    expect(byName.verifier.resolvedModel).toBe('opus'); // own
+    expect(byName.scout.resolvedEffort).toBe('low'); // own override
     expect(byName['migration-team'].depth).toBe(1);
-    expect(byName['scout'].parentName).toBe('migration-team');
+    expect(byName.scout.parentName).toBe('migration-team');
   });
 
   it('returns null resolvedModel when node has no own model', () => {
     const flat = flattenAgentTree([
-      { name: 'a', type: 'orchestrator', model: 'opus', subAgents: [{ name: 'b', type: 'sub-agent' }] },
+      {
+        name: 'a',
+        type: 'orchestrator',
+        model: 'opus',
+        subAgents: [{ name: 'b', type: 'sub-agent' }],
+      },
     ]);
     expect(flat.find((f) => f.node.name === 'b')!.resolvedModel).toBeNull();
   });

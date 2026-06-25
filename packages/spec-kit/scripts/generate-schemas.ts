@@ -41,10 +41,14 @@ const components: ComponentEntry[] = [
 ];
 
 function omitProps(schema: Record<string, unknown>, typeName: string, names: string[]) {
-  const def = (schema.definitions as Record<string, any> | undefined)?.[typeName];
+  const def = (schema.definitions as Record<string, Record<string, unknown>> | undefined)?.[
+    typeName
+  ];
   if (!def?.properties) return;
-  for (const n of names) delete def.properties[n];
-  if (Array.isArray(def.required)) def.required = def.required.filter((r: string) => !names.includes(r));
+  const props = def.properties as Record<string, unknown>;
+  for (const n of names) delete props[n];
+  if (Array.isArray(def.required))
+    def.required = (def.required as string[]).filter((r) => !names.includes(r));
 }
 
 function stripChildrenAndPrune(schema: Record<string, unknown>) {

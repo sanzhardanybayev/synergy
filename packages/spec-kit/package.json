@@ -24,11 +24,7 @@
     },
     "./templates/*": "./templates/*"
   },
-  "files": [
-    "dist",
-    "schemas",
-    "templates"
-  ],
+  "files": ["dist", "schemas", "templates"],
   "scripts": {
     "build": "pnpm run gen:schemas && tsup",
     "gen:schemas": "tsx scripts/generate-schemas.ts",

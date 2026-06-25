@@ -340,9 +340,7 @@ export async function getSource(file: string): Promise<string> {
 // PUT /api/agent-tree
 // ---------------------------------------------------------------------------
 
-export type AgentTreeResult =
-  | { ok: true }
-  | { ok: false; reason: string; detail?: string };
+export type AgentTreeResult = { ok: true } | { ok: false; reason: string; detail?: string };
 
 export async function putAgentTree(body: {
   file: string;

@@ -9,12 +9,12 @@
  * SpecPage and PhasePage.
  */
 
-import type React from 'react';
 import type { AgentTreeNode } from '@synergy/spec-kit';
 import { AgentTree } from '@synergy/spec-kit';
+import type React from 'react';
 import { AgentTreeView } from './AgentTreeView.js';
-import { EditableBlock } from './EditableBlock.js';
 import { useEditBuffer } from './EditBuffer.js';
+import { EditableBlock } from './EditableBlock.js';
 
 // Type that satisfies @mdx-js/react's `Props.components` parameter without
 // requiring @types/mdx as a direct devDependency.
@@ -22,9 +22,11 @@ type MdxComponentsMap = Record<string, React.ElementType>;
 
 function AgentTreeBound(props: { nodes: AgentTreeNode[] }) {
   const buffer = useEditBuffer();
-  return buffer.currentFile
-    ? <AgentTreeView nodes={props.nodes} file={buffer.currentFile} />
-    : <AgentTree nodes={props.nodes} />;
+  return buffer.currentFile ? (
+    <AgentTreeView nodes={props.nodes} file={buffer.currentFile} />
+  ) : (
+    <AgentTree nodes={props.nodes} />
+  );
 }
 
 export const mdxComponents: MdxComponentsMap = {
