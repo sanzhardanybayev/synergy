@@ -23,8 +23,13 @@ export function ProgressDrawer({ open, data, onClose }: Props) {
   if (!open) return null;
 
   const derived = data?.derived ?? { done: 0, total: 0, percent: 0 };
-  const phases = data?.progress.phases ?? [];
+  const roster = data?.roster ?? [];
+  const legacyPhases = data?.progress.phases ?? [];
   const resume = data?.progress.resume ?? {};
+  const rows =
+    roster.length > 0
+      ? roster.map((r) => ({ slug: r.slug, status: r.status, label: r.title }))
+      : legacyPhases.map((p) => ({ slug: p.slug, status: p.status, label: p.slug }));
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: role=dialog matches OrchestratorDrawer pattern
@@ -60,13 +65,13 @@ export function ProgressDrawer({ open, data, onClose }: Props) {
           )}
 
           <ul className="progress-phases">
-            {phases.map((p) => (
+            {rows.map((p) => (
               <li key={p.slug} className="progress-phases__item">
                 <span className={`sk-status sk-status--${p.status}`} data-status={p.status}>
                   <span className="sk-status__dot" aria-hidden />
                   {p.status}
                 </span>
-                <span className="progress-phases__slug">{p.slug}</span>
+                <span className="progress-phases__slug">{p.label}</span>
                 {data?.phaseJournals[p.slug] ? (
                   <details className="progress-phases__journal">
                     <summary>journal</summary>
