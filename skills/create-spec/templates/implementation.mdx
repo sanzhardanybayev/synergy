@@ -2,7 +2,7 @@
 title: 'Implementation plan'
 ---
 
-import { Phase, Timeline, AgentAllocation, CrossRef } from '@synergy/spec-kit';
+import { Phase, Timeline, AgentAllocation, AgentTree, CrossRef } from '@synergy/spec-kit';
 
 # Implementation plan
 
@@ -32,10 +32,19 @@ below are summaries — each one cross-refs the real folder.
 
 ## Agent allocation
 
+<AgentTree
+  context="Agent hierarchy — source of truth for model/effort. Effort inherits down; model is per-node."
+  nodes={[
+    { name: 'orchestrator', type: 'orchestrator', model: 'opus', effort: 'high', subAgents: [
+      { name: 'core-impl', type: 'sub-agent', responsibility: '<phase-1-and-2 task>', model: 'opus', effort: 'high' },
+    ] },
+  ]}
+/>
+
 <AgentAllocation
   context="Who owns which phases."
   entries={[
-    { name: 'core-impl', type: 'sub-agent', responsibility: 'Phase 1 & 2 implementation', phases: [1, 2] },
-    { name: 'reviewer', type: 'human', responsibility: 'PR review + acceptance', phases: [1, 2] },
+    { name: 'core-impl', type: 'sub-agent', responsibility: 'Phase 1 & 2 implementation', phases: ['<first-phase-slug>', '<second-phase-slug>'] },
+    { name: 'reviewer', type: 'human', responsibility: 'PR review + acceptance', phases: ['<first-phase-slug>', '<second-phase-slug>'] },
   ]}
 />

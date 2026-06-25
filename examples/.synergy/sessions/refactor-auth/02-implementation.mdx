@@ -2,7 +2,7 @@
 title: 'Implementation Plan'
 ---
 
-import { Phase, Timeline, AgentAllocation, Status, CrossRef } from '@synergy/spec-kit';
+import { Phase, Timeline, AgentAllocation, AgentTree, Status, CrossRef } from '@synergy/spec-kit';
 
 # Implementation Plan
 
@@ -33,13 +33,26 @@ Phases land sequentially; chunks inside each phase may run in parallel — see <
 
 ## Agent allocation
 
+<AgentTree
+  context="Phase 1 & 3 are bounded sub-agents. Phase 2 (live-traffic cutover) runs as an agent team with human-in-the-loop at every canary step."
+  nodes={[
+    { name: 'orchestrator', type: 'orchestrator', model: 'opus', effort: 'high', subAgents: [
+      { name: 'storage-impl', type: 'sub-agent', responsibility: 'Implement TokenStore + ComplianceStore', model: 'opus', effort: 'high' },
+      { name: 'service-wiring', type: 'sub-agent', responsibility: 'Wire dual-write, instrumentation', model: 'opus', effort: 'high' },
+      { name: 'migration-team', type: 'agent-team', teamName: 'Migration', responsibility: 'Read cutover + backfill, with canary supervision', model: 'opus', effort: 'max', subAgents: [
+        { name: 'audit-prep', type: 'sub-agent', responsibility: 'Compliance audit packet', model: 'sonnet', effort: 'medium' },
+      ] },
+    ] },
+  ]}
+/>
+
 <AgentAllocation
-  context="Phase 1 and 3 are bounded enough for sub-agents. Phase 2 has live-traffic risk and runs as an agent team with human-in-the-loop at every canary step."
+  context="Who touches which phase."
   entries={[
-    { name: 'storage-impl', type: 'sub-agent', responsibility: 'Implement TokenStore + ComplianceStore', phases: ['storage'], model: 'opus', effort: 'high', count: 1 },
-    { name: 'service-wiring', type: 'sub-agent', responsibility: 'Wire dual-write, instrumentation', phases: ['storage'], model: 'opus', effort: 'high' },
-    { name: 'migration-team', type: 'agent-team', responsibility: 'Read cutover + backfill, with canary supervision', phases: ['cutover'], model: 'opus', effort: 'max' },
-    { name: 'audit-prep', type: 'sub-agent', responsibility: 'Compliance audit packet', phases: ['cleanup'], model: 'sonnet', effort: 'medium' },
+    { name: 'storage-impl', type: 'sub-agent', responsibility: 'Implement TokenStore + ComplianceStore', phases: ['storage'] },
+    { name: 'service-wiring', type: 'sub-agent', responsibility: 'Wire dual-write, instrumentation', phases: ['storage'] },
+    { name: 'migration-team', type: 'agent-team', responsibility: 'Read cutover + backfill', phases: ['cutover'] },
+    { name: 'audit-prep', type: 'sub-agent', responsibility: 'Compliance audit packet', phases: ['cleanup'] },
     { name: 'avery', type: 'human', responsibility: 'Approve each phase boundary', phases: ['storage', 'cutover', 'cleanup'] },
     { name: 'riya', type: 'human', responsibility: 'Compliance sign-off after Phase 3', phases: ['cleanup'] },
   ]}

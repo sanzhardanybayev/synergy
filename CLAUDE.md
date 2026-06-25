@@ -32,6 +32,14 @@ Codex distribution is **not in v1**. Do not add Codex skill files yet.
 - **Charts:** default to `<Chart kind="...">` (Mermaid). Agents may import other chart libraries when Mermaid is insufficient — document the choice in the session.
 - **Session-specific components:** when a reusable shape doesn't exist in spec-kit, create one in the session's `_components/` directory rather than degrading to plain markdown.
 - **Orchestrator file:** every session must include an `orchestrator.md` (plain markdown, not MDX) with: Overview, Dependency Graph, Parallel Chunks, Agent Strategy (sub-agents vs teams), Verification Gates.
+- **Agent roster:** declare agents in `<AgentTree>` — the single source of truth for the
+  hierarchy and per-agent model/effort. Effort **inherits** down the tree (omit to inherit
+  the parent's); model is **per-node** (no inheritance). Apply the quality-first rubric:
+  start at `opus`, drop a tier only when the task is provably bounded AND verified
+  downstream. `<AgentAllocation>` is slimmed to agent→phase ownership (name + phases only,
+  no model/effort/count). `<Phase>` references agents by name; look up effort in the tree.
+  The preview lets you edit effort (inheriting) and model (per-node) and **Save** writes
+  back into the `<AgentTree>` source. Use `subAgents` (not `children`) for nesting nodes.
 
 ## Inline editing and feedback (v2)
 
