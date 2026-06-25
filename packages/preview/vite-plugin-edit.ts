@@ -66,7 +66,13 @@ export function synergyEditPlugin(options: PluginOptions): Plugin {
             const body = await readJsonBody(req);
             const result = await handleAgentTreePut(sessionsDir, body as any);
             res.setHeader('content-type', 'application/json');
-            res.statusCode = result.ok ? 200 : result.reason === 'not_found' ? 404 : 409;
+            res.statusCode = result.ok
+              ? 200
+              : result.reason === 'not_found'
+                ? 404
+                : result.reason === 'invalid'
+                  ? 400
+                  : 409;
             res.end(JSON.stringify(result));
             return;
           }

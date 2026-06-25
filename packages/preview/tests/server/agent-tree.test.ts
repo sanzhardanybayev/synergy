@@ -1,6 +1,9 @@
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import remarkMdx from 'remark-mdx';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
 import { describe, expect, it } from 'vitest';
 import { handleAgentTreePut } from '../../src/server/agent-tree.js';
 
@@ -28,6 +31,7 @@ describe('handleAgentTreePut', () => {
     expect(out).toContain("model: 'sonnet'");
     expect(out).toContain("effort: 'max'");
     expect(out).toContain('# Plan'); // surrounding content preserved
+    expect(out).toMatch(/nodes=\{\[.*\]\}/s);
   });
 
   it('returns not_found for a missing file', async () => {
@@ -42,5 +46,58 @@ describe('handleAgentTreePut', () => {
     const res = await handleAgentTreePut(sessionsDir, { file: 'demo/00-plan.mdx', tree: [] });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe('no_agent_tree');
+  });
+
+  it('apostrophe round-trip: name and responsibility with apostrophes serialize safely and re-parse', async () => {
+    const sessionsDir = session(SRC);
+    const res = await handleAgentTreePut(sessionsDir, {
+      file: 'demo/00-plan.mdx',
+      tree: [
+        {
+          name: "avery's agent",
+          type: 'orchestrator',
+          responsibility: "audit's packet",
+        },
+      ],
+    });
+    expect(res.ok).toBe(true);
+    const out = readFileSync(join(sessionsDir, 'demo', '00-plan.mdx'), 'utf8');
+    // JSON.stringify produces double-quoted values with escaped internals
+    expect(out).toContain('"avery\'s agent"');
+    expect(out).toContain('"audit\'s packet"');
+    // Re-parse must not throw
+    expect(() =>
+      unified().use(remarkParse).use(remarkMdx).parse(out),
+    ).not.toThrow();
+  });
+
+  it('returns invalid for an unknown model enum value', async () => {
+    const sessionsDir = session(SRC);
+    const res = await handleAgentTreePut(sessionsDir, {
+      file: 'demo/00-plan.mdx',
+      tree: [{ name: 'root', type: 'orchestrator', model: 'gpt' }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('invalid');
+  });
+
+  it('returns invalid for a non-finite count', async () => {
+    const sessionsDir = session(SRC);
+    const res = await handleAgentTreePut(sessionsDir, {
+      file: 'demo/00-plan.mdx',
+      tree: [{ name: 'root', type: 'orchestrator', count: Infinity }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('invalid');
+  });
+
+  it('returns invalid when tree is not an array', async () => {
+    const sessionsDir = session(SRC);
+    const res = await handleAgentTreePut(sessionsDir, {
+      file: 'demo/00-plan.mdx',
+      tree: 'not-an-array' as any,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('invalid');
   });
 });

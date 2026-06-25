@@ -17,23 +17,86 @@ export interface AgentTreeNodeLike {
   subAgents?: AgentTreeNodeLike[];
 }
 
+export class TreeValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TreeValidationError';
+  }
+}
+
+const VALID_TYPES = new Set(['sub-agent', 'agent-team', 'orchestrator']);
+const VALID_MODELS = new Set(['opus', 'sonnet', 'haiku']);
+const VALID_EFFORTS = new Set(['low', 'medium', 'high', 'max']);
+
 type Result =
   | { ok: true }
-  | { ok: false; reason: 'not_found' | 'no_agent_tree' | 'error'; detail?: string };
+  | { ok: false; reason: 'not_found' | 'no_agent_tree' | 'invalid' | 'error'; detail?: string };
 
 function serializeNode(n: AgentTreeNodeLike): string {
-  const parts: string[] = [`name: '${n.name}'`, `type: '${n.type}'`];
-  if (n.teamName !== undefined) parts.push(`teamName: '${n.teamName}'`);
-  if (n.responsibility !== undefined)
-    parts.push(`responsibility: '${n.responsibility.replace(/'/g, "\\'")}'`);
-  if (n.model !== undefined) parts.push(`model: '${n.model}'`);
-  if (n.effort !== undefined) parts.push(`effort: '${n.effort}'`);
-  if (n.count !== undefined) parts.push(`count: ${n.count}`);
-  if (n.subAgents?.length) parts.push(`subAgents: ${serializeTree(n.subAgents)}`);
+  if (typeof n.name !== 'string' || n.name.length === 0) {
+    throw new TreeValidationError('node.name must be a non-empty string');
+  }
+  if (!n.type || !VALID_TYPES.has(n.type)) {
+    throw new TreeValidationError(
+      `node.type must be one of ${[...VALID_TYPES].join(', ')}; got ${JSON.stringify(n.type)}`,
+    );
+  }
+
+  const parts: string[] = [
+    `name: ${JSON.stringify(n.name)}`,
+    `type: '${n.type}'`,
+  ];
+
+  if (n.teamName !== undefined) {
+    if (typeof n.teamName !== 'string') {
+      throw new TreeValidationError('node.teamName must be a string');
+    }
+    parts.push(`teamName: ${JSON.stringify(n.teamName)}`);
+  }
+
+  if (n.responsibility !== undefined) {
+    if (typeof n.responsibility !== 'string') {
+      throw new TreeValidationError('node.responsibility must be a string');
+    }
+    parts.push(`responsibility: ${JSON.stringify(n.responsibility)}`);
+  }
+
+  if (n.model !== undefined) {
+    if (!VALID_MODELS.has(n.model)) {
+      throw new TreeValidationError(
+        `node.model must be one of ${[...VALID_MODELS].join(', ')}; got ${JSON.stringify(n.model)}`,
+      );
+    }
+    parts.push(`model: '${n.model}'`);
+  }
+
+  if (n.effort !== undefined) {
+    if (!VALID_EFFORTS.has(n.effort)) {
+      throw new TreeValidationError(
+        `node.effort must be one of ${[...VALID_EFFORTS].join(', ')}; got ${JSON.stringify(n.effort)}`,
+      );
+    }
+    parts.push(`effort: '${n.effort}'`);
+  }
+
+  if (n.count !== undefined) {
+    if (typeof n.count !== 'number' || !Number.isFinite(n.count)) {
+      throw new TreeValidationError('node.count must be a finite number');
+    }
+    parts.push(`count: ${n.count}`);
+  }
+
+  if (Array.isArray(n.subAgents) && n.subAgents.length > 0) {
+    parts.push(`subAgents: ${serializeTree(n.subAgents)}`);
+  }
+
   return `{ ${parts.join(', ')} }`;
 }
 
 export function serializeTree(nodes: AgentTreeNodeLike[]): string {
+  if (!Array.isArray(nodes)) {
+    throw new TreeValidationError('tree must be an array');
+  }
   return `[${nodes.map(serializeNode).join(', ')}]`;
 }
 
@@ -41,6 +104,10 @@ export async function handleAgentTreePut(
   sessionsDir: string,
   body: { file: string; tree: AgentTreeNodeLike[] },
 ): Promise<Result> {
+  if (!Array.isArray(body.tree)) {
+    return { ok: false, reason: 'invalid', detail: 'body.tree must be an array' };
+  }
+
   let absPath: string;
   try {
     absPath = resolveSessionsRelative(sessionsDir, body.file);
@@ -72,14 +139,31 @@ export async function handleAgentTreePut(
 
   if (attrStart === null || attrEnd === null) return { ok: false, reason: 'no_agent_tree' };
 
-  const next = source.slice(0, attrStart) + serializeTree(body.tree) + source.slice(attrEnd);
-
+  let serialized: string;
   try {
-    const tmp = join(dirname(absPath), `.agent-tree.${Date.now()}.tmp`);
+    serialized = serializeTree(body.tree);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const next = source.slice(0, attrStart) + serialized + source.slice(attrEnd);
+
+  const tmp = join(dirname(absPath), `.agent-tree.${Date.now()}.tmp`);
+  try {
     writeFileSync(tmp, next, 'utf8');
     renameSync(tmp, absPath);
     return { ok: true };
   } catch (err) {
+    // Clean up tmp on failure — best-effort, ignore secondary errors.
+    try {
+      if (existsSync(tmp)) renameSync(tmp, `${tmp}.dead`);
+    } catch {
+      /* ignore cleanup error */
+    }
     return { ok: false, reason: 'error', detail: String(err) };
   }
 }
