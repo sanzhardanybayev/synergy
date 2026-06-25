@@ -11,6 +11,7 @@
 import { join } from 'node:path';
 import type { Plugin } from 'vite';
 import { handleActiveSession } from './src/server/active-session.js';
+import { handleAgentTreePut } from './src/server/agent-tree.js';
 import { handleDiff } from './src/server/diff.js';
 import { handleEdit } from './src/server/edit.js';
 import { handleLog, handlePhase, handleResume } from './src/server/execstate.js';
@@ -20,7 +21,7 @@ import {
   handleFeedbackPatch,
   handleFeedbackPost,
 } from './src/server/feedback.js';
-import { sendJson } from './src/server/http.js';
+import { readJsonBody, sendJson } from './src/server/http.js';
 import { handleProgress } from './src/server/progress.js';
 import { handleReview } from './src/server/review.js';
 import { handleScaffold } from './src/server/scaffold.js';
@@ -57,6 +58,16 @@ export function synergyEditPlugin(options: PluginOptions): Plugin {
           // PUT /api/edit
           if (method === 'PUT' && pathname === '/api/edit') {
             await handleEdit(req, res, sessionsDir);
+            return;
+          }
+
+          // PUT /api/agent-tree
+          if (method === 'PUT' && pathname === '/api/agent-tree') {
+            const body = await readJsonBody(req);
+            const result = await handleAgentTreePut(sessionsDir, body as any);
+            res.setHeader('content-type', 'application/json');
+            res.statusCode = result.ok ? 200 : result.reason === 'not_found' ? 404 : 409;
+            res.end(JSON.stringify(result));
             return;
           }
 
