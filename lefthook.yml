@@ -1,0 +1,13 @@
+# Git hooks managed by lefthook (https://github.com/evilmartians/lefthook).
+# Installed via the root `prepare` script on `pnpm install`.
+#
+# Pre-commit gate: run Biome on the files being committed BEFORE the commit lands,
+# so lint/format errors never reach CI. Safe fixes are applied and re-staged
+# automatically; unfixable errors (e.g. noExplicitAny) abort the commit.
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      glob: "*.{ts,tsx,js,jsx,json,jsonc,css}"
+      run: pnpm exec biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true

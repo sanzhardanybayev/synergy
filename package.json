@@ -13,6 +13,7 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "test": "pnpm -r run test",
+    "prepare": "lefthook install",
     "validate": "node packages/cli/dist/cli.js validate --root examples",
     "preview:start": "node packages/cli/dist/cli.js preview start --root examples",
     "preview:stop": "node packages/cli/dist/cli.js preview stop --root examples",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
+    "lefthook": "^2.1.9",
     "typescript": "5.6.3"
   }
 }
