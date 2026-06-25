@@ -11,6 +11,7 @@ import S8 from '../schemas/OpenQuestion.schema.json';
 import S9 from '../schemas/Risk.schema.json';
 import S10 from '../schemas/Mockup.schema.json';
 import S11 from '../schemas/Chart.schema.json';
+import S12 from '../schemas/AgentTree.schema.json';
 
 export type ComponentName =
   | 'Status'
@@ -24,7 +25,8 @@ export type ComponentName =
   | 'OpenQuestion'
   | 'Risk'
   | 'Mockup'
-  | 'Chart';
+  | 'Chart'
+  | 'AgentTree';
 
 export const schemas: Record<ComponentName, unknown> = {
   Status: S0 as unknown,
@@ -39,6 +41,7 @@ export const schemas: Record<ComponentName, unknown> = {
   Risk: S9 as unknown,
   Mockup: S10 as unknown,
   Chart: S11 as unknown,
+  AgentTree: S12 as unknown,
 };
 
 export const componentNames: ComponentName[] = [
@@ -54,4 +57,5 @@ export const componentNames: ComponentName[] = [
   'Risk',
   'Mockup',
   'Chart',
+  'AgentTree',
 ];

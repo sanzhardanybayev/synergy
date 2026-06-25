@@ -16,6 +16,8 @@
 // Shared coordinate types
 // ---------------------------------------------------------------------------
 
+import type { AgentTreeNode } from '@synergy/spec-kit';
+
 export interface LineCol {
   line: number; // 1-indexed
   col: number; // 0-indexed
@@ -332,6 +334,24 @@ export async function getSource(file: string): Promise<string> {
 
   const data = (await res.json()) as SourceResponse;
   return data.source;
+}
+
+// ---------------------------------------------------------------------------
+// PUT /api/agent-tree
+// ---------------------------------------------------------------------------
+
+export type AgentTreeResult = { ok: true } | { ok: false; reason: string; detail?: string };
+
+export async function putAgentTree(body: {
+  file: string;
+  tree: AgentTreeNode[];
+}): Promise<AgentTreeResult> {
+  const res = await fetch('/api/agent-tree', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return res.json() as Promise<AgentTreeResult>;
 }
 
 // ---------------------------------------------------------------------------

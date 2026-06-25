@@ -20,6 +20,10 @@ Task A
 
 - **Sub-agent** for: _bounded, well-specified tasks._
 - **Agent team** for: _cross-cutting or exploratory work._
+- **Mixed-effort team** for: _expensive reasoning gated by a cheap producer — name the
+  cheap producer and the verifier; the verifier sets the quality floor._
+- **Model/effort**: declared per agent in the `<AgentTree>`; this phase references agents
+  by name only. Start at opus; downgrade only when bounded + verified downstream.
 - **Human in the loop** at: _phase boundary; review before next phase starts._
 
 ## Verification gate

@@ -25,12 +25,18 @@ Phase 1 (<slug>)
 
 ## Agent strategy
 
-- **Sub-agents (single-shot, isolated)** for: file-bounded implementation
-  where the interface is already specified.
-- **Agent team (multi-step, exploratory)** for: cross-cutting concerns,
-  debugging, integration testing.
-- **Human in the loop** at every phase boundary: present a diff, run
-  tests, get approval.
+- **Sub-agents (single-shot, isolated)** for: file-bounded implementation where the
+  interface is already specified.
+- **Agent team (multi-step, exploratory)** for: cross-cutting concerns, debugging,
+  integration testing.
+- **Mixed-effort teams** are the cost lever: pair cheap producers (e.g. a `haiku/low`
+  scout that gathers and narrows) with one expensive reasoner/verifier (`opus/high`)
+  that decides on the narrowed input. The cheap members are safe *because* the verifier
+  downstream sets the quality floor.
+- **Model/effort** for every agent is declared in the `<AgentTree>` (see the spec),
+  following the quality-first rubric: start at opus, downgrade only when the task is
+  provably bounded and verified downstream.
+- **Human in the loop** at every phase boundary: present a diff, run tests, get approval.
 
 ## Verification gates
 

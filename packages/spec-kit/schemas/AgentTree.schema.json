@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/AgentTreeProps",
+  "definitions": {
+    "AgentTreeProps": {
+      "type": "object",
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AgentTreeNode"
+          }
+        },
+        "context": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodes"
+      ],
+      "additionalProperties": false
+    },
+    "AgentTreeNode": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "orchestrator",
+            "sub-agent",
+            "agent-team"
+          ]
+        },
+        "teamName": {
+          "type": "string",
+          "description": "Display name for team nodes."
+        },
+        "responsibility": {
+          "type": "string"
+        },
+        "model": {
+          "$ref": "#/definitions/AgentModel",
+          "description": "Per-node model. Does NOT inherit."
+        },
+        "effort": {
+          "$ref": "#/definitions/AgentEffort",
+          "description": "Effort; inherited from the nearest ancestor when absent."
+        },
+        "count": {
+          "type": "number"
+        },
+        "subAgents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AgentTreeNode"
+          },
+          "description": "Child nodes. Recurses for tree traversal."
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "AgentModel": {
+      "type": "string",
+      "enum": [
+        "opus",
+        "sonnet",
+        "haiku"
+      ]
+    },
+    "AgentEffort": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "max"
+      ]
+    }
+  }
+}

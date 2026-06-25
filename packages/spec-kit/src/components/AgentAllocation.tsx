@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import type { ReactNode } from 'react';
-import type { AgentEffort, AgentModel, AgentType } from '../types.js';
+import type { AgentType } from '../types.js';
 
 export interface AgentAllocationEntry {
   name: string;
@@ -8,12 +8,6 @@ export interface AgentAllocationEntry {
   responsibility: string;
   /** Phases this agent touches — slugs (preferred) or legacy numbers. */
   phases?: (number | string)[];
-  /** Default model for fan-out, e.g. "opus". Overridable per run by the execute skill. */
-  model?: AgentModel;
-  /** Default thinking effort for fan-out. */
-  effort?: AgentEffort;
-  /** How many parallel instances to spawn. */
-  count?: number;
 }
 
 export interface AgentAllocationProps {
@@ -28,15 +22,6 @@ const typeLabel: Record<AgentType, string> = {
   human: 'Human',
 };
 
-function fanout(e: AgentAllocationEntry): string {
-  if (e.type === 'human') return '—';
-  const parts: string[] = [];
-  if (e.model) parts.push(e.model);
-  if (e.effort) parts.push(e.effort);
-  if (e.count && e.count > 1) parts.push(`×${e.count}`);
-  return parts.length ? parts.join(' · ') : '—';
-}
-
 export function AgentAllocation({ context, entries, children }: AgentAllocationProps) {
   return (
     <div className="sk-allocation">
@@ -48,7 +33,6 @@ export function AgentAllocation({ context, entries, children }: AgentAllocationP
             <th>Type</th>
             <th>Responsibility</th>
             <th>Phases</th>
-            <th>Fan-out</th>
           </tr>
         </thead>
         <tbody>
@@ -64,7 +48,6 @@ export function AgentAllocation({ context, entries, children }: AgentAllocationP
               </td>
               <td>{e.responsibility}</td>
               <td>{e.phases?.length ? e.phases.join(', ') : '—'}</td>
-              <td className="sk-allocation__fanout">{fanout(e)}</td>
             </tr>
           ))}
         </tbody>

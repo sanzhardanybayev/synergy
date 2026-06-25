@@ -119,11 +119,51 @@ All from `@synergy/spec-kit`. Keep this short — the canonical list is in the p
 | `<Timeline milestones={[…]} />` | Ordered milestones with optional `when` / `status`. |
 | `<SubSpec slug title summary />` | Pointer to a sibling MDX file from `00-overview.mdx`. |
 | `<CrossRef to="…" />` | Validator-enforced spec-to-spec link. Use `phases/<slug>` for phases. |
-| `<AgentAllocation entries={[…]} />` | Who owns which phase(s). |
+| `<AgentAllocation entries={[…]} />` | Maps agents to phases by name (no model/effort here — those live in `<AgentTree>`). |
+| `<AgentTree nodes={[…]} />` | Agent hierarchy with model/effort per node. Source of truth for fan-out. |
 | `<OpenQuestion id question />` | Unresolved decision. |
 | `<Risk id title severity />` | Known hazard + mitigation. |
 | `<Mockup src alt caption />` | Image from `assets/`. |
 | `<Chart kind="flow\|sequence\|state\|er\|gantt\|mindmap">{`mermaid src`}</Chart>` | Diagrams. Default to Mermaid; build a session-local component if Mermaid is insufficient. |
+
+### Agent structure: `<AgentTree>` + `<AgentAllocation>`
+
+Author the agent roster as a tree — the single source of truth for the hierarchy
+and for each agent's model/effort:
+
+```mdx
+<AgentTree
+  context="Orchestrator coordinates; implementors and teams hang beneath it."
+  nodes={[
+    { name: 'orchestrator', type: 'orchestrator', model: 'opus', effort: 'high', subAgents: [
+      { name: 'storage-impl', type: 'sub-agent', responsibility: 'Implement TokenStore', model: 'sonnet', effort: 'medium' },
+      { name: 'migration', type: 'agent-team', teamName: 'Migration', model: 'opus', effort: 'max', subAgents: [
+        { name: 'scout', type: 'sub-agent', model: 'haiku', effort: 'low' },
+        { name: 'verifier', type: 'sub-agent', model: 'opus' },
+      ] },
+    ] },
+  ]}
+/>
+```
+
+Then map agents to phases with the slimmed `<AgentAllocation>` (name + phases only —
+NO model/effort here; those live in the tree). `<Phase>` references agents by name.
+
+**Quality-first model/effort rubric — quality is the invariant, cost flexes underneath:**
+
+> Start at `opus`. Drop a tier only when the task is *provably bounded* AND a
+> *verification gate downstream would catch a miss*. When unsure, don't drop.
+
+| Condition | Model / Effort |
+|---|---|
+| Any judgment, design, ambiguity, or risk (the default) | `opus` / `high`–`max` |
+| Fully-specified implementation against a clear interface, **verified downstream** | `sonnet` / `medium` |
+| Purely mechanical, zero-judgment, fully bounded, **verified downstream** | `haiku` / `low` |
+| A verification / review node | never below the tier of the riskiest thing it checks |
+
+Effort **inherits** down the tree (omit it to inherit the parent's); model is **per-node**
+(does not inherit). Every executable node must resolve to a model + effort or the
+validator warns.
 
 ## Hard rules
 

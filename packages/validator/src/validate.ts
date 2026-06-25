@@ -1,6 +1,13 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { type ComponentName, componentNames, schemas } from '@synergy/spec-kit';
+import {
+  type AgentTreeNode,
+  type ComponentName,
+  collectAgentNames,
+  componentNames,
+  flattenAgentTree,
+  schemas,
+} from '@synergy/spec-kit';
 import Ajv, { type ValidateFunction } from 'ajv';
 import { parseSpecCached } from './cache.js';
 import type { ParsedSpec } from './parse.js';
@@ -233,6 +240,17 @@ function validateSession(sessionDir: string, files = listMdxFiles(sessionDir)): 
   const allParsed: ParsedSpec[] = [...parsed, ...phaseParse.parsed.values()];
   const ctx: ResolveContext = { inventory, phases: phaseParse.parsed };
 
+  const knownAgentNames = new Set<string>();
+  for (const spec of allParsed) {
+    for (const comp of spec.components) {
+      if (comp.name === 'AgentTree' && Array.isArray(comp.attributes.nodes)) {
+        for (const n of collectAgentNames(comp.attributes.nodes as AgentTreeNode[])) {
+          knownAgentNames.add(n);
+        }
+      }
+    }
+  }
+
   for (const spec of allParsed) {
     for (const comp of spec.components) {
       if (!isComponent(comp.name)) continue; // unknown / session-local component
@@ -293,6 +311,46 @@ function validateSession(sessionDir: string, files = listMdxFiles(sessionDir)): 
               component: 'CrossRef',
               severity: 'warning',
               message: result.warning,
+            });
+          }
+        }
+      }
+      if (comp.name === 'AgentTree' && Array.isArray(comp.attributes.nodes)) {
+        for (const flat of flattenAgentTree(comp.attributes.nodes as AgentTreeNode[])) {
+          if (flat.resolvedEffort === null) {
+            issues.push({
+              file: spec.filePath,
+              line: comp.line,
+              column: comp.column,
+              component: 'AgentTree',
+              severity: 'warning',
+              message: `Agent \`${flat.node.name}\` has no effort and no ancestor effort to inherit — add an effort or set one on a parent.`,
+            });
+          }
+          if (flat.resolvedModel === null) {
+            issues.push({
+              file: spec.filePath,
+              line: comp.line,
+              column: comp.column,
+              component: 'AgentTree',
+              severity: 'warning',
+              message: `Agent \`${flat.node.name}\` has no model — assign one (start at opus; downgrade only when bounded + verified).`,
+            });
+          }
+        }
+      }
+      if (comp.name === 'Phase' && Array.isArray(comp.attributes.agents)) {
+        const known = [...knownAgentNames];
+        const hint = known.length ? ` (known agents: ${known.join(', ')})` : '';
+        for (const ref of comp.attributes.agents as unknown[]) {
+          if (typeof ref === 'string' && !knownAgentNames.has(ref)) {
+            issues.push({
+              file: spec.filePath,
+              line: comp.line,
+              column: comp.column,
+              component: 'Phase',
+              severity: 'warning',
+              message: `Phase references unknown agent \`${ref}\`${hint}.`,
             });
           }
         }

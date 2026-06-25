@@ -2,8 +2,8 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { AgentAllocation } from '../src/components/AgentAllocation.js';
 
-describe('AgentAllocation fan-out metadata', () => {
-  it('renders model + effort + count when provided', () => {
+describe('AgentAllocation', () => {
+  it('renders name, type, responsibility, and phases — no fan-out column', () => {
     render(
       <AgentAllocation
         entries={[
@@ -12,24 +12,13 @@ describe('AgentAllocation fan-out metadata', () => {
             type: 'sub-agent',
             responsibility: 'Implement TokenStore',
             phases: ['storage'],
-            model: 'opus',
-            effort: 'high',
-            count: 2,
           },
         ]}
       />,
     );
-    expect(screen.getByText(/opus/)).toBeTruthy();
-    expect(screen.getByText(/high/)).toBeTruthy();
-    expect(screen.getByText(/×2|x2|2/)).toBeTruthy();
-  });
-
-  it('accepts slug phases', () => {
-    render(
-      <AgentAllocation
-        entries={[{ name: 'a', type: 'sub-agent', responsibility: 'r', phases: ['cutover'] }]}
-      />,
-    );
-    expect(screen.getByText('cutover')).toBeTruthy();
+    expect(screen.getByText('storage-impl')).toBeTruthy();
+    expect(screen.getByText('Implement TokenStore')).toBeTruthy();
+    expect(screen.getByText('storage')).toBeTruthy();
+    expect(screen.queryByText(/Fan-out/i)).toBeNull();
   });
 });
