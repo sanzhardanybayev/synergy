@@ -3,6 +3,27 @@ name: execute
 description: Use when the user runs /synergy-execute or asks Claude to implement a Synergy spec session phase by phase. Owns the disciplined execution loop — reads orchestrator + live .state, works one phase at a time, and writes a boundary note + flips phase status via the synergy CLI before moving on. Honors run-time directives (scope, model/effort overrides) layered above the plan.
 ---
 
+<!-- synergy-version: 0.7.0 -->
+
+## Step 0 — Freshness check (run before anything else)
+
+This skill loads at session start, so it can be **stale** if the plugin was updated
+mid-session. Before doing any work, confirm you are the newest installed version.
+Set `MINE` to the version in the `synergy-version` marker just above, then run:
+
+```bash
+MINE="0.7.0"  # ← the synergy-version marker above
+CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
+NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
+if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
+   [ "$(printf '%s\n%s\n' "$MINE" "$NEWEST" | sort -V | tail -1)" = "$NEWEST" ]; then
+  printf '⚠ synergy: this session loaded v%s, but v%s is installed. Restart Claude Code to load the latest skills/templates.\n' "$MINE" "$NEWEST"
+fi
+```
+
+If it prints a warning, **surface that line to the user verbatim** before continuing.
+Then proceed — staleness is a warning, not a block.
+
 # execute
 
 Drives implementation of a Synergy session with a hard state-write gate. State is written ONLY through the `synergy` CLI (never by hand-editing `.state/`).

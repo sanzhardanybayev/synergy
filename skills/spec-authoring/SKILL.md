@@ -3,6 +3,27 @@ name: spec-authoring
 description: Use whenever editing or extending an existing Synergy spec session in .synergy/sessions/. Enforces spec-kit component usage, cross-reference discipline, and session-local component creation. Triggers when the user asks to "update the spec", "add a section to the design doc", "extend the architecture spec", or any edit to a `.synergy/sessions/**/*.mdx` file.
 ---
 
+<!-- synergy-version: 0.7.0 -->
+
+## Step 0 — Freshness check (run before anything else)
+
+This skill loads at session start, so it can be **stale** if the plugin was updated
+mid-session. Before doing any work, confirm you are the newest installed version.
+Set `MINE` to the version in the `synergy-version` marker just above, then run:
+
+```bash
+MINE="0.7.0"  # ← the synergy-version marker above
+CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
+NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
+if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
+   [ "$(printf '%s\n%s\n' "$MINE" "$NEWEST" | sort -V | tail -1)" = "$NEWEST" ]; then
+  printf '⚠ synergy: this session loaded v%s, but v%s is installed. Restart Claude Code to load the latest skills/templates.\n' "$MINE" "$NEWEST"
+fi
+```
+
+If it prints a warning, **surface that line to the user verbatim** before continuing.
+Then proceed — staleness is a warning, not a block.
+
 # spec-authoring
 
 Rules for editing existing Synergy specs. The `create-spec` skill is for new sessions; this skill is for everything after.

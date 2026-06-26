@@ -3,6 +3,27 @@ name: resume
 description: Use when the user runs /synergy-resume or asks a fresh-context agent to continue an in-progress Synergy session. Reconstructs context from the execution-state hand-off (resume pointer + journals) before reading the plan, then continues the execute loop from where the previous agent stopped.
 ---
 
+<!-- synergy-version: 0.7.0 -->
+
+## Step 0 — Freshness check (run before anything else)
+
+This skill loads at session start, so it can be **stale** if the plugin was updated
+mid-session. Before doing any work, confirm you are the newest installed version.
+Set `MINE` to the version in the `synergy-version` marker just above, then run:
+
+```bash
+MINE="0.7.0"  # ← the synergy-version marker above
+CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
+NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
+if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
+   [ "$(printf '%s\n%s\n' "$MINE" "$NEWEST" | sort -V | tail -1)" = "$NEWEST" ]; then
+  printf '⚠ synergy: this session loaded v%s, but v%s is installed. Restart Claude Code to load the latest skills/templates.\n' "$MINE" "$NEWEST"
+fi
+```
+
+If it prints a warning, **surface that line to the user verbatim** before continuing.
+Then proceed — staleness is a warning, not a block.
+
 # resume
 
 The fresh-context entry point. Reads state FIRST so you start exactly where the last agent left off.
