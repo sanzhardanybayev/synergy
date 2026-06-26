@@ -22,3 +22,27 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+
+  release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Stamp consistency (marketplace.json + SKILL.md == plugin.json)
+        run: pnpm exec tsx packages/plugin-guard/src/version-sync.ts --check
+      - name: Version bump required for behavior changes
+        env:
+          BASE_BRANCH: ${{ github.base_ref || 'main' }}
+          HEAD_REF: HEAD
+        run: |
+          git fetch origin "$BASE_BRANCH" --depth=1 || true
+          BASE_REF="origin/$BASE_BRANCH" pnpm exec tsx packages/plugin-guard/src/check-bump.ts

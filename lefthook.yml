@@ -11,3 +11,9 @@ pre-commit:
       glob: "*.{ts,tsx,js,jsx,json,jsonc,css}"
       run: pnpm exec biome check --write --no-errors-on-unmatched {staged_files}
       stage_fixed: true
+    # Derive marketplace.json + every SKILL.md `synergy-version` stamp from the
+    # single source of truth (.claude-plugin/plugin.json). Never hand-edit those.
+    version-sync:
+      glob: "{.claude-plugin/plugin.json,.claude-plugin/marketplace.json,skills/**/SKILL.md}"
+      run: pnpm exec tsx packages/plugin-guard/src/version-sync.ts
+      stage_fixed: true

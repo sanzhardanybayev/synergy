@@ -3,6 +3,27 @@ name: create-spec
 description: Use when the user wants to plan a new feature, refactor, or project. Generates a Synergy MDX spec session in .synergy/sessions/, auto-starts the preview server, and opens the browser. Triggers on phrases like "create a spec for X", "let's plan Y", "scaffold a refactor for Z", "/synergy-spec".
 ---
 
+<!-- synergy-version: 0.7.0 -->
+
+## Step 0 — Freshness check (run before anything else)
+
+This skill loads at session start, so it can be **stale** if the plugin was updated
+mid-session. Before doing any work, confirm you are the newest installed version.
+Set `MINE` to the version in the `synergy-version` marker just above, then run:
+
+```bash
+MINE="0.7.0"  # ← the synergy-version marker above
+CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
+NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
+if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
+   [ "$(printf '%s\n%s\n' "$MINE" "$NEWEST" | sort -V | tail -1)" = "$NEWEST" ]; then
+  printf '⚠ synergy: this session loaded v%s, but v%s is installed. Restart Claude Code to load the latest skills/templates.\n' "$MINE" "$NEWEST"
+fi
+```
+
+If it prints a warning, **surface that line to the user verbatim** before continuing.
+Then proceed — staleness is a warning, not a block.
+
 # create-spec
 
 You are scaffolding a new Synergy MDX spec session. There is **no `synergy spec` CLI command** — this skill is the authoring path. You read templates from disk, fill in placeholders, and write the result into `.synergy/sessions/<name>/`.

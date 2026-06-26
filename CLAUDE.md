@@ -128,6 +128,20 @@ Spec authoring is not a CLI command — invoke the `synergy:create-spec` skill (
 
 Claude Code slash commands: `/synergy-spec` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback` (skill), `/synergy-execute` (skill), `/synergy-resume` (skill).
 
+## Release & freshness
+
+- `.claude-plugin/plugin.json` `version` is the single source of truth. **Never
+  hand-edit** `marketplace.json` or the `synergy-version` stamp / `MINE` literal in
+  any `SKILL.md` — lefthook runs `version-sync` on commit to derive them all from
+  `plugin.json`. (`packages/plugin-guard` owns this tooling.)
+- A behavior change under `skills/`, `packages/`, `commands/`, or `hooks/` **must**
+  bump the version; the CI `release-gate` job fails the PR otherwise. `examples/`
+  and `docs/` are exempt.
+- A `SessionStart` hook (`hooks/session-start.sh`) and a Step-0 check in the
+  authoring skills **warn (and proceed)** when a session is running an older
+  version than is installed on disk. Both are fix-forward (effective from the
+  version that ships them) and fail open.
+
 ## What not to do
 
 - Don't add a Next.js or Astro dependency to `packages/preview`. Vite + React + MDX only.
