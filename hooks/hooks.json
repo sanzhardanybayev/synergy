@@ -1,0 +1,16 @@
+{
+  "description": "Synergy freshness guard — warns at session start when a newer plugin version is installed than this session loaded.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
