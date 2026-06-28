@@ -154,7 +154,7 @@ cli
   );
 
 cli
-  .command('resume <session>', 'Set the resume pointer (where a fresh agent should start)')
+  .command('continue <session>', 'Set the resume pointer (where a fresh agent should start)')
   .option('--root <dir>', 'Project root (default: cwd)')
   .option('--next <phaseId>', 'Phase slug to resume from')
   .option('--note <text>', 'Free-text start-here note')

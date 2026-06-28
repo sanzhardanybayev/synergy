@@ -83,13 +83,13 @@ CLI commands:
 ```
 synergy phase set <session> <phaseId> <status> [--note <text>]   record phase status + optional boundary note
 synergy log <session> <text> (--phase <id> | --global)           append a finding to a phase or global journal
-synergy resume <session> [--next <phaseId>] [--note <text>]      write the hand-off pointer
+synergy continue <session> [--next <phaseId>] [--note <text>]    write the hand-off pointer
 synergy status <session>                                          print progress rollup (phases done / total)
 ```
 
 Skills + slash commands:
 - `synergy:execute` (`/synergy-execute`) — disciplined execution loop; **mandatory state-write gate**: the skill calls `phase set` + `log` before it may proceed past a phase boundary. Accepts run-time directives (scope, model/effort overrides) after the session name; these layer above the stored plan and do NOT mutate it.
-- `synergy:resume` (`/synergy-resume`) — fresh-context entry point; reads the `resume` pointer first, then picks up from `nextPhase`. Also accepts run-time directives.
+- `synergy:continue` (`/synergy-continue`) — fresh-context entry point; reads the `resume` pointer first, then picks up from `nextPhase`. Also accepts run-time directives.
 
 `<AgentTree>` nodes carry per-agent `model`/`effort` (effort inherits from the nearest ancestor; model is per-node) and optional `count`; the execute skill resolves them by agent name when spawning sub-agents or teams.
 
@@ -103,7 +103,7 @@ and a mtime-keyed parse cache:
 |---|---|---|
 | `POST /api/phase` | `synergy phase set` | `{session, phaseId, status, note?}` |
 | `POST /api/log` | `synergy log` | `{session, text, phase?, global?}` |
-| `POST /api/resume` | `synergy resume` | `{session, next?, note?}` |
+| `POST /api/resume` | `synergy continue` | `{session, next?, note?}` |
 | `GET /api/validate?session=` | `synergy validate` | — (returns ValidationReport JSON) |
 | `GET /api/progress?session=` | `synergy status` | — |
 | `POST /api/scaffold` | per-file mkdir/write in create-spec | `{session, dirs?, files:[{path,content}]}` |
@@ -120,13 +120,13 @@ synergy preview <start|stop|status>   long-running preview server (port 4321, PI
 synergy validate [session]            parser + cross-ref check
 synergy phase set <session> <id> <status> [--note <text>]   record phase transition
 synergy log <session> <text> (--phase <id> | --global)      append finding to journal
-synergy resume <session> [--next <id>] [--note <text>]      write hand-off pointer
+synergy continue <session> [--next <id>] [--note <text>]    write hand-off pointer
 synergy status <session>                                     print execution-state rollup
 ```
 
 Spec authoring is not a CLI command — invoke the `synergy:create-spec` skill (or `/synergy-spec` slash command, which dispatches to the skill).
 
-Claude Code slash commands: `/synergy-spec` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback` (skill), `/synergy-execute` (skill), `/synergy-resume` (skill).
+Claude Code slash commands: `/synergy-spec` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback` (skill), `/synergy-execute` (skill), `/synergy-continue` (skill).
 
 ## Release & freshness
 
