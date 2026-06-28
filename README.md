@@ -31,7 +31,7 @@ Edits, comments, and review state all persist to disk (MDX files, `.synergy/feed
 Authoring is half the loop. Once a plan exists, agents implement against it — and Synergy records what actually happened in a committed `.state/` sidecar per session, so progress is visible and a fresh-context agent can pick up cleanly:
 
 - **Disciplined execution.** `/synergy-execute <session>` works one phase at a time and **can't move past a phase boundary** without recording it: it flips the phase status, writes a terse boundary note, drops ad-hoc findings, and updates the resume pointer — all through the CLI, never by hand-editing state. It fans out sub-agents and teams per the `<AgentAllocation>` plan (model + effort + count), and takes run-time directives ("only Phase 1", "use sonnet this run") that layer over the plan without mutating it.
-- **Clean hand-off.** `/synergy-resume <session>` is the fresh-context entry point: it reads the resume pointer and journals *first* (state → strategy → detail), then continues from exactly where the last agent stopped. Clear the session, start a new one, and nothing is lost.
+- **Clean hand-off.** `/synergy-continue <session>` is the fresh-context entry point: it reads the resume pointer and journals *first* (state → strategy → detail), then continues from exactly where the last agent stopped. Clear the session, start a new one, and nothing is lost.
 - **Live progress in the browser.** Every `<Phase id>` badge reflects real status from `.state/`, and a 📊 **Progress drawer** shows the derived rollup (e.g. "2 / 5 phases done"), per-phase journals, and the cross-cutting log — hot-reloading like everything else.
 
 Per-phase status and journals are the source of truth; overall progress is **derived** (never stored, so it can't drift). The `.state/` directory is committed to git — it's the shared hand-off record, not per-user scratch.
@@ -70,7 +70,7 @@ git clone https://github.com/sanzhardanybayev/synergy
 /synergy-execute                           # implement it, phase-by-phase (state-tracked)
 ```
 
-That's the loop. The first command scaffolds `.synergy/sessions/` in your project. The second invokes the `synergy:create-spec` skill — which reasons about scope, picks `.synergy/sessions/YYYY-MM-DD-add-rate-limiting/`, scaffolds the overview + optional architecture/implementation/phase folders, and opens your browser. The third checks schemas and cross-references before you ship. The fourth implements the plan one phase at a time, recording status and findings as it goes — and `/synergy-resume` picks it back up in a fresh session.
+That's the loop. The first command scaffolds `.synergy/sessions/` in your project. The second invokes the `synergy:create-spec` skill — which reasons about scope, picks `.synergy/sessions/YYYY-MM-DD-add-rate-limiting/`, scaffolds the overview + optional architecture/implementation/phase folders, and opens your browser. The third checks schemas and cross-references before you ship. The fourth implements the plan one phase at a time, recording status and findings as it goes — and `/synergy-continue` picks it back up in a fresh session.
 
 ## Reference
 
@@ -83,7 +83,7 @@ That's the loop. The first command scaffolds `.synergy/sessions/` in your projec
 | `/synergy-validate [session]` | Validate schemas + cross-refs. Zero errors before commit. |
 | `/synergy-feedback [session]` | Address browser-collected comments for the active session (edits specs, resolves/rejects each). |
 | `/synergy-execute [session] [directives]` | Implement a session phase-by-phase, updating execution state at each boundary. |
-| `/synergy-resume [session] [directives]` | Resume an in-progress session from its execution-state hand-off. |
+| `/synergy-continue [session] [directives]` | Continue an in-progress session from its execution-state hand-off. |
 | `/synergy-preview-start` | Boot the preview server on port 4321. Idempotent. |
 | `/synergy-preview-stop` | Kill the preview server, remove PID file. |
 | `/synergy-preview-status` | Report running / stopped, pid, URL. |
@@ -100,7 +100,7 @@ For terminal users — available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist
 | `synergy validate [session]` | `--root` | Validate sessions in `.synergy/sessions/` |
 | `synergy phase set <session> <id> <status>` | `--root`, `--note` | Record a phase status + optional boundary note |
 | `synergy log <session> <text>` | `--root`, `--phase <id>`, `--global` | Append a finding to a phase or the global journal |
-| `synergy resume <session>` | `--root`, `--next <id>`, `--note` | Write the hand-off pointer a fresh agent reads first |
+| `synergy continue <session>` | `--root`, `--next <id>`, `--note` | Write the hand-off pointer a fresh agent reads first |
 | `synergy status <session>` | `--root` | Print the execution-state rollup (phases done / total) |
 
 ### Daemon HTTP API (performance path)
@@ -114,7 +114,7 @@ the offline fallback when the preview is not running.
 |---|---|---|
 | `POST /api/phase` | `synergy phase set` | `{session, phaseId, status, note?}` |
 | `POST /api/log` | `synergy log` | `{session, text, phase?, global?}` |
-| `POST /api/resume` | `synergy resume` | `{session, next?, note?}` |
+| `POST /api/resume` | `synergy continue` | `{session, next?, note?}` |
 | `GET /api/validate?session=` | `synergy validate` | — (returns ValidationReport JSON) |
 | `GET /api/progress?session=` | `synergy status` | — |
 | `POST /api/scaffold` | per-file mkdir/write | `{session, dirs?, files:[{path,content}]}` |
