@@ -87,7 +87,7 @@ You may NOT start the next phase until all three are done:
     -d '{"session":"<session>","next":"<nextPhaseId>","note":"<where the next agent should start>"}'
 
   # Fallback:
-  node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" resume <session> --next <nextPhaseId> --note "<note>"
+  node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" continue <session> --next <nextPhaseId> --note "<note>"
   ```
 
 - Stop for the human checkpoint defined at this phase boundary.

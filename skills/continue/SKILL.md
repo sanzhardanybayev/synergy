@@ -1,6 +1,6 @@
 ---
-name: resume
-description: Use when the user runs /synergy-resume or asks a fresh-context agent to continue an in-progress Synergy session. Reconstructs context from the execution-state hand-off (resume pointer + journals) before reading the plan, then continues the execute loop from where the previous agent stopped.
+name: continue
+description: Use when the user runs /synergy-continue or asks a fresh-context agent to continue an in-progress Synergy session. Reconstructs context from the execution-state hand-off (resume pointer + journals) before reading the plan, then continues the execute loop from where the previous agent stopped.
 ---
 
 <!-- synergy-version: 0.7.0 -->
@@ -24,7 +24,7 @@ fi
 If it prints a warning, **surface that line to the user verbatim** before continuing.
 Then proceed — staleness is a warning, not a block.
 
-# resume
+# continue
 
 The fresh-context entry point. Reads state FIRST so you start exactly where the last agent left off.
 
