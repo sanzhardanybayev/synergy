@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-export { handoffPath } from './paths.js';
 import { handoffPath } from './paths.js';
+
+export { handoffPath };
 
 type NowFn = () => string;
 const defaultNow: NowFn = () => new Date().toISOString();
