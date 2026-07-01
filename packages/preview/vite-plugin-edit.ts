@@ -14,7 +14,7 @@ import { handleActiveSession } from './src/server/active-session.js';
 import { handleAgentTreePut } from './src/server/agent-tree.js';
 import { handleDiff } from './src/server/diff.js';
 import { handleEdit } from './src/server/edit.js';
-import { handleLog, handlePhase, handleResume } from './src/server/execstate.js';
+import { handleHandoff, handleLog, handlePhase, handleResume } from './src/server/execstate.js';
 import { handleFeedbackBatch } from './src/server/feedback-batch.js';
 import {
   handleFeedbackGet,
@@ -167,6 +167,12 @@ export function synergyEditPlugin(options: PluginOptions): Plugin {
           // POST /api/resume — write the hand-off pointer
           if (method === 'POST' && pathname === '/api/resume') {
             await handleResume(req, res, sessionsDir);
+            return;
+          }
+
+          // POST /api/handoff — write the KT handoff baton + resume pointer
+          if (method === 'POST' && pathname === '/api/handoff') {
+            await handleHandoff(req, res, sessionsDir);
             return;
           }
 
