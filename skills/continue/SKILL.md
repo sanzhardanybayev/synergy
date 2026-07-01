@@ -3,7 +3,7 @@ name: continue
 description: Use when the user runs /synergy-continue or asks a fresh-context agent to continue an in-progress Synergy session. Reconstructs context from the execution-state hand-off (resume pointer + journals) before reading the plan, then continues the execute loop from where the previous agent stopped.
 ---
 
-<!-- synergy-version: 0.8.1 -->
+<!-- synergy-version: 0.9.0 -->
 
 ## Step 0 — Freshness check (run before anything else)
 
@@ -12,7 +12,7 @@ mid-session. Before doing any work, confirm you are the newest installed version
 Set `MINE` to the version in the `synergy-version` marker just above, then run:
 
 ```bash
-MINE="0.8.1"  # ← the synergy-version marker above
+MINE="0.9.0"  # ← the synergy-version marker above
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -35,6 +35,10 @@ CLI base: `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js"`.
 **1. Resolve the session + directives** — same as `synergy:execute` step 1 (`$ARGUMENTS`; fall back to `.synergy/active-session`).
 
 **2. Load the hand-off (state first)**
+- **Read `.synergy/sessions/<session>/.state/handoff.md` first** if it exists — the latest
+  brain-dump from the agent that just stopped (what's half-done, the next concrete step,
+  gotchas, current phase slug). This is your primary starting instruction and router; pull
+  the resume pointer + journals below only for the phase it points you into.
 - Read the rollup and the **resume pointer** (`next` + note) — this is your starting instruction.
   Prefer the daemon endpoint; fall back when the preview is not running:
   ```bash
