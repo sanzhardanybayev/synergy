@@ -4,8 +4,10 @@ export {
   progressPath,
   phaseJournalPath,
   globalJournalPath,
+  handoffPath,
 } from './paths.js';
 export { emptyProgress, readProgress, writeProgress, deriveProgress } from './progress.js';
+export { writeHandoff, readHandoff } from './handoff.js';
 export {
   setPhaseStatus,
   appendFinding,

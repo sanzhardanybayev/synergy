@@ -18,3 +18,7 @@ export function phaseJournalPath(sessionDir: string, phaseId: string): string {
 export function globalJournalPath(sessionDir: string): string {
   return join(stateDir(sessionDir), 'journal.md');
 }
+
+export function handoffPath(sessionDir: string): string {
+  return join(stateDir(sessionDir), 'handoff.md');
+}
