@@ -2,6 +2,7 @@ import { type SessionMeta, loaders, sessions } from 'virtual:synergy/sessions';
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { Outlet, useNavigate, useParams } from 'react-router-dom';
 import { ActiveSessionPinger } from './ActiveSessionPinger.js';
+import { AgentTreeControlsProvider } from './AgentTreeControls.js';
 import { CommentsPanel } from './CommentsPanel.js';
 import { EditBufferProvider, useEditBuffer } from './EditBuffer.js';
 import { OrchestratorDrawer } from './OrchestratorDrawer.js';
@@ -157,7 +158,9 @@ function SessionInner({ session, drawer, closeDrawer, openOrchestrator }: Sessio
             onOpenOrchestrator={openOrchestrator}
           />
           <main className="layout__main">
-            <Outlet />
+            <AgentTreeControlsProvider>
+              <Outlet />
+            </AgentTreeControlsProvider>
           </main>
           <OrchestratorDrawer
             open={drawer !== null}

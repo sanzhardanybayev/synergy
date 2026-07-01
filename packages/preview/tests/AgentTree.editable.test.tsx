@@ -1,31 +1,43 @@
 /**
- * Tests for AgentTreeView — the EditBuffer-wired wrapper around AgentTree.
+ * Tests for the editable AgentTree — model/effort dropdowns + Save/Discard.
+ *
+ * Editability now lives in the spec-kit AgentTree, driven by the
+ * AgentTreeControlsContext the preview supplies (AgentTreeControlsProvider). This
+ * makes an AgentTree authored in MDX interactive regardless of whether the MDX
+ * `import`ed it — an import can no longer shadow the behavior. Replaces the old
+ * AgentTreeView tests.
  */
 
 import type { AgentTreeNode } from '@synergy/spec-kit';
 import { AgentTree } from '@synergy/spec-kit';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AgentTreeView } from '../src/AgentTreeView.js';
-import { EditBufferProvider } from '../src/EditBuffer.js';
+import { AgentTreeControlsProvider } from '../src/AgentTreeControls.js';
+import { EditBufferProvider, useEditBuffer } from '../src/EditBuffer.js';
 import { ToastProvider } from '../src/ToastProvider.js';
 
-// ---------------------------------------------------------------------------
-// Mock fetch (needed so applyOne does not explode)
-// ---------------------------------------------------------------------------
-
+// Mock fetch so applyOne (Save) does not explode.
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+/** Sets the buffer's active file, the way SpecPage/PhasePage do on mount. */
+function SetCurrentFile({ file }: { file: string }) {
+  const { setCurrentFile } = useEditBuffer();
+  useEffect(() => {
+    setCurrentFile(file);
+  }, [file, setCurrentFile]);
+  return null;
+}
 
-function Wrapper({ children }: { children: ReactNode }) {
+/** Editable harness: active file set + controls context provided. */
+function Editable({ file, children }: { file: string; children: ReactNode }) {
   return (
     <ToastProvider>
-      <EditBufferProvider>{children}</EditBufferProvider>
+      <EditBufferProvider>
+        <SetCurrentFile file={file} />
+        <AgentTreeControlsProvider>{children}</AgentTreeControlsProvider>
+      </EditBufferProvider>
     </ToastProvider>
   );
 }
@@ -40,56 +52,45 @@ const nodes: AgentTreeNode[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-describe('AgentTreeView', () => {
+describe('AgentTree (editable via AgentTreeControlsContext)', () => {
   beforeEach(() => {
     mockFetch.mockReset();
   });
 
   it('marks the tree dirty after an effort change', () => {
     render(
-      <Wrapper>
-        <AgentTreeView nodes={nodes} file="demo/00-plan.mdx" />
-      </Wrapper>,
+      <Editable file="demo/00-plan.mdx">
+        <AgentTree nodes={nodes} />
+      </Editable>,
     );
-
     const row = screen.getByText('impl').closest('[data-agent-name]') as HTMLElement;
     const effort = row.querySelector('select[data-field="effort"]') as HTMLSelectElement;
     fireEvent.change(effort, { target: { value: 'max' } });
-
     expect(screen.getByRole('button', { name: /save/i })).toBeTruthy();
   });
 
   it('discard button removes the dirty state', () => {
     render(
-      <Wrapper>
-        <AgentTreeView nodes={nodes} file="demo/00-plan.mdx" />
-      </Wrapper>,
+      <Editable file="demo/00-plan.mdx">
+        <AgentTree nodes={nodes} />
+      </Editable>,
     );
-
     const row = screen.getByText('impl').closest('[data-agent-name]') as HTMLElement;
     const effort = row.querySelector('select[data-field="effort"]') as HTMLSelectElement;
     fireEvent.change(effort, { target: { value: 'max' } });
-
     expect(screen.getByRole('button', { name: /save/i })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /discard/i }));
-
     expect(screen.queryByRole('button', { name: /save/i })).toBeNull();
   });
 
-  it('save button calls PUT /api/agent-tree', async () => {
+  it('save button calls PUT /api/agent-tree with the edited tree', async () => {
     mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
-
     render(
-      <Wrapper>
-        <AgentTreeView nodes={nodes} file="demo/00-plan.mdx" />
-      </Wrapper>,
+      <Editable file="demo/00-plan.mdx">
+        <AgentTree nodes={nodes} />
+      </Editable>,
     );
-
     const row = screen.getByText('impl').closest('[data-agent-name]') as HTMLElement;
     const effort = row.querySelector('select[data-field="effort"]') as HTMLSelectElement;
     fireEvent.change(effort, { target: { value: 'max' } });
@@ -103,48 +104,43 @@ describe('AgentTreeView', () => {
     expect((opts.method as string).toUpperCase()).toBe('PUT');
     const body = JSON.parse(opts.body as string) as { file: string; tree: AgentTreeNode[] };
     expect(body.file).toBe('demo/00-plan.mdx');
-    // impl node should now have effort 'max'
     const implNode = body.tree[0].subAgents?.find((n) => n.name === 'impl');
     expect(implNode?.effort).toBe('max');
   });
 
-  it('subAgents are recursed correctly — nested effort change', () => {
+  it('recurses into subAgents — nested effort change marks dirty', () => {
     const deepNodes: AgentTreeNode[] = [
       {
         name: 'root',
         type: 'orchestrator',
         subAgents: [
-          {
-            name: 'mid',
-            type: 'sub-agent',
-            subAgents: [{ name: 'leaf', type: 'sub-agent' }],
-          },
+          { name: 'mid', type: 'sub-agent', subAgents: [{ name: 'leaf', type: 'sub-agent' }] },
         ],
       },
     ];
-
     render(
-      <Wrapper>
-        <AgentTreeView nodes={deepNodes} file="demo/deep.mdx" />
-      </Wrapper>,
+      <Editable file="demo/deep.mdx">
+        <AgentTree nodes={deepNodes} />
+      </Editable>,
     );
-
     const leafRow = screen.getByText('leaf').closest('[data-agent-name]') as HTMLElement;
     const effortSel = leafRow.querySelector('select[data-field="effort"]') as HTMLSelectElement;
     fireEvent.change(effortSel, { target: { value: 'low' } });
-
     expect(screen.getByRole('button', { name: /save/i })).toBeTruthy();
   });
 
-  it('renders read-only AgentTree when editable without a file (empty currentFile)', () => {
+  it('renders read-only (no controls) when there is no active file', () => {
     render(
-      <Wrapper>
-        <AgentTree nodes={nodes} />
-      </Wrapper>,
+      <ToastProvider>
+        <EditBufferProvider>
+          <AgentTreeControlsProvider>
+            <AgentTree nodes={nodes} />
+          </AgentTreeControlsProvider>
+        </EditBufferProvider>
+      </ToastProvider>,
     );
-
-    // Read-only AgentTree should have no editable controls
-    const effortSelects = screen.queryAllByRole('combobox', { hidden: true });
-    expect(effortSelects).toHaveLength(0);
+    // No currentFile → factory returns null → read-only, no <select> controls.
+    expect(screen.queryAllByRole('combobox', { hidden: true })).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /save/i })).toBeNull();
   });
 });
