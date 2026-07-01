@@ -12,25 +12,18 @@
 import type { AgentTreeNode } from '@synergy/spec-kit';
 import { AgentTree } from '@synergy/spec-kit';
 import type React from 'react';
-import { AgentTreeView } from './AgentTreeView.js';
-import { useEditBuffer } from './EditBuffer.js';
 import { EditableBlock } from './EditableBlock.js';
 
 // Type that satisfies @mdx-js/react's `Props.components` parameter without
 // requiring @types/mdx as a direct devDependency.
 type MdxComponentsMap = Record<string, React.ElementType>;
 
-function AgentTreeBound(props: { nodes: AgentTreeNode[] }) {
-  const buffer = useEditBuffer();
-  return buffer.currentFile ? (
-    <AgentTreeView nodes={props.nodes} file={buffer.currentFile} />
-  ) : (
-    <AgentTree nodes={props.nodes} />
-  );
-}
-
 export const mdxComponents: MdxComponentsMap = {
-  AgentTree: (props: { nodes: AgentTreeNode[] }) => <AgentTreeBound {...props} />,
+  // AgentTree is editable-aware on its own (via AgentTreeControlsContext, which
+  // the preview provides). Mapping it here only covers MDX files that reference
+  // <AgentTree> without importing it; imported usages resolve to the same
+  // context-aware component, so editability can't be shadowed by the import.
+  AgentTree: (props: { nodes: AgentTreeNode[]; context?: string }) => <AgentTree {...props} />,
   p: (props: React.HTMLAttributes<HTMLParagraphElement> & Record<string, unknown>) => (
     <EditableBlock
       as="p"
