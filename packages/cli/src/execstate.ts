@@ -7,6 +7,7 @@ import {
   readProgress,
   setPhaseStatus,
   setResume,
+  writeHandoff,
 } from '@synergy/state';
 import { bold, dim, green } from 'kleur/colors';
 import { resolveProjectPaths } from './paths.js';
@@ -101,4 +102,22 @@ export function printProgress(args: ProgressArgs): string {
   }
   if (progress.phases.length === 0) lines.push(`  ${dim('(no phases recorded yet)')}`);
   return lines.join('\n');
+}
+
+export interface HandoffArgs {
+  root?: string;
+  session: string;
+  body: string;
+  next?: string;
+}
+
+export function handoffSet(args: HandoffArgs): void {
+  const sessionDir = resolveSessionDir(args.root, args.session);
+  writeHandoff(sessionDir, args.body);
+  const stamp = new Date().toISOString();
+  setResume(sessionDir, {
+    nextPhase: args.next,
+    note: `See .state/handoff.md (captured ${stamp})`,
+  });
+  process.stdout.write(`${green('✓')} handoff written → ${dim('.state/handoff.md')}\n`);
 }

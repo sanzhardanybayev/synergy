@@ -1,9 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { ValidationReport } from '@synergy/validator';
 import cac from 'cac';
 import { bold, dim, green, red, yellow } from 'kleur/colors';
 import { tryDaemon } from './daemon.js';
-import { logFinding, phaseSet, printProgress, resumeSet } from './execstate.js';
+import { handoffSet, logFinding, phaseSet, printProgress, resumeSet } from './execstate.js';
 import { initProject } from './init.js';
 import { previewStart, previewStatus, previewStop, printStatus } from './preview.js';
 
@@ -187,5 +188,39 @@ cli
       process.exit(1);
     }
   });
+
+cli
+  .command('handoff <session>', 'Write the KT handoff baton (.state/handoff.md) + resume pointer')
+  .option('--root <dir>', 'Project root (default: cwd)')
+  .option('--next <phaseId>', 'Phase slug the next agent should resume from')
+  .option('--body <text>', 'Handoff markdown body (inline)')
+  .option('--body-file <path>', 'Read the handoff markdown body from a file')
+  .action(
+    async (
+      session: string,
+      flags: { root?: string; next?: string; body?: string; bodyFile?: string },
+    ) => {
+      try {
+        const body = flags.bodyFile ? readFileSync(flags.bodyFile, 'utf8') : (flags.body ?? '');
+        if (!body.trim()) {
+          process.stderr.write(`${red('Error:')} handoff needs --body or --body-file\n`);
+          process.exit(1);
+        }
+        const viaDaemon = await tryDaemon(flags.root, 'POST', '/api/handoff', {
+          session,
+          body,
+          next: flags.next,
+        });
+        if (viaDaemon) {
+          process.stdout.write(`${green('✓')} handoff written → ${dim('.state/handoff.md')}\n`);
+        } else {
+          handoffSet({ root: flags.root, session, body, next: flags.next });
+        }
+      } catch (err) {
+        process.stderr.write(`${red('Error:')} ${(err as Error).message}\n`);
+        process.exit(1);
+      }
+    },
+  );
 
 cli.parse();
