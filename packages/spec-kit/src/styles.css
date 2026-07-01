@@ -309,6 +309,134 @@
   color: #3f6212;
 }
 
+/* ───── AgentTree ───── */
+.sk-agent-tree {
+  margin: 16px 0;
+}
+.sk-agent-tree__context {
+  color: var(--sk-fg-muted);
+  font-size: 14px;
+  margin: 0 0 10px;
+}
+.sk-agent-tree__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--sk-border);
+  border-radius: var(--sk-radius);
+  overflow: hidden;
+}
+.sk-agent-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--sk-border);
+  background: var(--sk-bg);
+  font-size: 14px;
+}
+.sk-agent-tree__row:last-child {
+  border-bottom: none;
+}
+.sk-agent-tree__name {
+  font-family: var(--sk-font-mono);
+  font-weight: 600;
+  color: var(--sk-fg);
+}
+.sk-agent-tree__agentname {
+  font-family: var(--sk-font-mono);
+  font-size: 12px;
+  color: var(--sk-fg-muted);
+}
+.sk-agent-tree__type {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: var(--sk-radius-sm);
+  font-size: 11px;
+  background: var(--sk-bg-muted);
+  color: var(--sk-fg-muted);
+}
+.sk-agent-tree__type--orchestrator {
+  background: var(--sk-accent-soft);
+  color: var(--sk-accent);
+}
+.sk-agent-tree__type--agent-team {
+  background: #fef3c7;
+  color: #92400e;
+}
+/* model + effort controls sit at the right edge of the row */
+.sk-agent-tree__model,
+.sk-agent-tree__select[data-field="model"] {
+  margin-left: auto;
+}
+.sk-agent-tree__model {
+  font-family: var(--sk-font-mono);
+  font-size: 12px;
+  color: var(--sk-fg);
+}
+.sk-agent-tree__effort {
+  font-size: 12px;
+  color: var(--sk-fg-muted);
+}
+.sk-agent-tree__effort[data-inherited="true"] {
+  font-style: italic;
+  opacity: 0.75;
+}
+.sk-agent-tree__count {
+  font-size: 12px;
+  color: var(--sk-fg-muted);
+}
+.sk-agent-tree__select {
+  padding: 3px 6px;
+  border: 1px solid var(--sk-border-strong);
+  border-radius: var(--sk-radius-sm);
+  background: var(--sk-bg);
+  color: var(--sk-fg);
+  font-size: 12px;
+  font-family: var(--sk-font-mono);
+  cursor: pointer;
+}
+.sk-agent-tree__select[data-field="model"] {
+  min-width: 84px;
+}
+.sk-agent-tree__select[data-field="effort"] {
+  min-width: 104px;
+}
+.sk-agent-tree__select[data-inherited="true"] {
+  color: var(--sk-fg-muted);
+  font-style: italic;
+}
+.sk-agent-tree--dirty .sk-agent-tree__list {
+  border-color: var(--sk-status-in-progress);
+}
+.sk-agent-tree__pending {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sk-status-in-progress);
+  margin-left: 6px;
+}
+.sk-agent-tree-view__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.sk-agent-tree-view__actions button {
+  padding: 4px 12px;
+  border: 1px solid var(--sk-border-strong);
+  border-radius: var(--sk-radius-sm);
+  background: var(--sk-bg-elev);
+  color: var(--sk-fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+.sk-agent-tree-view__actions button:first-child {
+  background: var(--sk-accent);
+  color: #fff;
+  border-color: var(--sk-accent);
+}
+
 /* ───── Team ───── */
 .sk-team {
   border: 1px solid var(--sk-border);
