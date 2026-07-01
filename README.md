@@ -26,11 +26,21 @@ The preview isn't read-only — you can fix and annotate specs without a round-t
 
 Edits, comments, and review state all persist to disk (MDX files, `.synergy/feedback/`, and a gitignored `review-state.json`) — git is the version history, so there's no database.
 
+## Plan the agent roster in the browser
+
+Multi-agent execution is only as good as the plan behind it. The `<AgentTree>` **is** that plan — the agent hierarchy plus each agent's model and effort — and it's the single source of truth `/synergy-execute` fans out against.
+
+![Synergy AgentTree: an implementation plan's agent roster showing the hierarchy of orchestrator, sub-agents, and an agent team, each row with a per-agent model dropdown and an inheriting effort dropdown, plus Save / Discard when edited](docs/agent-tree.png)
+
+- **Model is per-node; effort inherits.** Each agent picks its own model (`opus` / `sonnet` / `haiku`); effort cascades down the tree, so you set it once at the top and override only where it matters — a node left on `inherit` shows the resolved value.
+- **Edit in place, Save writes back.** Model and effort are live dropdowns. Change one and the tree goes dirty with **Save** / **Discard**; **Save** writes the change straight into the `<AgentTree>` source in the MDX — no Claude round-trip, the same buffer model as inline prose edits.
+- **Quality-first defaults.** Start every agent at `opus`; drop a tier only when the task is provably bounded and verified downstream. `<AgentAllocation>` then maps each agent to the phases it owns, and `/synergy-execute` resolves the model + effort by name when it spawns sub-agents and teams.
+
 ## Execute & hand off
 
 Authoring is half the loop. Once a plan exists, agents implement against it — and Synergy records what actually happened in a committed `.state/` sidecar per session, so progress is visible and a fresh-context agent can pick up cleanly:
 
-- **Disciplined execution.** `/synergy-execute <session>` works one phase at a time and **can't move past a phase boundary** without recording it: it flips the phase status, writes a terse boundary note, drops ad-hoc findings, and updates the resume pointer — all through the CLI, never by hand-editing state. It fans out sub-agents and teams per the `<AgentAllocation>` plan (model + effort + count), and takes run-time directives ("only Phase 1", "use sonnet this run") that layer over the plan without mutating it.
+- **Disciplined execution.** `/synergy-execute <session>` works one phase at a time and **can't move past a phase boundary** without recording it: it flips the phase status, writes a terse boundary note, drops ad-hoc findings, and updates the resume pointer — all through the CLI, never by hand-editing state. It fans out sub-agents and teams per the `<AgentAllocation>` phase map, resolving each agent's model + effort from the `<AgentTree>` roster by name, and takes run-time directives ("only Phase 1", "use sonnet this run") that layer over the plan without mutating it.
 - **Clean hand-off.** `/synergy-continue <session>` is the fresh-context entry point: it reads the resume pointer and journals *first* (state → strategy → detail), then continues from exactly where the last agent stopped. Clear the session, start a new one, and nothing is lost.
 - **Live progress in the browser.** Every `<Phase id>` badge reflects real status from `.state/`, and a 📊 **Progress drawer** shows the derived rollup (e.g. "2 / 5 phases done"), per-phase journals, and the cross-cutting log — hot-reloading like everything else.
 
@@ -131,7 +141,8 @@ Imported from `@synergy/spec-kit`. Props are schema-validated; cross-references 
 | `<Timeline>` | `milestones` | Ordered visual milestones with optional dates and statuses |
 | `<SubSpec>` | `slug`, `title` | Link card to a sibling spec file |
 | `<CrossRef>` | `to` | Inline reference; `to="<spec-slug>"`, `"<spec-slug>#<anchor>"`, or `"phases/<slug>"` for phase folders |
-| `<AgentAllocation>` | `entries` | Table of agents (`sub-agent`, `agent-team`, `human`), ownership, and per-agent fan-out (`model`, `effort`, `count`) that `/synergy-execute` spawns against |
+| `<AgentTree>` | `nodes` | Agent hierarchy and the **source of truth for per-agent `model` + `effort`** — effort inherits down the tree, model is per-node. Editable live in the preview (see [below](#plan-the-agent-roster-in-the-browser)); `/synergy-execute` resolves each agent's model/effort from here by name |
+| `<AgentAllocation>` | `entries` | Agent → phase ownership (name + phases). Types: `sub-agent`, `agent-team`, `human`. Model/effort are **not** set here — they live in `<AgentTree>` |
 | `<Team>` | `name`, `members` | Group of contributors with roles |
 | `<Reviewer>` | `name`, `role`, `scope` | Reviewer and their sign-off scope |
 | `<OpenQuestion>` | `question` | Unresolved decision blocking progress |
