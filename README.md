@@ -41,7 +41,8 @@ Multi-agent execution is only as good as the plan behind it. The `<AgentTree>` *
 Authoring is half the loop. Once a plan exists, agents implement against it — and Synergy records what actually happened in a committed `.state/` sidecar per session, so progress is visible and a fresh-context agent can pick up cleanly:
 
 - **Disciplined execution.** `/synergy-execute <session>` works one phase at a time and **can't move past a phase boundary** without recording it: it flips the phase status, writes a terse boundary note, drops ad-hoc findings, and updates the resume pointer — all through the CLI, never by hand-editing state. It fans out sub-agents and teams per the `<AgentAllocation>` phase map, resolving each agent's model + effort from the `<AgentTree>` roster by name, and takes run-time directives ("only Phase 1", "use sonnet this run") that layer over the plan without mutating it.
-- **Clean hand-off.** `/synergy-continue <session>` is the fresh-context entry point: it reads the resume pointer and journals *first* (state → strategy → detail), then continues from exactly where the last agent stopped. Clear the session, start a new one, and nothing is lost.
+- **Quit mid-work.** Closing your laptop in the middle of a phase? `/synergy-handoff <session>` has the current agent write a knowledge-transfer baton to `.state/handoff.md` — what it did, what's half-done, the single next concrete step, gotchas, and the current phase — so the next agent resumes *inside* the phase instead of restarting it. It's latest-wins (one current snapshot), git-committed, and read **first** by both execute and continue.
+- **Clean hand-off.** `/synergy-continue <session>` is the fresh-context entry point: it reads `handoff.md`, then the resume pointer and journals (state → strategy → detail), then continues from exactly where the last agent stopped. Clear the session, start a new one, and nothing is lost.
 - **Live progress in the browser.** Every `<Phase id>` badge reflects real status from `.state/`, and a 📊 **Progress drawer** shows the derived rollup (e.g. "2 / 5 phases done"), per-phase journals, and the cross-cutting log — hot-reloading like everything else.
 
 Per-phase status and journals are the source of truth; overall progress is **derived** (never stored, so it can't drift). The `.state/` directory is committed to git — it's the shared hand-off record, not per-user scratch.
@@ -94,6 +95,7 @@ That's the loop. The first command scaffolds `.synergy/sessions/` in your projec
 | `/synergy-feedback [session]` | Address browser-collected comments for the active session (edits specs, resolves/rejects each). |
 | `/synergy-execute [session] [directives]` | Implement a session phase-by-phase, updating execution state at each boundary. |
 | `/synergy-continue [session] [directives]` | Continue an in-progress session from its execution-state hand-off. |
+| `/synergy-handoff [session]` | Capture a mid-work KT baton (`.state/handoff.md`) before you quit, so a future agent resumes inside the current phase. |
 | `/synergy-preview-start` | Boot the preview server on port 4321. Idempotent. |
 | `/synergy-preview-stop` | Kill the preview server, remove PID file. |
 | `/synergy-preview-status` | Report running / stopped, pid, URL. |
@@ -111,6 +113,7 @@ For terminal users — available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist
 | `synergy phase set <session> <id> <status>` | `--root`, `--note` | Record a phase status + optional boundary note |
 | `synergy log <session> <text>` | `--root`, `--phase <id>`, `--global` | Append a finding to a phase or the global journal |
 | `synergy continue <session>` | `--root`, `--next <id>`, `--note` | Write the hand-off pointer a fresh agent reads first |
+| `synergy handoff <session>` | `--root`, `--next <id>`, `--body <text>`, `--body-file <path>` | Write the KT handoff baton (`.state/handoff.md`) + resume pointer |
 | `synergy status <session>` | `--root` | Print the execution-state rollup (phases done / total) |
 
 ### Daemon HTTP API (performance path)
@@ -125,6 +128,7 @@ the offline fallback when the preview is not running.
 | `POST /api/phase` | `synergy phase set` | `{session, phaseId, status, note?}` |
 | `POST /api/log` | `synergy log` | `{session, text, phase?, global?}` |
 | `POST /api/resume` | `synergy continue` | `{session, next?, note?}` |
+| `POST /api/handoff` | `synergy handoff` | `{session, body, next?}` |
 | `GET /api/validate?session=` | `synergy validate` | — (returns ValidationReport JSON) |
 | `GET /api/progress?session=` | `synergy status` | — |
 | `POST /api/scaffold` | per-file mkdir/write | `{session, dirs?, files:[{path,content}]}` |
