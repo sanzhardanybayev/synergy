@@ -1,6 +1,12 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
-import { type StatusValue, appendFinding, setPhaseStatus, setResume } from '@synergy/state';
+import {
+  type StatusValue,
+  appendFinding,
+  setPhaseStatus,
+  setResume,
+  writeHandoff,
+} from '@synergy/state';
 import { readJsonBody, sendJson } from './http.js';
 
 const STATUS_VALUES: StatusValue[] = [
@@ -159,6 +165,53 @@ export async function handleResume(
       session: body.session,
       next: typeof body.next === 'string' ? body.next : undefined,
       note: typeof body.note === 'string' ? body.note : undefined,
+    });
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 400, {
+      error: 'bad_request',
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+export function applyHandoff(
+  sessionsDir: string,
+  body: { session: string; body: string; next?: string },
+): void {
+  assertSafeSession(body.session);
+  const sessionDir = join(sessionsDir, body.session);
+  writeHandoff(sessionDir, body.body);
+  setResume(sessionDir, {
+    nextPhase: body.next,
+    note: `See .state/handoff.md (captured ${new Date().toISOString()})`,
+  });
+}
+
+export async function handleHandoff(
+  req: IncomingMessage,
+  res: ServerResponse,
+  sessionsDir: string,
+): Promise<void> {
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    sendJson(res, 400, { error: 'invalid_json' });
+    return;
+  }
+  if (!isRecord(body) || typeof body.session !== 'string' || typeof body.body !== 'string') {
+    sendJson(res, 400, {
+      error: 'bad_request',
+      detail: 'session and body are required strings',
+    });
+    return;
+  }
+  try {
+    applyHandoff(sessionsDir, {
+      session: body.session,
+      body: body.body,
+      next: typeof body.next === 'string' ? body.next : undefined,
     });
     sendJson(res, 200, { ok: true });
   } catch (err) {

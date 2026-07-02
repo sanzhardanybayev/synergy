@@ -75,6 +75,10 @@ Every session has a `.state/` sidecar **committed to git** — it is the shared 
 - `phases/<slug>.md` — per-phase journal written by `phase set --note` and `log --phase`.
 - `journal.md` — cross-cutting findings written by `log --global`.
 - `resume` in `progress.json` — the hand-off pointer (`nextPhase` + free-text `note`) a fresh agent reads first before touching anything else.
+- `handoff.md` — a latest-wins KT baton written by `/synergy-handoff` when you stop
+  mid-work. Both `synergy:execute` and `synergy:continue` read it FIRST; it carries
+  sub-phase state (what's half-done, the next concrete step) that the phase-gated journals
+  miss. Overwritten on each capture; git-committed like the rest of `.state/`.
 
 Every `<Phase>` should carry a stable `id` (slug, e.g. `id="storage"`). Execution state keys on that slug. The validator emits a warning when `id` is absent.
 
@@ -84,6 +88,7 @@ CLI commands:
 synergy phase set <session> <phaseId> <status> [--note <text>]   record phase status + optional boundary note
 synergy log <session> <text> (--phase <id> | --global)           append a finding to a phase or global journal
 synergy continue <session> [--next <phaseId>] [--note <text>]    write the hand-off pointer
+synergy handoff <session> [--next <id>] [--body <text> | --body-file <path>]   write the KT handoff baton (.state/handoff.md) + resume pointer
 synergy status <session>                                          print progress rollup (phases done / total)
 ```
 
@@ -104,6 +109,7 @@ and a mtime-keyed parse cache:
 | `POST /api/phase` | `synergy phase set` | `{session, phaseId, status, note?}` |
 | `POST /api/log` | `synergy log` | `{session, text, phase?, global?}` |
 | `POST /api/resume` | `synergy continue` | `{session, next?, note?}` |
+| `POST /api/handoff` | `synergy handoff` | `{session, body, next?}` |
 | `GET /api/validate?session=` | `synergy validate` | — (returns ValidationReport JSON) |
 | `GET /api/progress?session=` | `synergy status` | — |
 | `POST /api/scaffold` | per-file mkdir/write in create-spec | `{session, dirs?, files:[{path,content}]}` |
@@ -121,12 +127,13 @@ synergy validate [session]            parser + cross-ref check
 synergy phase set <session> <id> <status> [--note <text>]   record phase transition
 synergy log <session> <text> (--phase <id> | --global)      append finding to journal
 synergy continue <session> [--next <id>] [--note <text>]    write hand-off pointer
+synergy handoff <session> [--next <id>] [--body <text> | --body-file <path>]   write the KT handoff baton (.state/handoff.md) + resume pointer
 synergy status <session>                                     print execution-state rollup
 ```
 
 Spec authoring is not a CLI command — invoke the `synergy:create-spec` skill (or `/synergy-spec` slash command, which dispatches to the skill).
 
-Claude Code slash commands: `/synergy-spec` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback` (skill), `/synergy-execute` (skill), `/synergy-continue` (skill).
+Claude Code slash commands: `/synergy-spec` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback` (skill), `/synergy-execute` (skill), `/synergy-continue` (skill), `/synergy-handoff` (skill).
 
 ## Release & freshness
 
