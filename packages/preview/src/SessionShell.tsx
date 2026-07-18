@@ -12,6 +12,7 @@ import { ProgressProvider, useProgressData } from './ProgressProvider.js';
 import { type OrchestratorTarget, Sidebar } from './Sidebar.js';
 import { UnloadGuard } from './UnloadGuard.js';
 import type { Comment } from './api.js';
+import { ListChecksIcon, MessageIcon, XIcon } from './icons.js';
 
 interface SessionContextValue {
   session: SessionMeta;
@@ -181,7 +182,7 @@ function SessionInner({ session, drawer, closeDrawer, openOrchestrator }: Sessio
           aria-expanded={progressOpen}
           aria-label={progressOpen ? 'Close progress' : 'Open progress'}
         >
-          {progressOpen ? '✕' : '📊'}
+          {progressOpen ? <XIcon size={16} /> : <ListChecksIcon size={16} />}
         </button>
       </ProgressProvider>
 
@@ -197,7 +198,7 @@ function SessionInner({ session, drawer, closeDrawer, openOrchestrator }: Sessio
           aria-expanded={commentsPanelOpen}
           aria-label={commentsPanelOpen ? 'Close comments panel' : 'Open comments panel'}
         >
-          {commentsPanelOpen ? '✕' : '\u{1F4AC}'}
+          {commentsPanelOpen ? <XIcon size={16} /> : <MessageIcon size={16} />}
         </button>
 
         {commentsPanelOpen && (

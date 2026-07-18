@@ -149,6 +149,14 @@ for human reviewers.
 
 The CLI handles process and execution-state operations only — see CLAUDE.md "Commands" for the authoritative list of `synergy` subcommands and Claude Code slash commands. Spec creation and editing live in skills — there is no `synergy spec` command.
 
+## Preview design system
+
+The preview app's visual language ("Ember & Graphite" - warm copper accent on warm
+graphite/paper neutrals, Space Grotesk + Inter + JetBrains Mono) is token-driven.
+`packages/preview/src/theme.css` is the single token source; `docs/design-system.md`
+documents it. When touching preview or spec-kit CSS, consume `--syn-*` tokens (or the
+`--sk-*` aliases) - never hardcode palette hex values in component rules.
+
 ## Don'ts
 
 - Don't co-locate session content in the consumer's source tree. Always `.synergy/sessions/`.
@@ -159,3 +167,10 @@ The CLI handles process and execution-state operations only — see CLAUDE.md "C
 - Don't pin the preview to a port other than 4321 without updating CLAUDE.md and the docs.
 - Don't reference phases by numeric prefix in CrossRefs. The slug is the identifier; the prefix is just sort order.
 - Don't try to add a `synergy spec` CLI command. Authoring is a skill.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

@@ -208,19 +208,19 @@ describe('Sidebar', () => {
         }),
       ],
     });
-    expect(screen.queryByRole('button', { name: /orchestrator \(root\)/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^orchestrator$/i })).toBeNull();
   });
 
   it('renders the root orchestrator entry when the session has one', () => {
     renderSidebar();
-    expect(screen.getByRole('button', { name: /orchestrator \(root\)/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^orchestrator$/i })).toBeInTheDocument();
   });
 
   it('invokes onOpenOrchestrator with root when clicked', async () => {
     const onOpenOrchestrator = vi.fn();
     const user = userEvent.setup();
     renderSidebar({ onOpenOrchestrator });
-    await user.click(screen.getByRole('button', { name: /orchestrator \(root\)/i }));
+    await user.click(screen.getByRole('button', { name: /^orchestrator$/i }));
     expect(onOpenOrchestrator).toHaveBeenCalledWith('root');
   });
 

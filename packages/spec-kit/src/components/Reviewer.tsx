@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { ActorRole } from '../types.js';
+import { UserIcon } from './icons.js';
 
 export interface ReviewerProps {
   name: string;
@@ -14,7 +15,7 @@ export function Reviewer({ name, role, scope, handle, children }: ReviewerProps)
   return (
     <div className="sk-reviewer">
       <span className="sk-reviewer__icon" aria-hidden>
-        👤
+        <UserIcon size={18} />
       </span>
       <div className="sk-reviewer__body">
         <div className="sk-reviewer__head">

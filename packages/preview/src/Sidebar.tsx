@@ -1,6 +1,14 @@
 import type { PhaseMeta, SessionMeta } from 'virtual:synergy/sessions';
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import { ThemeToggle } from './ThemeToggle.js';
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  SynergyMark,
+  WorkflowIcon,
+} from './icons.js';
 
 export type OrchestratorTarget = 'root' | { phaseSlug: string };
 
@@ -43,6 +51,9 @@ export function Sidebar({ sessions, currentSessionName, onOpenOrchestrator }: Pr
       <aside className="sidebar">
         <Brand />
         <p className="sidebar__hint">No session selected.</p>
+        <div className="sidebar__section sidebar__section--bottom">
+          <ThemeToggle />
+        </div>
       </aside>
     );
   }
@@ -66,7 +77,7 @@ export function Sidebar({ sessions, currentSessionName, onOpenOrchestrator }: Pr
           <span className="sidebar__section-label">Session</span>
           <span className="sidebar__current">{currentSessionName}</span>
           <span className="sidebar__chevron" aria-hidden="true">
-            {sessionsOpen ? '▴' : '▾'}
+            {sessionsOpen ? <ChevronUpIcon size={14} /> : <ChevronDownIcon size={14} />}
           </span>
         </button>
         {sessionsOpen ? (
@@ -115,7 +126,11 @@ export function Sidebar({ sessions, currentSessionName, onOpenOrchestrator }: Pr
                       aria-expanded={phasesExpanded}
                       onClick={() => setPhasesExpanded((p) => !p)}
                     >
-                      {phasesExpanded ? '▾' : '▸'}
+                      {phasesExpanded ? (
+                        <ChevronDownIcon size={13} />
+                      ) : (
+                        <ChevronRightIcon size={13} />
+                      )}
                     </button>
                   ) : null}
                 </div>
@@ -143,18 +158,21 @@ export function Sidebar({ sessions, currentSessionName, onOpenOrchestrator }: Pr
         </ul>
       </div>
 
-      {session.hasOrchestrator ? (
-        <div className="sidebar__section sidebar__section--bottom">
+      <div className="sidebar__section sidebar__section--bottom">
+        {session.hasOrchestrator ? (
           <button
             type="button"
             className="sidebar__orchestrator"
             onClick={() => onOpenOrchestrator('root')}
           >
-            <span aria-hidden="true">📎</span>
-            <span>Orchestrator (root)</span>
+            <span className="sidebar__orchestrator-icon" aria-hidden="true">
+              <WorkflowIcon size={15} />
+            </span>
+            <span>Orchestrator</span>
           </button>
-        </div>
-      ) : null}
+        ) : null}
+        <ThemeToggle />
+      </div>
     </aside>
   );
 }
@@ -163,7 +181,7 @@ function Brand() {
   return (
     <div className="sidebar__brand">
       <span className="sidebar__logo" aria-hidden="true">
-        ⌬
+        <SynergyMark size={20} />
       </span>
       <span className="sidebar__title">Synergy</span>
     </div>

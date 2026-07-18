@@ -12,6 +12,7 @@
 
 import { useCallback } from 'react';
 import { useEditBuffer } from './EditBuffer.js';
+import { FileDiffIcon, MessageIcon } from './icons.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -77,13 +78,13 @@ export function TopToolbar({ openComments, diffOn, onToggleDiff }: TopToolbarPro
             diffOn ? 'Diff view: on — click to turn off' : 'Diff view: off — click to turn on'
           }
         >
-          <span aria-hidden="true">&#128269;</span> Diff: {diffOn ? 'on' : 'off'}
+          <FileDiffIcon size={14} /> Diff: {diffOn ? 'on' : 'off'}
         </button>
 
         {openComments > 0 && (
           <span className="top-toolbar__comment-badge" aria-label={`${openComments} open comments`}>
             <span className="top-toolbar__comment-badge-icon" aria-hidden="true">
-              &#128172;
+              <MessageIcon size={13} />
             </span>
             {openComments}
           </span>

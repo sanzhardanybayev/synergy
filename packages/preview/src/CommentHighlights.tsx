@@ -9,6 +9,7 @@ import { useEditBuffer } from './EditBuffer.js';
 import type { Comment } from './api.js';
 import { listFeedback } from './api.js';
 import { getMarkerPosition, getRangeClientRects, locateCommentInDom } from './commentDom.js';
+import { MessageIcon } from './icons.js';
 
 export interface CommentHighlightsProps {
   session: string;
@@ -188,7 +189,7 @@ function CommentHighlightItem({ layout, expanded, pulsing, onToggle, onClose }: 
           aria-label={expanded ? 'Collapse comment' : `Comment: ${comment.body}`}
         >
           <span className="comment-highlight__bubble-icon" aria-hidden>
-            💬
+            <MessageIcon size={13} />
           </span>
           {!expanded && (
             <span className="comment-highlight__bubble-preview">{truncate(comment.body, 48)}</span>

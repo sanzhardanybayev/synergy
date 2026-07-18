@@ -21,6 +21,7 @@ import { useToast } from './ToastProvider.js';
 import type { CommentAnchor } from './api.js';
 import { postFeedback } from './api.js';
 import { computeAnchor } from './commentAnchors.js';
+import { PlusIcon } from './icons.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -231,7 +232,7 @@ export function CommentLayer({ session, file, fileSource, onPosted }: CommentLay
           }}
           onClick={openComposer}
         >
-          +
+          <PlusIcon size={14} />
         </button>
       )}
 

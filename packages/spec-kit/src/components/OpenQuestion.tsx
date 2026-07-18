@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { CircleHelpIcon } from './icons.js';
 
 export interface OpenQuestionProps {
   /** Short identifier, e.g. "Q1". Used for cross-refs. */
@@ -17,7 +18,7 @@ export function OpenQuestion({ id, question, owner, resolveBy, children }: OpenQ
     <aside className="sk-question" data-question-id={id ?? ''}>
       <header className="sk-question__header">
         <span className="sk-question__icon" aria-hidden>
-          ❓
+          <CircleHelpIcon size={16} />
         </span>
         {id ? <span className="sk-question__id">{id}</span> : null}
         <span className="sk-question__text">{question}</span>

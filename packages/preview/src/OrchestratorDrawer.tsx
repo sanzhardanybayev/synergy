@@ -1,6 +1,7 @@
 import { Component, type ReactNode, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { CopyButton } from './CopyButton.js';
+import { XIcon } from './icons.js';
 
 interface Props {
   open: boolean;
@@ -69,7 +70,7 @@ export function OrchestratorDrawer({ open, title, path, loader, onClose }: Props
           <div className="drawer__actions">
             <CopyButton label="Copy path" value={path} />
             <button type="button" className="drawer__close" aria-label="Close" onClick={onClose}>
-              ✕
+              <XIcon size={16} />
             </button>
           </div>
         </header>

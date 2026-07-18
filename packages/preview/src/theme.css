@@ -1,0 +1,276 @@
+/*
+ * theme.css — the Synergy design-token layer ("Ember & Graphite").
+ *
+ * Single source of truth for color, type, spacing, radii, shadows, and motion
+ * across the preview app AND the spec-kit component surface (via the --sk-*
+ * aliases at the bottom). Import order in main.tsx matters: this file loads
+ * after @synergy/spec-kit/styles.css so the aliases win.
+ *
+ * Theming: index.html resolves the theme before first paint and stamps
+ * `data-theme="light" | "dark"` on <html>. `:root` carries the light values;
+ * `:root[data-theme='dark']` overrides them. There is no media-query fallback
+ * on purpose — the inline script always resolves "system" to a concrete theme
+ * and live-updates it, so the CSS stays single-source.
+ */
+
+:root {
+  /* ---- Brand ---- */
+  --syn-accent: #c14f2c;
+  --syn-accent-strong: #a83f20;
+  --syn-accent-fg: #a83f20;
+  --syn-accent-contrast: #ffffff;
+  --syn-on-fill: #ffffff;
+  --syn-accent-soft: rgba(193, 79, 44, 0.1);
+  --syn-accent-soft-strong: rgba(193, 79, 44, 0.18);
+  --syn-accent-border: rgba(193, 79, 44, 0.42);
+
+  /* ---- Neutrals (warm paper) ---- */
+  --syn-bg: #faf9f6;
+  --syn-bg-sunken: #f3f1ec;
+  --syn-bg-raised: #ffffff;
+  --syn-bg-overlay: #ffffff;
+  --syn-bg-hover: rgba(31, 28, 24, 0.05);
+  --syn-bg-active: rgba(31, 28, 24, 0.08);
+  --syn-fg: #211d18;
+  --syn-fg-muted: #5f584e;
+  --syn-fg-subtle: #736b5d;
+  --syn-border: #e6e2d9;
+  --syn-border-strong: #d2ccc0;
+  --syn-code-bg: rgba(31, 28, 24, 0.055);
+  --syn-scrim: rgba(24, 21, 17, 0.45);
+
+  /* ---- Status hues ---- */
+  --syn-status-draft: #8d8578;
+  --syn-status-proposed: #6d5bd0;
+  --syn-status-in-progress: #a16207;
+  --syn-status-blocked: #c03a2b;
+  --syn-status-done: #22794a;
+  --syn-status-shipped: #17708b;
+
+  --syn-danger: #c03a2b;
+  --syn-danger-soft: rgba(192, 58, 43, 0.1);
+  --syn-success: #22794a;
+  --syn-success-soft: rgba(34, 121, 74, 0.12);
+  --syn-warn: #a16207;
+  --syn-warn-soft: rgba(161, 98, 7, 0.12);
+
+  /* Diff view */
+  --syn-diff-add-bg: rgba(34, 121, 74, 0.14);
+  --syn-diff-add-bg-soft: rgba(34, 121, 74, 0.07);
+  --syn-diff-add-fg: #1c5f3b;
+  --syn-diff-add-fg-soft: #2e7d51;
+  --syn-diff-del-bg: rgba(192, 58, 43, 0.12);
+  --syn-diff-del-bg-soft: rgba(192, 58, 43, 0.06);
+  --syn-diff-del-fg: #9c3223;
+  --syn-diff-del-fg-soft: #b04a3a;
+
+  /* Comment highlight (marker over prose) */
+  --syn-mark: rgba(224, 158, 48, 0.32);
+  --syn-mark-strong: rgba(224, 158, 48, 0.55);
+
+  /* Chart sheet — deliberately light in BOTH themes (mermaid renders a fixed
+     light palette; framing it as a paper "spec sheet" makes that a feature). */
+  --syn-sheet-bg: #fdfcfa;
+  --syn-sheet-border: var(--syn-border);
+
+  /* ---- Typography ---- */
+  --syn-font-ui: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    system-ui, sans-serif;
+  --syn-font-display: "Space Grotesk Variable", "Space Grotesk", var(--syn-font-ui);
+  --syn-font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+
+  --syn-text-xs: 11px;
+  --syn-text-sm: 12px;
+  --syn-text-md: 13px;
+  --syn-text-base: 14px;
+  --syn-text-body: 15px;
+  --syn-text-lg: 17px;
+  --syn-text-xl: 21px;
+  --syn-text-2xl: 26px;
+  --syn-leading-tight: 1.25;
+  --syn-leading-snug: 1.4;
+  --syn-leading-body: 1.65;
+  --syn-tracking-tight: -0.02em;
+  --syn-tracking-wide: 0.08em;
+
+  /* ---- Spacing (4px base) ---- */
+  --syn-sp-1: 4px;
+  --syn-sp-2: 8px;
+  --syn-sp-3: 12px;
+  --syn-sp-4: 16px;
+  --syn-sp-5: 20px;
+  --syn-sp-6: 24px;
+  --syn-sp-8: 32px;
+  --syn-sp-10: 40px;
+  --syn-sp-12: 48px;
+  --syn-sp-16: 64px;
+
+  /* ---- Radii ---- */
+  --syn-radius-xs: 4px;
+  --syn-radius-sm: 6px;
+  --syn-radius-md: 8px;
+  --syn-radius-lg: 12px;
+  --syn-radius-xl: 16px;
+  --syn-radius-full: 999px;
+
+  /* ---- Shadows ---- */
+  --syn-shadow-sm: 0 1px 2px rgba(31, 28, 24, 0.06);
+  --syn-shadow-md: 0 2px 8px -2px rgba(31, 28, 24, 0.12), 0 1px 2px rgba(31, 28, 24, 0.06);
+  --syn-shadow-lg: 0 12px 32px -8px rgba(31, 28, 24, 0.2), 0 2px 8px -2px rgba(31, 28, 24, 0.08);
+  --syn-shadow-drawer: -24px 0 64px -24px rgba(24, 21, 17, 0.35);
+
+  /* ---- Motion ---- */
+  --syn-ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+  --syn-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --syn-dur-fast: 120ms;
+  --syn-dur-med: 180ms;
+  --syn-dur-slow: 260ms;
+
+  /* ---- Layout ---- */
+  --syn-sidebar-w: 268px;
+  --syn-content-w: 860px;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  /* ---- Brand ---- */
+  --syn-accent: #e0784f;
+  --syn-accent-strong: #e98a63;
+  --syn-accent-fg: #ef9871;
+  --syn-accent-contrast: #1c130e;
+  --syn-on-fill: #161412;
+  --syn-accent-soft: rgba(224, 120, 79, 0.12);
+  --syn-accent-soft-strong: rgba(224, 120, 79, 0.22);
+  --syn-accent-border: rgba(224, 120, 79, 0.45);
+
+  /* ---- Neutrals (warm graphite) ---- */
+  --syn-bg: #161412;
+  --syn-bg-sunken: #11100e;
+  --syn-bg-raised: #1d1b18;
+  --syn-bg-overlay: #23201c;
+  --syn-bg-hover: rgba(237, 231, 222, 0.06);
+  --syn-bg-active: rgba(237, 231, 222, 0.1);
+  --syn-fg: #ece7df;
+  --syn-fg-muted: #a89f92;
+  --syn-fg-subtle: #8a8172;
+  --syn-border: #2b2823;
+  --syn-border-strong: #403b33;
+  --syn-code-bg: rgba(237, 231, 222, 0.07);
+  --syn-scrim: rgba(8, 7, 6, 0.6);
+
+  /* ---- Status hues ---- */
+  --syn-status-draft: #8d8578;
+  --syn-status-proposed: #a394e8;
+  --syn-status-in-progress: #d9a13c;
+  --syn-status-blocked: #e0644e;
+  --syn-status-done: #55b47c;
+  --syn-status-shipped: #56aec9;
+
+  --syn-danger: #e0644e;
+  --syn-danger-soft: rgba(224, 100, 78, 0.14);
+  --syn-success: #55b47c;
+  --syn-success-soft: rgba(85, 180, 124, 0.14);
+  --syn-warn: #d9a13c;
+  --syn-warn-soft: rgba(217, 161, 60, 0.14);
+
+  /* Diff view */
+  --syn-diff-add-bg: rgba(85, 180, 124, 0.16);
+  --syn-diff-add-bg-soft: rgba(85, 180, 124, 0.08);
+  --syn-diff-add-fg: #8fd6ac;
+  --syn-diff-add-fg-soft: #b4e5c9;
+  --syn-diff-del-bg: rgba(224, 100, 78, 0.16);
+  --syn-diff-del-bg-soft: rgba(224, 100, 78, 0.08);
+  --syn-diff-del-fg: #f0a294;
+  --syn-diff-del-fg-soft: #f6c4ba;
+
+  /* Comment highlight */
+  --syn-mark: rgba(224, 158, 48, 0.28);
+  --syn-mark-strong: rgba(224, 158, 48, 0.5);
+
+  /* Chart sheet stays paper-light: see note above. */
+  --syn-sheet-bg: #f6f4ef;
+  --syn-sheet-border: #4a453d;
+
+  /* ---- Shadows (deeper; borders carry structure) ---- */
+  --syn-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --syn-shadow-md: 0 2px 10px -2px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.35);
+  --syn-shadow-lg: 0 16px 40px -12px rgba(0, 0, 0, 0.65), 0 2px 8px -2px rgba(0, 0, 0, 0.4);
+  --syn-shadow-drawer: -24px 0 64px -20px rgba(0, 0, 0, 0.7);
+
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------------------
+   Legacy aliases — app.css / edit-ui.css historically used --app-* names and
+   spec-kit uses --sk-*. Both resolve to the token layer above so every surface
+   shifts theme together.
+   --------------------------------------------------------------------------- */
+
+:root,
+:root[data-theme="dark"] {
+  --app-bg: var(--syn-bg);
+  --app-fg: var(--syn-fg);
+  --app-fg-muted: var(--syn-fg-muted);
+  --app-fg-subtle: var(--syn-fg-subtle);
+  --app-border: var(--syn-border);
+  --app-border-strong: var(--syn-border-strong);
+  --sidebar-bg: var(--syn-bg-sunken);
+  --sidebar-fg: var(--syn-fg);
+  --accent: var(--syn-accent);
+  --accent-bg: var(--syn-accent-soft);
+  --accent-fg: var(--syn-accent-fg);
+  --drawer-bg: var(--syn-bg-raised);
+  --code-bg: var(--syn-code-bg);
+  --radius: var(--syn-radius-md);
+  --sidebar-w: var(--syn-sidebar-w);
+  --mono: var(--syn-font-mono);
+
+  --sk-bg: var(--syn-bg);
+  --sk-bg-elev: var(--syn-bg-raised);
+  --sk-bg-muted: var(--syn-code-bg);
+  --sk-fg: var(--syn-fg);
+  --sk-fg-muted: var(--syn-fg-muted);
+  --sk-muted: var(--syn-fg-muted);
+  --sk-border: var(--syn-border);
+  --sk-border-strong: var(--syn-border-strong);
+  --sk-accent: var(--syn-accent);
+  --sk-accent-fg: var(--syn-accent-fg);
+  --sk-accent-soft: var(--syn-accent-soft);
+  --sk-on-fill: var(--syn-on-fill);
+  --sk-status-draft: var(--syn-status-draft);
+  --sk-status-proposed: var(--syn-status-proposed);
+  --sk-status-in-progress: var(--syn-status-in-progress);
+  --sk-status-blocked: var(--syn-status-blocked);
+  --sk-status-done: var(--syn-status-done);
+  --sk-status-shipped: var(--syn-status-shipped);
+  --sk-sev-low: var(--syn-status-done);
+  --sk-sev-medium: var(--syn-status-in-progress);
+  --sk-sev-high: var(--syn-status-blocked);
+  --sk-sev-critical: #8f1d1d;
+  --sk-radius: var(--syn-radius-md);
+  --sk-radius-sm: var(--syn-radius-xs);
+  --sk-font-mono: var(--syn-font-mono);
+  --sk-sheet-bg: var(--syn-sheet-bg);
+  --sk-sheet-border: var(--syn-sheet-border);
+}
+
+:root[data-theme="dark"] {
+  --sk-sev-critical: #f28b82;
+}
+
+/* ---------------------------------------------------------------------------
+   Motion hygiene
+   --------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

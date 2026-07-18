@@ -1,4 +1,8 @@
+import '@fontsource-variable/inter';
+import '@fontsource-variable/space-grotesk';
+import '@fontsource-variable/jetbrains-mono';
 import '@synergy/spec-kit/styles.css';
+import './theme.css';
 import './app.css';
 import './edit-ui.css';
 

@@ -6,6 +6,7 @@ import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { defineConfig } from 'vite';
 import { rehypeSourceRange } from './src/rehype-source-range.js';
+import { buildFsAllowList } from './vite-fs-allow.js';
 import { synergyEditPlugin } from './vite-plugin-edit.js';
 import { synergySessionsPlugin } from './vite-plugin-sessions.js';
 
@@ -24,8 +25,9 @@ export default defineConfig({
     strictPort: true,
     host: 'localhost',
     fs: {
-      // Allow vite to serve files outside of cwd (the sessions dir).
-      allow: [__dirname, projectRoot, sessionsDir],
+      // Allow vite to serve files outside of cwd: the sessions dir plus the
+      // self-hosted font assets (see vite-fs-allow.ts).
+      allow: buildFsAllowList(__dirname, projectRoot, sessionsDir),
     },
   },
   resolve: {

@@ -18,6 +18,7 @@ Codex distribution is **not in v1**. Do not add Codex skill files yet.
 ## Conventions
 
 - pnpm workspaces. Use `pnpm` not `npm`/`yarn`.
+- Preview styling is token-driven ("Ember & Graphite"). Tokens live in `packages/preview/src/theme.css`; see `docs/design-system.md`. Never hardcode palette hex values in preview or spec-kit component CSS.
 - TypeScript everywhere. Strict mode on.
 - One package per concern — do not let preview leak into spec-kit, or vice versa.
 - Each MDX session lives in `.synergy/sessions/YYYY-MM-DD-<slug-from-title>/`. Slug max 40 chars, lowercase, hyphenated. Collisions get a `-<6-char-hash>` suffix.
