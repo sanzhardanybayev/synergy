@@ -1,16 +1,15 @@
 import { type FSWatcher, mkdirSync, statSync, watch } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
+import { LISTENING_FILE, REVIEW_DONE_FILE } from '@synergy/state';
 import { formatSseFrame } from './progress-stream.js';
 
 const DEBOUNCE_MS = 80;
 
-/**
- * Presence marker a waiting `synergy feedback wait` maintains (heartbeat
- * touch every 30s, removed on exit). Must match LISTENING_FILE in
- * @synergy/cli's feedback-wait.
- */
-export const LISTENING_FILE = '.listening';
+// Re-exported for existing importers of this module; the authoritative
+// definition (and doc comment) now lives in @synergy/state's
+// feedback-files.ts, shared with @synergy/cli's feedback-wait.
+export { LISTENING_FILE };
 
 /** Marker older than this is a dead process, not a listening agent. */
 const LISTENING_STALE_MS = 90_000;
@@ -31,8 +30,11 @@ export function isAgentListening(sessionDir: string, now = Date.now()): boolean 
  * GET /api/feedback/stream?session=<name>
  *
  * SSE notification channel for the comment set of one session: an initial
- * `connected` frame, then a `feedback-changed` frame whenever any file in the
- * session's feedback dir changes (new comment, agent resolution, review-done).
+ * `connected` frame, then `feedback-changed`/`presence` frames as the
+ * session's feedback dir changes. `.md` comment-file changes (new comment,
+ * agent resolution) and `REVIEW_DONE_FILE` drops trigger `feedback-changed`;
+ * `LISTENING_FILE` changes trigger a `presence` frame; an unknown or null
+ * filename (platform-dependent) conservatively triggers both.
  * Frames carry no comment data — clients refetch GET /api/feedback, so the
  * payload can never go stale or race a half-written file.
  */
@@ -92,6 +94,12 @@ export function handleFeedbackStream(
   };
 
   let watcher: FSWatcher | undefined;
+  let watcherClosed = false;
+  const closeWatcher = () => {
+    if (watcherClosed) return;
+    watcherClosed = true;
+    watcher?.close();
+  };
   try {
     watcher = watch(sessionDir, (_event, filename) => {
       const name = filename?.toString() ?? '';
@@ -101,7 +109,23 @@ export function handleFeedbackStream(
         sendPresence();
         return;
       }
-      if (name.endsWith('.md')) schedule();
+      if (name.endsWith('.md') || name === REVIEW_DONE_FILE) {
+        schedule();
+        return;
+      }
+      if (!name) {
+        // Null/empty filename (platform-dependent): could be either kind of
+        // change, so conservatively trigger both a refetch and a presence check.
+        schedule();
+        sendPresence();
+      }
+    });
+    watcher.on('error', () => {
+      // Watched dir vanished mid-stream (e.g. session deleted). Stop
+      // watching but keep the SSE connection and presence poll alive —
+      // the client falls back to manual refresh instead of the whole
+      // response (or process) crashing on an uncaught watcher error.
+      closeWatcher();
     });
   } catch {
     /* watch unsupported/dir vanished; client keeps manual refresh behavior */
@@ -114,7 +138,7 @@ export function handleFeedbackStream(
   req.on('close', () => {
     if (timer) clearTimeout(timer);
     clearInterval(presencePoll);
-    watcher?.close();
+    closeWatcher();
     res.end();
   });
 }

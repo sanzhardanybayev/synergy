@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdirSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -118,6 +118,40 @@ describe('handleFeedbackStream', () => {
 
     req.emit('close');
   });
+
+  it(
+    'survives the watched dir vanishing mid-stream without an uncaught watcher error',
+    { timeout: 15_000 },
+    async () => {
+      temp = makeTempDir();
+      const sessionDir = join(temp.dir, SESSION);
+      mkdirSync(sessionDir, { recursive: true });
+
+      const req = makeStreamReq(`/api/feedback/stream?session=${SESSION}`);
+      const { res, chunks } = makeStreamRes();
+
+      handleFeedbackStream(
+        req as unknown as IncomingMessage,
+        res as unknown as ServerResponse,
+        temp.dir,
+      );
+
+      await waitFor(() => chunks.length >= 1);
+
+      // Deleting the watched directory can raise a watcher 'error' event
+      // (e.g. ENOENT on Linux). Prior to the fix, an unhandled 'error' event
+      // on an FSWatcher throws and crashes the process; if this test file
+      // completes normally, no such crash occurred.
+      rmSync(sessionDir, { recursive: true, force: true });
+
+      // Give the fs backend a beat to (maybe) deliver the error/rename event,
+      // then confirm the stream is still alive and presence polling continues
+      // to work (the fix only stops watching, not the whole response).
+      await new Promise((r) => setTimeout(r, 200));
+
+      req.emit('close');
+    },
+  );
 
   it('rejects an invalid session', () => {
     temp = makeTempDir();

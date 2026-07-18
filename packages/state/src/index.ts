@@ -16,6 +16,7 @@ export {
   type FindingTarget,
 } from './mutations.js';
 export { readPhaseJournal, readGlobalJournal } from './journals.js';
+export { REVIEW_DONE_FILE, LISTENING_FILE } from './feedback-files.js';
 export { progressJsonSchema } from './schema.js';
 export type {
   PhaseState,

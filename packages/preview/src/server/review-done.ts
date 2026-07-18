@@ -1,15 +1,13 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
+import { REVIEW_DONE_FILE } from '@synergy/state';
 import { readJsonBody, sendJson } from './http.js';
 
-/**
- * Control file dropped into `<feedbackDir>/<session>/` when the user clicks
- * "Done reviewing". An agent blocked in `synergy feedback wait` sees it via
- * its directory watcher and ends the wait with `status: "ended"`, consuming
- * the file. Must match REVIEW_DONE_FILE in @synergy/cli's feedback-wait.
- */
-export const REVIEW_DONE_FILE = '.review-done';
+// Re-exported for existing importers of this module; the authoritative
+// definition (and doc comment) now lives in @synergy/state's
+// feedback-files.ts, shared with @synergy/cli's feedback-wait.
+export { REVIEW_DONE_FILE };
 
 /**
  * POST /api/review-done — signal the end of the user's review round.

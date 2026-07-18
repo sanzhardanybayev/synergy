@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { existsSync, mkdirSync, rmSync, type watch, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -146,5 +147,32 @@ describe('waitForFeedback', () => {
 
     expect(result.status).toBe('timeout');
     expect(result.comments).toEqual([]);
+  });
+
+  it('settles as timeout instead of crashing when the watcher emits an error', async () => {
+    // A real FSWatcher 'error' (e.g. the session dir removed out from under
+    // an active watch) is platform-dependent and not reliably triggerable in
+    // a fast, portable test, so inject a fake watch() that emits one
+    // deterministically. This exercises the same finish/cleanup path a real
+    // watcher error would hit, proving the promise settles instead of
+    // throwing an uncaught exception.
+    const fakeWatcher = new EventEmitter() as ReturnType<typeof watch>;
+    fakeWatcher.close = () => {};
+    const watchImpl = (() => fakeWatcher) as typeof watch;
+
+    const pending = waitForFeedback({
+      feedbackDir,
+      session: SESSION,
+      timeoutMs: 10_000,
+      watchImpl,
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    fakeWatcher.emit('error', new Error('ENOENT: session dir removed'));
+
+    const result = await pending;
+
+    expect(result).toEqual({ status: 'timeout', comments: [] });
+    expect(existsSync(join(feedbackDir, SESSION, LISTENING_FILE))).toBe(false);
   });
 });

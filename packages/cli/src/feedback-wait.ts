@@ -8,20 +8,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { LISTENING_FILE, REVIEW_DONE_FILE } from '@synergy/state';
 import matter from 'gray-matter';
 
-/**
- * Control file the preview server writes into a session's feedback dir when
- * the user clicks "Done reviewing". Its appearance ends an active wait.
- */
-export const REVIEW_DONE_FILE = '.review-done';
-
-/**
- * Presence marker maintained while a wait is active. The preview's feedback
- * SSE stream stats this file (mtime freshness) to show "agent listening" in
- * the browser. Touched on a heartbeat so a killed process reads as stale.
- */
-export const LISTENING_FILE = '.listening';
+// Re-exported for existing importers of this module; the shared definitions
+// (with the authoritative doc comments) now live in @synergy/state's
+// feedback-files.ts, alongside @synergy/preview's review-done and
+// feedback-stream routes that must agree on these names.
+export { REVIEW_DONE_FILE, LISTENING_FILE };
 
 const LISTENING_HEARTBEAT_MS = 30_000;
 
@@ -90,6 +84,12 @@ export interface WaitOptions {
   session: string;
   /** Bounded wait; omit to wait indefinitely. */
   timeoutMs?: number;
+  /**
+   * Test-only seam for injecting a fake `fs.watch` to exercise watcher
+   * 'error' handling without depending on platform-specific FSWatcher
+   * behavior. Defaults to the real `node:fs` `watch`.
+   */
+  watchImpl?: typeof watch;
 }
 
 const WATCH_DEBOUNCE_MS = 60;
@@ -102,7 +102,7 @@ const WATCH_DEBOUNCE_MS = 60;
  * wait before the user has said anything.
  */
 export function waitForFeedback(options: WaitOptions): Promise<WaitResult> {
-  const { feedbackDir, session, timeoutMs } = options;
+  const { feedbackDir, session, timeoutMs, watchImpl = watch } = options;
   const sessionDir = join(feedbackDir, session);
   // fs.watch requires the directory to exist; comments may not have been
   // written yet when the agent starts listening.
@@ -133,11 +133,19 @@ export function waitForFeedback(options: WaitOptions): Promise<WaitResult> {
     let debounce: ReturnType<typeof setTimeout> | undefined;
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const watcher = watch(sessionDir, (_event, filename) => {
+    const watcher = watchImpl(sessionDir, (_event, filename) => {
       // The heartbeat touches .listening inside the watched dir; reacting to
       // it would wake the scan every 30s for nothing.
       if (filename?.toString() === LISTENING_FILE) return;
       schedule();
+    });
+
+    // Platform-dependent: e.g. the session dir gets removed out from under an
+    // active wait. Without this listener the 'error' event is uncaught and
+    // kills the process; settle gracefully instead via the same finish/cleanup
+    // machinery used everywhere else.
+    watcher.on('error', () => {
+      finish({ status: 'timeout', comments: [] });
     });
 
     const cleanup = () => {

@@ -215,13 +215,17 @@ export function CommentsPanel({
     setEndingReview(true);
     try {
       await postReviewDone(session);
-      showToast('Review ended — a waiting agent picks up your remaining comments now.');
+      showToast(
+        agentListening
+          ? 'Review ended — a waiting agent picks up your remaining comments now.'
+          : 'Review ended — no agent is listening right now, so comments will be picked up on the next /synergy-feedback.',
+      );
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to end the review');
     } finally {
       setEndingReview(false);
     }
-  }, [session, showToast]);
+  }, [session, showToast, agentListening]);
 
   // -------------------------------------------------------------------------
   // Fetch
@@ -324,7 +328,7 @@ export function CommentsPanel({
           className="comments-panel__done-btn"
           disabled={endingReview}
           onClick={() => void handleReviewDone()}
-          title="End this review round — a waiting agent stops listening after handling your remaining comments"
+          title="End this review round — a waiting agent handles your remaining comments; otherwise they're picked up on the next /synergy-feedback"
         >
           Done reviewing
         </button>
