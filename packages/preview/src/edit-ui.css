@@ -292,6 +292,56 @@
   color: var(--app-fg);
 }
 
+.comments-panel__presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--app-fg-muted);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.comments-panel__presence-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--app-fg-muted);
+  opacity: 0.5;
+}
+
+.comments-panel__presence--live {
+  color: var(--app-fg);
+}
+
+.comments-panel__presence--live .comments-panel__presence-dot {
+  background: #22a06b;
+  opacity: 1;
+  box-shadow: 0 0 0 3px rgba(34, 160, 107, 0.18);
+}
+
+.comments-panel__done-btn {
+  background: transparent;
+  border: 1px solid var(--app-border);
+  color: var(--app-fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.comments-panel__done-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--app-fg);
+}
+
+.comments-panel__done-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .comments-panel__loading,
 .comments-panel__empty {
   color: var(--app-fg-muted);

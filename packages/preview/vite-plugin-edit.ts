@@ -16,6 +16,7 @@ import { handleDiff } from './src/server/diff.js';
 import { handleEdit } from './src/server/edit.js';
 import { handleHandoff, handleLog, handlePhase, handleResume } from './src/server/execstate.js';
 import { handleFeedbackBatch } from './src/server/feedback-batch.js';
+import { handleFeedbackStream } from './src/server/feedback-stream.js';
 import {
   handleFeedbackGet,
   handleFeedbackPatch,
@@ -24,6 +25,7 @@ import {
 import { readJsonBody, sendJson } from './src/server/http.js';
 import { handleProgressStream } from './src/server/progress-stream.js';
 import { handleProgress } from './src/server/progress.js';
+import { handleReviewDone } from './src/server/review-done.js';
 import { handleReview } from './src/server/review.js';
 import { handleScaffold } from './src/server/scaffold.js';
 import { handleSource } from './src/server/source.js';
@@ -99,6 +101,13 @@ export function synergyEditPlugin(options: PluginOptions): Plugin {
             return;
           }
 
+          // GET /api/feedback/stream (SSE) — notifies on any comment-file
+          // change. Must precede the `:id` PATCH matcher's territory.
+          if (method === 'GET' && pathname === '/api/feedback/stream') {
+            handleFeedbackStream(req, res, feedbackDir);
+            return;
+          }
+
           // POST /api/feedback/resolve-batch — resolve/reject many comments at once.
           // Must precede the `:id` matcher below (resolve-batch is a single segment).
           if (method === 'POST' && pathname === '/api/feedback/resolve-batch') {
@@ -113,6 +122,13 @@ export function synergyEditPlugin(options: PluginOptions): Plugin {
           if (method === 'PATCH' && feedbackPatchMatch) {
             const id = feedbackPatchMatch[1]!;
             await handleFeedbackPatch(req, res, feedbackDir, id);
+            return;
+          }
+
+          // POST /api/review-done — user finished the review round; signals
+          // any agent blocked in `synergy feedback wait`.
+          if (method === 'POST' && pathname === '/api/review-done') {
+            await handleReviewDone(req, res, feedbackDir);
             return;
           }
 

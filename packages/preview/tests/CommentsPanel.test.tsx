@@ -6,6 +6,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CommentsPanel } from '../src/CommentsPanel.js';
+import { EditBufferProvider } from '../src/EditBuffer.js';
 import { ToastProvider } from '../src/ToastProvider.js';
 import type { Comment } from '../src/api.js';
 
@@ -52,7 +53,9 @@ function okPatch() {
 function renderPanel(props: Partial<React.ComponentProps<typeof CommentsPanel>> = {}) {
   return render(
     <ToastProvider>
-      <CommentsPanel session="2026-05-25-foo" {...props} />
+      <EditBufferProvider>
+        <CommentsPanel session="2026-05-25-foo" {...props} />
+      </EditBufferProvider>
     </ToastProvider>,
   );
 }
@@ -195,10 +198,36 @@ describe('CommentsPanel', () => {
 
     rerender(
       <ToastProvider>
-        <CommentsPanel session="2026-05-25-foo" refreshKey={1} />
+        <EditBufferProvider>
+          <CommentsPanel session="2026-05-25-foo" refreshKey={1} />
+        </EditBufferProvider>
       </ToastProvider>,
     );
 
     expect(await screen.findByText('Second batch')).toBeInTheDocument();
+  });
+
+  it('shows the no-agent presence state by default', async () => {
+    mockFetch.mockImplementation(() => makeResponse([]));
+    renderPanel();
+
+    expect(await screen.findByText('No agent')).toBeInTheDocument();
+  });
+
+  it('posts review-done when Done reviewing is clicked', async () => {
+    mockFetch.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') return okPatch();
+      return makeResponse([]);
+    });
+    renderPanel();
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Done reviewing' }));
+
+    await waitFor(() => {
+      const postCall = mockFetch.mock.calls.find(([, init]) => init?.method === 'POST');
+      expect(postCall?.[0]).toBe('/api/review-done');
+      expect(JSON.parse(postCall?.[1]?.body as string)).toEqual({ session: '2026-05-25-foo' });
+    });
   });
 });
