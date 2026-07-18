@@ -5,6 +5,7 @@ import { ActiveSessionPinger } from './ActiveSessionPinger.js';
 import { AgentTreeControlsProvider } from './AgentTreeControls.js';
 import { CommentsPanel } from './CommentsPanel.js';
 import { EditBufferProvider, useEditBuffer } from './EditBuffer.js';
+import { FeedbackStreamSubscriber } from './FeedbackStreamSubscriber.js';
 import { OrchestratorDrawer } from './OrchestratorDrawer.js';
 import { ProgressDrawer } from './ProgressDrawer.js';
 import { ProgressProvider, useProgressData } from './ProgressProvider.js';
@@ -149,6 +150,7 @@ function SessionInner({ session, drawer, closeDrawer, openOrchestrator }: Sessio
     <>
       <UnloadGuard />
       <ActiveSessionPinger session={session.name} />
+      <FeedbackStreamSubscriber session={session.name} />
 
       <ProgressProvider session={session.name}>
         <div className="layout">

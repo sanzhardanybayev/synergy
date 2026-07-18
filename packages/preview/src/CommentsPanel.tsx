@@ -13,9 +13,10 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { useEditBuffer } from './EditBuffer.js';
 import { useToast } from './ToastProvider.js';
 import type { Comment } from './api.js';
-import { listFeedback, patchFeedback } from './api.js';
+import { listFeedback, patchFeedback, postReviewDone } from './api.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -204,9 +205,27 @@ export function CommentsPanel({
   onCountChange,
 }: CommentsPanelProps) {
   const { show: showToast } = useToast();
+  const { agentListening } = useEditBuffer();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
+  const [endingReview, setEndingReview] = useState(false);
+
+  const handleReviewDone = useCallback(async () => {
+    setEndingReview(true);
+    try {
+      await postReviewDone(session);
+      showToast(
+        agentListening
+          ? 'Review ended — a waiting agent picks up your remaining comments now.'
+          : 'Review ended — no agent is listening right now, so comments will be picked up on the next /synergy-feedback.',
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to end the review');
+    } finally {
+      setEndingReview(false);
+    }
+  }, [session, showToast, agentListening]);
 
   // -------------------------------------------------------------------------
   // Fetch
@@ -284,6 +303,17 @@ export function CommentsPanel({
             <span className="comments-panel__badge">{openComments.length}</span>
           )}
         </h2>
+        <span
+          className={`comments-panel__presence${agentListening ? ' comments-panel__presence--live' : ''}`}
+          title={
+            agentListening
+              ? 'An agent is waiting for your comments — it picks them up the moment you post'
+              : 'No agent is listening right now — comments are saved and picked up on the next /synergy-feedback'
+          }
+        >
+          <span className="comments-panel__presence-dot" aria-hidden="true" />
+          {agentListening ? 'Agent listening' : 'No agent'}
+        </span>
         {closedComments.length > 0 && (
           <button
             type="button"
@@ -293,6 +323,15 @@ export function CommentsPanel({
             {showResolved ? 'Hide resolved' : `Show resolved (${closedComments.length})`}
           </button>
         )}
+        <button
+          type="button"
+          className="comments-panel__done-btn"
+          disabled={endingReview}
+          onClick={() => void handleReviewDone()}
+          title="End this review round — a waiting agent handles your remaining comments; otherwise they're picked up on the next /synergy-feedback"
+        >
+          Done reviewing
+        </button>
       </div>
 
       {loading && <p className="comments-panel__loading">Loading comments…</p>}

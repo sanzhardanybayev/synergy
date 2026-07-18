@@ -23,6 +23,7 @@ The preview isn't read-only — you can fix and annotate specs without a round-t
 - **Comments.** Select any text, click the **+**, and leave a note for Claude. Each comment is a markdown file under `.synergy/feedback/<session>/` with a line/col + surrounding-context anchor so it survives later edits.
 - **Diff view.** Toggle **🔍 Diff** on any page to highlight what changed since you last reviewed the file (git-backed: committed + uncommitted), then **Mark as reviewed** to advance the cursor.
 - **Hand back to Claude.** Run `/synergy-feedback` — the `synergy:address-feedback` skill reads the open-comment queue for the browser-active session, edits each referenced location, and marks every comment resolved or rejected (never silently dropped).
+- **Live review loop.** Run `/synergy-feedback --wait` (or `synergy feedback wait <session>`) and the agent blocks until your comments arrive, addresses them, and keeps listening — resolutions stream back into the comments panel live. The panel shows **Agent listening** / **No agent**, and the **Done reviewing** button ends the round.
 
 Edits, comments, and review state all persist to disk (MDX files, `.synergy/feedback/`, and a gitignored `review-state.json`) — git is the version history, so there's no database.
 
@@ -92,7 +93,7 @@ That's the loop. The first command scaffolds `.synergy/sessions/` in your projec
 | `/synergy-init` | Scaffold `.synergy/` in the current project. Once per project. |
 | `/synergy-spec "<title>"` | Create a new spec session (also auto-starts preview, opens browser). |
 | `/synergy-validate [session]` | Validate schemas + cross-refs. Zero errors before commit. |
-| `/synergy-feedback [session]` | Address browser-collected comments for the active session (edits specs, resolves/rejects each). |
+| `/synergy-feedback [session] [--wait]` | Address browser-collected comments for the active session (edits specs, resolves/rejects each). With `--wait`, blocks on `synergy feedback wait` and loops until you click **Done reviewing**. |
 | `/synergy-execute [session] [directives]` | Implement a session phase-by-phase, updating execution state at each boundary. |
 | `/synergy-continue [session] [directives]` | Continue an in-progress session from its execution-state hand-off. |
 | `/synergy-handoff [session]` | Capture a mid-work KT baton (`.state/handoff.md`) before you quit, so a future agent resumes inside the current phase. |
@@ -115,6 +116,7 @@ For terminal users — available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist
 | `synergy continue <session>` | `--root`, `--next <id>`, `--note` | Write the hand-off pointer a fresh agent reads first |
 | `synergy handoff <session>` | `--root`, `--next <id>`, `--body <text>`, `--body-file <path>` | Write the KT handoff baton (`.state/handoff.md`) + resume pointer |
 | `synergy status <session>` | `--root` | Print the execution-state rollup (phases done / total) |
+| `synergy feedback wait <session>` | `--root`, `--for <dur>` (e.g. `10m`; default: indefinite) | Block until review comments arrive, the user clicks **Done reviewing**, or the bounded wait expires |
 
 ### Daemon HTTP API (performance path)
 

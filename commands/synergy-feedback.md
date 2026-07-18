@@ -1,6 +1,6 @@
 ---
 description: Address open feedback comments from the Synergy preview for the active session
-argument-hint: [session-slug]
+argument-hint: [session-slug] [--wait]
 ---
 
 Invoke the `synergy:address-feedback` skill to process the open-comment queue for the
@@ -19,3 +19,7 @@ The skill will:
 4. Run `synergy validate <session>` and print a final summary.
 
 Follow the skill's procedure exactly — do not skip the validate step.
+
+With `--wait` (or when the user says they are about to review), follow the skill's
+**Live wait mode**: block on `synergy feedback wait <session>` in the foreground and loop
+until the user clicks **Done reviewing** or the wait times out.

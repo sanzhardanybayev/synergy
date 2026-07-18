@@ -372,6 +372,27 @@ export async function postActiveSession(session: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// POST /api/review-done
+// ---------------------------------------------------------------------------
+
+/**
+ * Signal that the user finished this review round. Drops the review-done
+ * control file so an agent blocked in `synergy feedback wait` ends its wait.
+ */
+export async function postReviewDone(session: string): Promise<void> {
+  const res = await fetch('/api/review-done', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`POST /api/review-done failed (${res.status}): ${text}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/progress
 // ---------------------------------------------------------------------------
 

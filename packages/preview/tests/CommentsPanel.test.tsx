@@ -4,8 +4,10 @@
 
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useEffect } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CommentsPanel } from '../src/CommentsPanel.js';
+import { EditBufferProvider, useEditBuffer } from '../src/EditBuffer.js';
 import { ToastProvider } from '../src/ToastProvider.js';
 import type { Comment } from '../src/api.js';
 
@@ -52,7 +54,30 @@ function okPatch() {
 function renderPanel(props: Partial<React.ComponentProps<typeof CommentsPanel>> = {}) {
   return render(
     <ToastProvider>
-      <CommentsPanel session="2026-05-25-foo" {...props} />
+      <EditBufferProvider>
+        <CommentsPanel session="2026-05-25-foo" {...props} />
+      </EditBufferProvider>
+    </ToastProvider>,
+  );
+}
+
+// Renders CommentsPanel with agentListening forced to `listening` via the
+// EditBuffer context, so tests can cover the "agent is listening" toast copy.
+function AgentListeningSetter({ listening }: { listening: boolean }) {
+  const { setAgentListening } = useEditBuffer();
+  useEffect(() => {
+    setAgentListening(listening);
+  }, [listening, setAgentListening]);
+  return null;
+}
+
+function renderPanelWithAgentListening(listening: boolean) {
+  return render(
+    <ToastProvider>
+      <EditBufferProvider>
+        <AgentListeningSetter listening={listening} />
+        <CommentsPanel session="2026-05-25-foo" />
+      </EditBufferProvider>
     </ToastProvider>,
   );
 }
@@ -195,10 +220,70 @@ describe('CommentsPanel', () => {
 
     rerender(
       <ToastProvider>
-        <CommentsPanel session="2026-05-25-foo" refreshKey={1} />
+        <EditBufferProvider>
+          <CommentsPanel session="2026-05-25-foo" refreshKey={1} />
+        </EditBufferProvider>
       </ToastProvider>,
     );
 
     expect(await screen.findByText('Second batch')).toBeInTheDocument();
+  });
+
+  it('shows the no-agent presence state by default', async () => {
+    mockFetch.mockImplementation(() => makeResponse([]));
+    renderPanel();
+
+    expect(await screen.findByText('No agent')).toBeInTheDocument();
+  });
+
+  it('posts review-done when Done reviewing is clicked', async () => {
+    mockFetch.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') return okPatch();
+      return makeResponse([]);
+    });
+    renderPanel();
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Done reviewing' }));
+
+    await waitFor(() => {
+      const postCall = mockFetch.mock.calls.find(([, init]) => init?.method === 'POST');
+      expect(postCall?.[0]).toBe('/api/review-done');
+      expect(JSON.parse(postCall?.[1]?.body as string)).toEqual({ session: '2026-05-25-foo' });
+    });
+  });
+
+  it('shows a no-agent toast for Done reviewing when no agent is listening', async () => {
+    mockFetch.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') return okPatch();
+      return makeResponse([]);
+    });
+    renderPanelWithAgentListening(false);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Done reviewing' }));
+
+    expect(
+      await screen.findByText(
+        'Review ended — no agent is listening right now, so comments will be picked up on the next /synergy-feedback.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the agent-picks-up toast for Done reviewing when an agent is listening', async () => {
+    mockFetch.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') return okPatch();
+      return makeResponse([]);
+    });
+    renderPanelWithAgentListening(true);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Done reviewing' }));
+
+    expect(
+      await screen.findByText(
+        'Review ended — a waiting agent picks up your remaining comments now.',
+      ),
+    ).toBeInTheDocument();
   });
 });

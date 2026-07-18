@@ -125,6 +125,14 @@ export interface EditBufferContextValue {
   bumpCommentRefresh: () => void;
 
   /**
+   * True while a `synergy feedback wait` process is listening on this
+   * session's feedback dir (fresh .listening marker, reported over the
+   * feedback SSE stream). Drives the presence indicator in CommentsPanel.
+   */
+  agentListening: boolean;
+  setAgentListening: (listening: boolean) => void;
+
+  /**
    * When set (e.g. from CommentsPanel click), CommentHighlights scrolls to and
    * pulses the matching inline highlight.
    */

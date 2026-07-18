@@ -1,11 +1,18 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import type { ValidationReport } from '@synergy/validator';
 import cac from 'cac';
 import { bold, dim, green, red, yellow } from 'kleur/colors';
 import { tryDaemon } from './daemon.js';
 import { handoffSet, logFinding, phaseSet, printProgress, resumeSet } from './execstate.js';
+import {
+  LISTENING_FILE,
+  type WaitResult,
+  parseDuration,
+  waitForFeedback,
+} from './feedback-wait.js';
 import { initProject } from './init.js';
+import { resolveProjectPaths } from './paths.js';
 import { previewStart, previewStatus, previewStop, printStatus } from './preview.js';
 
 const cli = cac('synergy');
@@ -37,6 +44,72 @@ cli
       );
       process.exit(2);
     }
+  });
+
+const HEARTBEAT_MS = 30_000;
+
+function feedbackNextStep(result: WaitResult, session: string): string {
+  if (result.status === 'ended') {
+    return 'The user finished reviewing. Address any comments in this final batch (edit the referenced spec locations, then resolve or reject each comment), report back in the conversation, and do NOT re-run `synergy feedback wait` — the review session is over.';
+  }
+  if (result.status === 'timeout') {
+    return `No feedback arrived before the timeout. Return to the conversation; re-run \`synergy feedback wait ${session}\` only when the user says they are reviewing again.`;
+  }
+  return `Address each comment: edit the referenced spec location, then resolve or reject the comment (POST /api/feedback/resolve-batch when the preview is up, frontmatter edit otherwise). After resolving, re-run \`synergy feedback wait ${session}\` to keep listening — the user sees your resolutions live.`;
+}
+
+cli
+  .command('feedback <action> <session>', 'Wait for review comments (action: wait)')
+  .option('--root <dir>', 'Project root (default: cwd)')
+  .option('--for <duration>', 'Bounded wait, e.g. 90s, 10m, 1h (default: wait indefinitely)')
+  .action(async (action: string, session: string, flags: { root?: string; for?: string }) => {
+    if (action !== 'wait') {
+      process.stderr.write(`${red('Error:')} unknown feedback action "${action}" — use wait\n`);
+      process.exit(2);
+    }
+    let timeoutMs: number | undefined;
+    try {
+      timeoutMs = flags.for ? parseDuration(flags.for) : undefined;
+    } catch (err) {
+      process.stderr.write(`${red('Error:')} ${(err as Error).message}\n`);
+      process.exit(2);
+    }
+    if (session.includes('..') || session.includes('/') || session.includes('\\')) {
+      process.stderr.write(`${red('Error:')} session must be a single directory name\n`);
+      process.exit(2);
+    }
+    const { feedbackDir } = resolveProjectPaths(flags.root);
+
+    // The indefinite wait looks hung from the agent's side: stdout stays empty
+    // until the final JSON. Banner + heartbeat on stderr keep the harness (and
+    // a curious human) informed without polluting the JSON channel.
+    process.stderr.write(
+      `${dim('[synergy]')} Waiting for review comments on ${bold(session)}. Stays silent until the user queues a comment or clicks "Done reviewing" — leave it running.\n${dim('[synergy]')} If this gets killed, re-run \`synergy feedback wait ${session}\` — comments persist on disk and are never lost.\n`,
+    );
+    const startedAt = Date.now();
+    const heartbeat = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startedAt) / 1000);
+      process.stderr.write(`${dim(`[synergy] still waiting (${elapsed}s elapsed)…`)}\n`);
+    }, HEARTBEAT_MS);
+    heartbeat.unref?.();
+
+    const onSignal = (signal: NodeJS.Signals) => {
+      // process.exit skips waitForFeedback's cleanup — drop the presence
+      // marker here so the browser doesn't show a listening agent that died.
+      rmSync(join(feedbackDir, session, LISTENING_FILE), { force: true });
+      process.stderr.write(
+        `\n${dim('[synergy]')} Wait interrupted. Re-run \`synergy feedback wait ${session}\` to resume; queued comments persist.\n`,
+      );
+      process.exit(signal === 'SIGINT' ? 130 : 143);
+    };
+    process.on('SIGINT', onSignal);
+    process.on('SIGTERM', onSignal);
+
+    const result = await waitForFeedback({ feedbackDir, session, timeoutMs });
+    clearInterval(heartbeat);
+    process.stdout.write(
+      `${JSON.stringify({ ...result, next_step: feedbackNextStep(result, session) }, null, 2)}\n`,
+    );
   });
 
 cli
