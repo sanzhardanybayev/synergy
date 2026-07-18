@@ -19,6 +19,7 @@
   --syn-accent-strong: #a83f20;
   --syn-accent-fg: #a83f20;
   --syn-accent-contrast: #ffffff;
+  --syn-on-fill: #ffffff;
   --syn-accent-soft: rgba(193, 79, 44, 0.1);
   --syn-accent-soft-strong: rgba(193, 79, 44, 0.18);
   --syn-accent-border: rgba(193, 79, 44, 0.42);
@@ -139,6 +140,7 @@
   --syn-accent-strong: #e98a63;
   --syn-accent-fg: #ef9871;
   --syn-accent-contrast: #1c130e;
+  --syn-on-fill: #161412;
   --syn-accent-soft: rgba(224, 120, 79, 0.12);
   --syn-accent-soft-strong: rgba(224, 120, 79, 0.22);
   --syn-accent-border: rgba(224, 120, 79, 0.45);
@@ -236,6 +238,7 @@
   --sk-accent: var(--syn-accent);
   --sk-accent-fg: var(--syn-accent-fg);
   --sk-accent-soft: var(--syn-accent-soft);
+  --sk-on-fill: var(--syn-on-fill);
   --sk-status-draft: var(--syn-status-draft);
   --sk-status-proposed: var(--syn-status-proposed);
   --sk-status-in-progress: var(--syn-status-in-progress);

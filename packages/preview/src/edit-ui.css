@@ -534,7 +534,7 @@
 .comments-panel__reject-submit {
   background: var(--syn-danger);
   border: 1px solid transparent;
-  color: #fff;
+  color: var(--syn-on-fill);
   font-weight: 600;
 }
 

@@ -32,6 +32,7 @@ Light (`:root`) / Dark (`:root[data-theme='dark']`):
 | `--syn-accent` | `#c14f2c` | `#e0784f` | Primary actions, active nav |
 | `--syn-accent-fg` | `#a83f20` | `#ef9871` | Accent-colored text on bg |
 | `--syn-accent-contrast` | `#ffffff` | `#1c130e` | Text on accent fills |
+| `--syn-on-fill` | `#ffffff` | `#161412` | Text on solid badge/status fills (aliased as `--sk-on-fill`) |
 | `--syn-bg` | `#faf9f6` | `#161412` | App background |
 | `--syn-bg-sunken` | `#f3f1ec` | `#11100e` | Sidebar |
 | `--syn-bg-raised` | `#ffffff` | `#1d1b18` | Cards, drawers, panels |

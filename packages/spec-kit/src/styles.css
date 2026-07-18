@@ -20,6 +20,7 @@
   --sk-accent: #c14f2c;
   --sk-accent-fg: #a83f20;
   --sk-accent-soft: rgba(193, 79, 44, 0.1);
+  --sk-on-fill: #ffffff;
 
   --sk-status-draft: #8d8578;
   --sk-status-proposed: #6d5bd0;
@@ -54,6 +55,7 @@
   --sk-accent: #e0784f;
   --sk-accent-fg: #ef9871;
   --sk-accent-soft: rgba(224, 120, 79, 0.12);
+  --sk-on-fill: #161412;
 
   --sk-status-proposed: #a394e8;
   --sk-status-in-progress: #d9a13c;
@@ -506,7 +508,7 @@
 }
 .sk-agent-tree-view__actions button:first-child {
   background: var(--sk-accent);
-  color: #fff;
+  color: var(--sk-on-fill);
   border-color: var(--sk-accent);
   font-weight: 600;
 }
@@ -672,7 +674,7 @@
   padding: 2px 7px;
   border-radius: 999px;
   letter-spacing: 0.06em;
-  color: #fff;
+  color: var(--sk-on-fill);
 }
 .sk-risk__badge--low {
   background: var(--sk-sev-low);
@@ -685,9 +687,6 @@
 }
 .sk-risk__badge--critical {
   background: var(--sk-sev-critical);
-}
-:root[data-theme="dark"] .sk-risk__badge {
-  color: #161412;
 }
 .sk-risk__id {
   font-family: var(--sk-font-mono);
@@ -912,11 +911,7 @@
 .sk-timeline__step--done .sk-timeline__step-num,
 .sk-timeline__step--shipped .sk-timeline__step-num {
   background: var(--sk-accent);
-  color: #fff;
-}
-:root[data-theme="dark"] .sk-timeline__step--done .sk-timeline__step-num,
-:root[data-theme="dark"] .sk-timeline__step--shipped .sk-timeline__step-num {
-  color: #161412;
+  color: var(--sk-on-fill);
 }
 .sk-timeline__step-title {
   font-weight: 500;
