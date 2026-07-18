@@ -17,6 +17,7 @@ import { useEditBuffer } from './EditBuffer.js';
 import { useToast } from './ToastProvider.js';
 import type { Comment } from './api.js';
 import { listFeedback, patchFeedback, postReviewDone } from './api.js';
+import { CheckIcon, XIcon } from './icons.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -117,7 +118,7 @@ function CommentCard({ comment, onResolve, onReject, onClick }: CardProps) {
                 }}
                 aria-label="Resolve comment"
               >
-                ✓ Resolve
+                <CheckIcon size={12} /> Resolve
               </button>
               <button
                 type="button"
@@ -129,7 +130,7 @@ function CommentCard({ comment, onResolve, onReject, onClick }: CardProps) {
                 }}
                 aria-label="Reject comment"
               >
-                ✕ Reject
+                <XIcon size={12} /> Reject
               </button>
             </>
           ) : (

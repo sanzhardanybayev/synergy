@@ -1,6 +1,7 @@
-import { useCallback } from 'react';
+import { type ReactNode, useCallback } from 'react';
 import { useToast } from './ToastProvider.js';
 import { copyToClipboard } from './clipboard.js';
+import { CopyIcon } from './icons.js';
 
 interface Props {
   /** Human-readable label shown on the button. */
@@ -9,11 +10,11 @@ interface Props {
   value: string;
   /** Optional extra class names. */
   className?: string;
-  /** Optional override for the icon. Defaults to a clipboard glyph. */
-  icon?: string;
+  /** Optional override for the icon. Defaults to a copy glyph. */
+  icon?: ReactNode;
 }
 
-export function CopyButton({ label, value, className, icon = '📋' }: Props) {
+export function CopyButton({ label, value, className, icon = <CopyIcon size={13} /> }: Props) {
   const { show } = useToast();
 
   const onClick = useCallback(async () => {

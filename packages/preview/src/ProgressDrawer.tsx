@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import type { ProgressDto } from './api.js';
+import { XIcon } from './icons.js';
 
 interface Props {
   open: boolean;
@@ -44,7 +45,7 @@ export function ProgressDrawer({ open, data, onClose }: Props) {
         <header className="drawer__header">
           <h2 className="drawer__title">Progress</h2>
           <button type="button" className="drawer__close" aria-label="Close" onClick={onClose}>
-            ✕
+            <XIcon size={16} />
           </button>
         </header>
         <div className="drawer__body">

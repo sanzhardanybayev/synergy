@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { ArrowUpRightIcon } from './icons.js';
 
 export interface CrossRefProps {
   /**
@@ -25,7 +26,7 @@ export function CrossRef({ to, label, children }: CrossRefProps) {
   return (
     <a className="sk-crossref" href={targetToHref(to)} data-crossref={to}>
       <span className="sk-crossref__icon" aria-hidden>
-        ↗
+        <ArrowUpRightIcon size={12} />
       </span>
       <span className="sk-crossref__label">{text}</span>
     </a>
