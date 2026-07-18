@@ -1,6 +1,6 @@
 # Synergy: multi-page preview, phases-as-folders, skill-first authoring
 
-**Status:** approved — ready for implementation planning
+**Status:** approved — ready for implementation planning. Shipped; visual details in the mockups below (emoji glyphs, the "Orchestrator (root)" label, colors) predate the "Ember & Graphite" redesign — `docs/design-system.md` owns the current visual language.
 **Date:** 2026-05-23
 **Author:** Sanzhar + Claude (brainstorming session)
 **Affects:** `packages/preview`, `packages/cli`, `packages/validator`, `packages/spec-kit`, Claude Code skills under `skills/synergy/*`, `CLAUDE.md`, `README.md`
