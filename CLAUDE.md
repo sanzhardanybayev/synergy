@@ -63,6 +63,15 @@ The preview at `http://localhost:4321` supports direct editing without a Claude 
 - **Feedback handoff.** Run `/synergy-feedback` in Claude Code. The `synergy:address-feedback`
   skill reads the comment queue for the browser-active session, edits each referenced spec
   location, and PATCHes each comment to resolved or rejected.
+- **Live feedback loop.** `synergy feedback wait <session> [--for 10m]` blocks until open
+  comments exist (queued ones return immediately), the browser's **Done reviewing** button
+  drops the `.review-done` control file (`status: "ended"`, final comments ride along), or
+  the bounded wait expires. The CLI watches `.synergy/feedback/<session>/` directly, so it
+  works without the preview server. `GET /api/feedback/stream` (SSE) notifies the preview
+  of comment-file changes so agent resolutions appear live; the skill's Live wait mode owns
+  the agent-side loop contract. While waiting, the CLI maintains a `.listening` heartbeat
+  marker (30s touch, removed on exit); the stream reports it as `presence` frames
+  (mtime fresh within 90s) and the comments panel shows "Agent listening" / "No agent".
 - **New gitignored files.** `active-session` (tracks the currently-viewed session) and
   `review-state.json` (per-user diff-review cursor) are gitignored. The `sessions/` and
   `feedback/` directories remain tracked.
@@ -129,6 +138,7 @@ synergy log <session> <text> (--phase <id> | --global)      append finding to jo
 synergy continue <session> [--next <id>] [--note <text>]    write hand-off pointer
 synergy handoff <session> [--next <id>] [--body <text> | --body-file <path>]   write the KT handoff baton (.state/handoff.md) + resume pointer
 synergy status <session>                                     print execution-state rollup
+synergy feedback wait <session> [--for <dur>]                block until review comments arrive (or Done reviewing / timeout)
 ```
 
 Spec authoring is not a CLI command — invoke the `synergy:create-spec` skill (or `/synergy-spec` slash command, which dispatches to the skill).

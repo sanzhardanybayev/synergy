@@ -103,6 +103,37 @@ If validate is failing, list the errors and fix them before declaring done.
 
 ---
 
+## Live wait mode
+
+When the user says they are about to review (e.g. `/synergy-feedback --wait`, "wait for my
+feedback", "I'll review the spec now"), don't exit on an empty queue — block on the wait
+command and let the browser wake you:
+
+```bash
+# Bounded wait (recommended default; keeps a forgotten wait from blocking forever):
+node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" feedback wait <session> --for 15m
+```
+
+Execution rules (the wake path is the completion of this command — protect it):
+
+- Run it **in the foreground** and leave it running. It streams a heartbeat to stderr and
+  stays silent on stdout until the final JSON; that silence is normal — never kill it.
+- Never wrap it in `nohup`, shell `&`, or a detached process just to keep it alive: if the
+  process's completion cannot resume you, nobody reads the feedback.
+- If it gets killed or times out anyway, re-running it is always safe — comments persist
+  on disk and queued ones return immediately.
+
+The final JSON has `status`, `comments`, and `next_step`. Follow `next_step`:
+
+- `status: "feedback"` — process `comments` through steps 3–4 above (edit specs, flush one
+  resolve-batch, validate), then **re-run the wait command** to keep listening. The user
+  sees your resolutions live in the preview.
+- `status: "ended"` — the user clicked **Done reviewing**. Process any `comments` in this
+  final batch the same way, print the summary, and do **not** re-run the wait — the review
+  round is over.
+- `status: "timeout"` — return to the conversation and say no feedback arrived; re-enter
+  the wait only when the user says they are reviewing again.
+
 ## Special cases
 
 **Empty queue.** If step 2 finds zero open comments, print "No open feedback. Exiting." and stop.
