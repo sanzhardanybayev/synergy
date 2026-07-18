@@ -140,20 +140,14 @@ for human reviewers.
   `synergy:address-feedback` skill reads `.synergy/active-session`, loads all
   `status: open` comment files, edits the spec at each anchor, and PATCHes each comment
   to `resolved` or `rejected`. Run `synergy validate <session>` before declaring done.
+  With `--wait`, the skill's Live wait mode blocks on `synergy feedback wait <session>`
+  and loops until the human clicks **Done reviewing** (see CLAUDE.md "Live feedback loop").
 - **Gitignored files.** `active-session` and `review-state.json` are per-machine state —
   do not commit them. `sessions/` and `feedback/` remain tracked (they are spec content).
 
 ## CLI surface
 
-```
-synergy init                          scaffold .synergy/ in the cwd
-synergy preview <start|stop|status>   long-running preview server (port 4321)
-synergy validate [session]            parser + cross-ref check
-```
-
-That's the whole CLI. Spec creation and editing live in skills — there is no `synergy spec` or `synergy phase` command.
-
-Claude Code slash commands: `/synergy-spec`, `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback`.
+The CLI handles process and execution-state operations only — see CLAUDE.md "Commands" for the authoritative list of `synergy` subcommands and Claude Code slash commands. Spec creation and editing live in skills — there is no `synergy spec` command.
 
 ## Don'ts
 
