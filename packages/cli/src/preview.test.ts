@@ -1,5 +1,15 @@
+import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { once } from 'node:events';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -102,6 +112,14 @@ function healthFor(runtime: PreviewRuntimeState): PreviewHealth {
     pid: runtime.pid,
     port: runtime.port,
   };
+}
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
 }
 
 describe('preview lifecycle', () => {
@@ -572,6 +590,33 @@ describe('preview lifecycle', () => {
     expect(readPreviewRuntime(paths.previewRuntimeFile)).toEqual(runtime);
   });
 
+  it('does not stop runtime metadata while another lifecycle owner holds the project lease', async () => {
+    const paths = resolveProjectPaths(rootA);
+    mkdirSync(paths.synergyDir, { recursive: true });
+    const runtime = runtimeFor(rootA);
+    writePreviewRuntime(paths.previewRuntimeFile, runtime);
+    writeFileSync(
+      paths.previewLockFile,
+      `${JSON.stringify({
+        attemptId: 'active-start',
+        pid: process.pid,
+        createdAt: new Date().toISOString(),
+      })}\n`,
+    );
+    const fetch = vi.fn(async () => jsonResponse(healthFor(runtime)));
+    const lifecycle = createPreviewLifecycle({
+      fetch,
+      lockStaleMs: 1,
+      pollIntervalMs: 1,
+      processKill: () => true,
+      stopTimeoutMs: 30,
+    });
+
+    await expect(lifecycle.stop(rootA)).resolves.toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(readPreviewRuntime(paths.previewRuntimeFile)).toEqual(runtime);
+  });
+
   it('reserves startup time for publication cleanup within the invocation deadline', async () => {
     const paths = resolveProjectPaths(rootA);
     let now = 0;
@@ -705,6 +750,57 @@ describe('preview lifecycle', () => {
     await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/start lock/i);
     expect(spawnCount).toBe(1);
     expect(existsSync(paths.previewLockFile)).toBe(true);
+  });
+
+  it('aborts immediately when child ownership cannot be published and retains the parent fence', async () => {
+    const paths = resolveProjectPaths(rootA);
+    const fetch = vi.fn(async () =>
+      jsonResponse({
+        protocolVersion: 1,
+        state: 'ready',
+        instanceId: 'owner-update-instance',
+        projectId: deriveProjectId(realpathSync(rootA)),
+        pid: 30_012,
+        port: 4321,
+      }),
+    );
+    let attempt = 0;
+    let spawnCount = 0;
+    const lifecycle = createPreviewLifecycle({
+      createAttemptId: () => `owner-update-attempt-${++attempt}`,
+      createInstanceId: () => 'owner-update-instance',
+      createControlToken: () => CONTROL_TOKEN,
+      lockStaleMs: 1,
+      pollIntervalMs: 1,
+      processKill: () => true,
+      spawnChild: (launch) => {
+        spawnCount += 1;
+        const child = new StuckChild(30_012);
+        if (spawnCount === 1) {
+          renameSync(paths.previewLockFile, `${paths.previewLockFile}.quarantine.parent.manual`);
+          queueMicrotask(() =>
+            child.emit('message', {
+              type: 'ready',
+              instanceId: launch.instanceId,
+              pid: child.pid,
+              port: 4321,
+              listenMs: 1,
+            }),
+          );
+        }
+        return child;
+      },
+      startTimeoutMs: 50,
+      terminationGraceMs: 2,
+      fetch,
+      writeOutput: () => undefined,
+    });
+
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/lock owner/i);
+    expect(fetch).not.toHaveBeenCalled();
+
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/start lock/i);
+    expect(spawnCount).toBe(1);
   });
 
   it('measures total startup time through child detachment and lock release', async () => {
@@ -882,5 +978,43 @@ describe('preview lifecycle', () => {
       'http://127.0.0.1:45678/api/runtime/health',
       'http://127.0.0.1:45678/api/progress?session=example',
     ]);
+  });
+
+  it('reports running while valid runtime metadata is concurrently quarantined for removal', async () => {
+    const paths = resolveProjectPaths(rootA);
+    mkdirSync(paths.synergyDir, { recursive: true });
+    const runtime = runtimeFor(rootA);
+    writePreviewRuntime(paths.previewRuntimeFile, runtime);
+    const quarantinePath = `${paths.previewRuntimeFile}.quarantine.remover.manual`;
+    const readyPath = join(tempDir, 'runtime-remover.ready');
+    const continuePath = join(tempDir, 'runtime-remover.continue');
+    const remover = spawn(
+      process.execPath,
+      [
+        '-e',
+        "const fs=require('node:fs');const [runtime,quarantine,ready,cont]=process.argv.slice(1);fs.renameSync(runtime,quarantine);fs.writeFileSync(ready,'ready');const wait=()=>{if(fs.existsSync(cont)){fs.renameSync(quarantine,runtime);process.exit(0)}setImmediate(wait)};wait();",
+        paths.previewRuntimeFile,
+        quarantinePath,
+        readyPath,
+        continuePath,
+      ],
+      { stdio: 'ignore' },
+    );
+    const removerExit = once(remover, 'exit');
+    await waitForFile(readyPath);
+    const lifecycle = createPreviewLifecycle({
+      fetch: async () => jsonResponse(healthFor(runtime)),
+    });
+
+    try {
+      await expect(lifecycle.status(rootA)).resolves.toMatchObject({
+        running: true,
+        instanceId: runtime.instanceId,
+        pid: runtime.pid,
+      });
+    } finally {
+      writeFileSync(continuePath, 'continue');
+      await removerExit;
+    }
   });
 });

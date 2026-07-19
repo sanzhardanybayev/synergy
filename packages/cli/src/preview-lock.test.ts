@@ -5,12 +5,13 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { acquirePreviewStartLock } from './preview-lock.js';
 
@@ -27,6 +28,11 @@ function writeLock(path: string, attemptId: string, padding = '', pid = process.
 
 function readAttemptId(path: string): string {
   return (JSON.parse(readFileSync(path, 'utf8')) as LockRecord).attemptId;
+}
+
+function hasLockQuarantine(path: string): boolean {
+  const prefix = `${basename(path)}.quarantine.`;
+  return readdirSync(dirname(path)).some((entry) => entry.startsWith(prefix));
 }
 
 async function waitForFile(path: string): Promise<void> {
@@ -162,7 +168,7 @@ describe('preview start lock', () => {
 
       expect(() => lock.release()).toThrow(`restore ${code}`);
       expect(existsSync(lockPath)).toBe(false);
-      expect(readdirSync(tempDir).some((entry) => entry.endsWith('.quarantine'))).toBe(true);
+      expect(hasLockQuarantine(lockPath)).toBe(true);
     },
   );
 
@@ -194,7 +200,7 @@ describe('preview start lock', () => {
       ),
     ).rejects.toThrow('transient restore failure');
     expect(restoreAttempts).toBe(1);
-    expect(readdirSync(tempDir).some((entry) => entry.endsWith('.quarantine'))).toBe(true);
+    expect(hasLockQuarantine(lockPath)).toBe(true);
   });
 
   it.each([
@@ -239,5 +245,69 @@ describe('preview start lock', () => {
       attemptId: 'attempt-a',
       pid: 91_004,
     });
+  });
+
+  it('does not let a contender acquire while a live lock is captured in quarantine', async () => {
+    await acquirePreviewStartLock({
+      path: lockPath,
+      attemptId: 'attempt-a',
+      deadline: performance.now() + 1_000,
+      staleMs: 10_000,
+      pollIntervalMs: 1,
+    });
+    const quarantinePath = `${lockPath}.quarantine.attempt-a.manual`;
+    renameSync(lockPath, quarantinePath);
+
+    await expect(
+      acquirePreviewStartLock(
+        {
+          path: lockPath,
+          attemptId: 'attempt-c',
+          deadline: performance.now() + 20,
+          staleMs: 1,
+          pollIntervalMs: 1,
+        },
+        { processKill: () => true },
+      ),
+    ).rejects.toThrow(/start lock/i);
+
+    expect(readAttemptId(lockPath)).toBe('attempt-a');
+    expect(existsSync(quarantinePath)).toBe(false);
+  });
+
+  it('does not let a later contender acquire after a restore failure leaves quarantine', async () => {
+    const lock = await acquirePreviewStartLock(
+      {
+        path: lockPath,
+        attemptId: 'attempt-a',
+        deadline: performance.now() + 1_000,
+        staleMs: 10_000,
+        pollIntervalMs: 1,
+      },
+      {
+        copyFileExclusive: () => {
+          throw Object.assign(new Error('restore failed'), { code: 'EIO' });
+        },
+      },
+    );
+    rmSync(lockPath);
+    writeLock(lockPath, 'attempt-b');
+    expect(() => lock.release()).toThrow('restore failed');
+
+    await expect(
+      acquirePreviewStartLock(
+        {
+          path: lockPath,
+          attemptId: 'attempt-d',
+          deadline: performance.now() + 20,
+          staleMs: 1,
+          pollIntervalMs: 1,
+        },
+        { processKill: () => true },
+      ),
+    ).rejects.toThrow(/start lock/i);
+
+    expect(readAttemptId(lockPath)).toBe('attempt-b');
+    expect(hasLockQuarantine(lockPath)).toBe(false);
   });
 });

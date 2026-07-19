@@ -464,6 +464,9 @@ async function startPreview(
     const launchStartedAt = dependencies.now();
     child = dependencies.spawnChild(launch);
     if (!isPositiveInteger(child.pid)) throw new Error('Failed to spawn preview child');
+    if (!lock.updateOwnerPid(child.pid)) {
+      throw new Error('Preview start lock owner update did not succeed');
+    }
     const launchMs = dependencies.now() - launchStartedAt;
     const ready = await waitForReadyPreviewChild(
       child,
@@ -529,17 +532,6 @@ async function startPreview(
       );
       if (!didExit) {
         shouldReleaseLock = false;
-        try {
-          if (lock === null || !isPositiveInteger(child.pid) || !lock.updateOwnerPid(child.pid)) {
-            cleanupFailures.push(new Error('child PID lock fence could not be retained'));
-          }
-        } catch (fenceError) {
-          cleanupFailures.push(
-            new Error(
-              `child PID lock fence failed: ${fenceError instanceof Error ? fenceError.message : String(fenceError)}`,
-            ),
-          );
-        }
       }
     }
     if (lock !== null && shouldReleaseLock) {
@@ -582,54 +574,73 @@ async function stopPreview(
   );
   const workDeadline = totalDeadline - cleanupReserveMs;
   const paths = projectPaths(root, dependencies);
-  const projectId = deriveProjectId(paths.root);
-  const runtime = readPreviewRuntime(paths.previewRuntimeFile);
-  if (runtime === null) {
-    migrateLegacyPid(paths.previewPidFile, dependencies);
-    dependencies.writeOutput(`${yellow('!')} No verified preview server recorded\n`);
+  let lock: AcquiredPreviewStartLock;
+  try {
+    lock = await acquirePreviewStartLock(
+      {
+        path: paths.previewLockFile,
+        attemptId: dependencies.createAttemptId(),
+        deadline: workDeadline,
+        staleMs: dependencies.lockStaleMs,
+        pollIntervalMs: dependencies.pollIntervalMs,
+      },
+      lockDependencies(dependencies),
+    );
+  } catch {
     return false;
   }
-  if (runtime.projectId !== projectId || dependencies.now() >= workDeadline) return false;
+  try {
+    const projectId = deriveProjectId(paths.root);
+    const runtime = readPreviewRuntime(paths.previewRuntimeFile);
+    if (runtime === null) {
+      migrateLegacyPid(paths.previewPidFile, dependencies);
+      dependencies.writeOutput(`${yellow('!')} No verified preview server recorded\n`);
+      return false;
+    }
+    if (runtime.projectId !== projectId || dependencies.now() >= workDeadline) return false;
 
-  const initial = await requestPreviewHealth(
-    runtime.origin,
-    Math.max(0, Math.min(dependencies.statusTimeoutMs, workDeadline - dependencies.now())),
-    transportDependencies(dependencies),
-  );
-  if (
-    initial.kind !== 'healthy' ||
-    !healthMatchesRuntime(initial.health, runtime) ||
-    dependencies.now() >= workDeadline
-  ) {
-    return false;
-  }
-
-  const shutdown = await requestPreviewShutdown(
-    runtime.origin,
-    runtime.instanceId,
-    runtime.controlToken,
-    workDeadline - dependencies.now(),
-    transportDependencies(dependencies),
-  );
-  if (shutdown.kind !== 'accepted' || dependencies.now() >= workDeadline) return false;
-
-  while (dependencies.now() < workDeadline) {
-    const outcome = await requestPreviewHealth(
+    const initial = await requestPreviewHealth(
       runtime.origin,
       Math.max(0, Math.min(dependencies.statusTimeoutMs, workDeadline - dependencies.now())),
       transportDependencies(dependencies),
     );
-    if (isDefinitiveDisappearance(outcome, runtime)) {
-      const removed = dependencies.removeRuntime(paths.previewRuntimeFile, runtime.instanceId);
-      if (!removed || dependencies.now() > totalDeadline) return false;
-      dependencies.writeOutput(`${green('✓')} Preview stopped (pid ${runtime.pid})\n`);
-      return true;
+    if (
+      initial.kind !== 'healthy' ||
+      !healthMatchesRuntime(initial.health, runtime) ||
+      dependencies.now() >= workDeadline
+    ) {
+      return false;
     }
-    const remainingMs = workDeadline - dependencies.now();
-    if (remainingMs <= 0) break;
-    await dependencies.sleep(Math.min(dependencies.pollIntervalMs, remainingMs));
+
+    const shutdown = await requestPreviewShutdown(
+      runtime.origin,
+      runtime.instanceId,
+      runtime.controlToken,
+      workDeadline - dependencies.now(),
+      transportDependencies(dependencies),
+    );
+    if (shutdown.kind !== 'accepted' || dependencies.now() >= workDeadline) return false;
+
+    while (dependencies.now() < workDeadline) {
+      const outcome = await requestPreviewHealth(
+        runtime.origin,
+        Math.max(0, Math.min(dependencies.statusTimeoutMs, workDeadline - dependencies.now())),
+        transportDependencies(dependencies),
+      );
+      if (isDefinitiveDisappearance(outcome, runtime)) {
+        const removed = dependencies.removeRuntime(paths.previewRuntimeFile, runtime.instanceId);
+        if (!removed || dependencies.now() > totalDeadline) return false;
+        dependencies.writeOutput(`${green('✓')} Preview stopped (pid ${runtime.pid})\n`);
+        return true;
+      }
+      const remainingMs = workDeadline - dependencies.now();
+      if (remainingMs <= 0) break;
+      await dependencies.sleep(Math.min(dependencies.pollIntervalMs, remainingMs));
+    }
+    return false;
+  } finally {
+    lock.release();
   }
-  return false;
 }
 
 export function createPreviewLifecycle(

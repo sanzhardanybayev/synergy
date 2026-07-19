@@ -8,12 +8,14 @@ import {
   ftruncateSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
   writeSync,
 } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 
 interface PreviewStartLockRecord {
   attemptId: string;
@@ -86,20 +88,42 @@ function quarantinePath(
   attemptId: string,
   dependencies: PreviewStartLockDependencies,
 ): string {
-  return `${path}.${attemptId}.${dependencies.createQuarantineId()}.quarantine`;
+  return `${path}.quarantine.${attemptId}.${dependencies.createQuarantineId()}`;
+}
+
+function listQuarantines(path: string): string[] {
+  const directory = dirname(path);
+  const prefix = `${basename(path)}.quarantine.`;
+  return readdirSync(directory)
+    .filter((entry) => entry.startsWith(prefix))
+    .map((entry) => join(directory, entry));
+}
+
+function sameLockOwner(
+  first: PreviewStartLockRecord | null,
+  second: PreviewStartLockRecord | null,
+) {
+  return (
+    first !== null &&
+    second !== null &&
+    first.attemptId === second.attemptId &&
+    first.pid === second.pid
+  );
 }
 
 function restoreWithoutOverwrite(
   capturedPath: string,
   lockPath: string,
   dependencies: PreviewStartLockDependencies,
-): void {
+): boolean {
   try {
     dependencies.copyFileExclusive(capturedPath, lockPath);
   } catch (error) {
     if (!hasErrorCode(error, 'EEXIST')) throw error;
+    if (!sameLockOwner(readLockRecord(capturedPath), readLockRecord(lockPath))) return false;
   }
   unlinkSync(capturedPath);
+  return true;
 }
 
 function captureCurrentLock(
@@ -125,7 +149,15 @@ function recoverCapturedLock(
 ): boolean {
   const capturedPath = captureCurrentLock(path, attemptId, dependencies);
   if (capturedPath === null) return true;
+  return recoverQuarantine(path, capturedPath, staleMs, dependencies);
+}
 
+function recoverQuarantine(
+  path: string,
+  capturedPath: string,
+  staleMs: number,
+  dependencies: PreviewStartLockDependencies,
+): boolean {
   const capturedRecord = readLockRecord(capturedPath);
   let capturedAgeMs: number;
   try {
@@ -152,6 +184,18 @@ function recoverCapturedLock(
   }
   restoreWithoutOverwrite(capturedPath, path, dependencies);
   return false;
+}
+
+function quarantineBlocksAcquisition(
+  path: string,
+  staleMs: number,
+  dependencies: PreviewStartLockDependencies,
+): boolean {
+  let isBlocked = false;
+  for (const capturedPath of listQuarantines(path)) {
+    if (!recoverQuarantine(path, capturedPath, staleMs, dependencies)) isBlocked = true;
+  }
+  return isBlocked;
 }
 
 function mayBeStale(
@@ -218,6 +262,12 @@ export async function acquirePreviewStartLock(
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...dependencyOverrides };
   const lockStartedAt = dependencies.now();
   while (dependencies.now() < options.deadline) {
+    if (quarantineBlocksAcquisition(options.path, options.staleMs, dependencies)) {
+      const remainingMs = options.deadline - dependencies.now();
+      if (remainingMs <= 0) break;
+      await dependencies.sleep(Math.min(options.pollIntervalMs, remainingMs));
+      continue;
+    }
     try {
       const descriptor = openSync(options.path, 'wx', 0o600);
       try {
@@ -229,6 +279,13 @@ export async function acquirePreviewStartLock(
         writeFileSync(descriptor, `${JSON.stringify(record)}\n`);
       } finally {
         closeSync(descriptor);
+      }
+      if (listQuarantines(options.path).length > 0) {
+        releaseOwnedLock(options.path, options.attemptId, dependencies);
+        const remainingMs = options.deadline - dependencies.now();
+        if (remainingMs <= 0) break;
+        await dependencies.sleep(Math.min(options.pollIntervalMs, remainingMs));
+        continue;
       }
       return {
         lockMs: dependencies.now() - lockStartedAt,

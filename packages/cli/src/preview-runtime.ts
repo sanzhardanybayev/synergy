@@ -5,6 +5,7 @@ import {
   copyFileSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   unlinkSync,
   writeSync,
@@ -82,7 +83,20 @@ function hasErrorCode(error: unknown, code: string): boolean {
 }
 
 function quarantinePath(path: string): string {
-  return join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.quarantine`);
+  return `${path}.quarantine.${process.pid}.${randomUUID()}`;
+}
+
+function listRuntimeQuarantines(path: string): string[] {
+  const directory = dirname(path);
+  const prefix = `${basename(path)}.quarantine.`;
+  try {
+    return readdirSync(directory)
+      .filter((entry) => entry.startsWith(prefix))
+      .map((entry) => join(directory, entry));
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) return [];
+    throw error;
+  }
 }
 
 function restoreCapturedFile(
@@ -193,12 +207,22 @@ export function generateControlToken(): string {
   return randomBytes(32).toString('hex');
 }
 
-export function readPreviewRuntime(path: string): PreviewRuntimeState | null {
+function readRuntimeFile(path: string): PreviewRuntimeState | null {
   try {
     return parsePreviewRuntime(JSON.parse(readFileSync(path, 'utf8')));
   } catch {
     return null;
   }
+}
+
+export function readPreviewRuntime(path: string): PreviewRuntimeState | null {
+  const canonical = readRuntimeFile(path);
+  if (canonical !== null) return canonical;
+  for (const capturedPath of listRuntimeQuarantines(path)) {
+    const captured = readRuntimeFile(capturedPath);
+    if (captured !== null) return captured;
+  }
+  return readRuntimeFile(path);
 }
 
 export function writePreviewRuntime(path: string, state: PreviewRuntimeState): void {
@@ -244,7 +268,7 @@ export function removeOwnedPreviewRuntime(
     throw error;
   }
 
-  const runtime = readPreviewRuntime(capturedPath);
+  const runtime = readRuntimeFile(capturedPath);
   if (runtime !== null && runtime.instanceId === instanceId) {
     unlinkSync(capturedPath);
     return true;
