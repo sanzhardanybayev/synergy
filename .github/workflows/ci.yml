@@ -18,6 +18,12 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Check tracked runtime artifacts before build
+        run: pnpm check:artifacts
+      - name: Rebuild runtime artifacts
+        run: pnpm build:runtime
+      - name: Check runtime artifact drift after build
+        run: pnpm check:artifacts
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm lint

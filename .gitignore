@@ -1,5 +1,15 @@
 node_modules/
 dist/
+!/packages/cli/dist/
+!/packages/cli/dist/**
+!/packages/review-core/dist/
+!/packages/review-core/dist/**
+!/packages/spec-kit/dist/
+!/packages/spec-kit/dist/**
+!/packages/state/dist/
+!/packages/state/dist/**
+!/packages/validator/dist/
+!/packages/validator/dist/**
 .turbo/
 .vite/
 *.log
