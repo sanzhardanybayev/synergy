@@ -45,6 +45,14 @@ function createRuntimeState(overrides: Partial<PreviewRuntimeState> = {}): Previ
   };
 }
 
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
 describe('preview runtime', () => {
   let tempDir: string;
   let runtimePath: string;
@@ -167,40 +175,40 @@ describe('preview runtime', () => {
     expect(existsSync(runtimePath)).toBe(false);
   });
 
-  it('cannot remove instance B while an instance A cleanup waits for an in-flight writer', async () => {
+  it('does not wait on a legacy mutation-lock artifact', () => {
     const mutationLockPath = `${runtimePath}.mutation.lock`;
-    const instanceB = createRuntimeState({ instanceId: 'instance-b' });
-    writePreviewRuntime(runtimePath, createRuntimeState());
-    writeFileSync(mutationLockPath, 'writer owns this lock');
+    writeFileSync(mutationLockPath, 'orphaned legacy lock');
+    const startedAt = performance.now();
 
+    expect(() => writePreviewRuntime(runtimePath, createRuntimeState())).not.toThrow();
+    expect(performance.now() - startedAt).toBeLessThan(250);
+    expect(readPreviewRuntime(runtimePath)).toEqual(createRuntimeState());
+  });
+
+  it('does not restore a captured mismatch over a concurrently published successor', async () => {
+    const instanceB = createRuntimeState({ instanceId: 'instance-b' });
+    const instanceC = createRuntimeState({ instanceId: 'instance-c' });
+    writeFileSync(runtimePath, `${JSON.stringify(instanceB)}${' '.repeat(75_000_000)}`);
+    const readyPath = join(tempDir, 'racer.ready');
     const writer = spawn(
       process.execPath,
       [
         '-e',
-        "const fs = require('node:fs'); const [runtime, lock, state] = process.argv.slice(1); setTimeout(() => { fs.writeFileSync(runtime, state); fs.unlinkSync(lock); }, 100);",
+        "const fs=require('node:fs');const [p,v,ready]=process.argv.slice(1),end=Date.now()+2000;fs.writeFileSync(ready,'ready');const tick=()=>{try{const fd=fs.openSync(p,'wx');fs.writeFileSync(fd,v);fs.closeSync(fd);process.exit(0)}catch(e){if(e.code!=='EEXIST')process.exit(1)}if(Date.now()>=end)process.exit(2);setImmediate(tick)};tick();",
         runtimePath,
-        mutationLockPath,
-        JSON.stringify(instanceB),
+        JSON.stringify(instanceC),
+        readyPath,
       ],
       { stdio: 'ignore' },
     );
     const writerExit = once(writer, 'exit');
+    await waitForFile(readyPath);
 
     expect(removeOwnedPreviewRuntime(runtimePath, INSTANCE_ID)).toBe(false);
     const [exitCode] = await writerExit;
     expect(exitCode).toBe(0);
-    expect(readPreviewRuntime(runtimePath)?.instanceId).toBe('instance-b');
-  });
-
-  it('releases the mutation lock when an atomic write throws', () => {
-    const invalidRuntimePath = join(tempDir, 'runtime-directory');
-    const mutationLockPath = `${invalidRuntimePath}.mutation.lock`;
-    mkdirSync(invalidRuntimePath);
-
-    expect(() => writePreviewRuntime(invalidRuntimePath, createRuntimeState())).toThrow();
-    expect(existsSync(mutationLockPath)).toBe(false);
-
-    rmSync(invalidRuntimePath, { recursive: true });
-    expect(() => writePreviewRuntime(invalidRuntimePath, createRuntimeState())).not.toThrow();
+    expect(readPreviewRuntime(runtimePath)).toEqual(instanceC);
+    rmSync(readyPath);
+    expect(readdirSync(tempDir).sort()).toEqual(['preview.runtime.json']);
   });
 });

@@ -5,6 +5,7 @@ import { resolveProjectPaths } from './paths.js';
 
 const GITIGNORE_ENTRIES = [
   'preview.runtime.json',
+  'preview.runtime.json.mutation.lock',
   'preview.start.lock',
   'preview.pid',
   'preview.log',

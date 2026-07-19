@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -9,14 +8,26 @@ import {
   readFileSync,
   readSync,
   realpathSync,
-  statSync,
   unlinkSync,
-  writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import { dim, green, yellow } from 'kleur/colors';
 import { PREVIEW_PORT, resolveProjectPaths } from './paths.js';
+import {
+  type AcquiredPreviewStartLock,
+  type PreviewStartLockDependencies,
+  acquirePreviewStartLock,
+} from './preview-lock.js';
+import {
+  type PreviewChildHandle,
+  type PreviewChildLaunch,
+  type PreviewProcessTimerDependencies,
+  type ReadyPreviewChild,
+  detachReadyPreviewChild,
+  spawnPreviewChild,
+  terminateOwnedPreviewChild,
+  waitForReadyPreviewChild,
+} from './preview-process.js';
 import {
   type PreviewHealth,
   type PreviewRuntimeState,
@@ -27,40 +38,25 @@ import {
   removeOwnedPreviewRuntime,
   writePreviewRuntime,
 } from './preview-runtime.js';
+import {
+  type PreviewHealthOutcome,
+  type PreviewTransportDependencies,
+  requestPreviewHealth,
+  requestPreviewShutdown,
+} from './preview-transport.js';
+
+export type { PreviewChildHandle, PreviewChildLaunch } from './preview-process.js';
 
 const require = createRequire(import.meta.url);
 const START_TIMEOUT_MS = 10_000;
-const STATUS_TIMEOUT_MS = 500;
+const START_CLEANUP_RESERVE_MS = 1_000;
 const STOP_TIMEOUT_MS = 3_000;
+const STOP_CLEANUP_RESERVE_MS = 100;
+const STATUS_TIMEOUT_MS = 500;
 const POLL_INTERVAL_MS = 25;
 const LOCK_STALE_MS = START_TIMEOUT_MS;
+const TERMINATION_GRACE_MS = 500;
 const MAX_LOG_TAIL_BYTES = 4_096;
-
-type PreviewChildMessage =
-  | { type: 'ready'; instanceId: string; pid: number; port: number; listenMs: number }
-  | { type: 'failed'; instanceId: string; phase: string; message: string };
-
-interface StartLockRecord {
-  attemptId: string;
-  pid: number;
-  createdAt: string;
-}
-
-interface AcquiredStartLock {
-  lockMs: number;
-  release(): void;
-}
-
-interface ReadyChild {
-  pid: number;
-  port: number;
-  listenMs: number;
-}
-
-interface HealthResult {
-  health: PreviewHealth | null;
-  reachable: boolean;
-}
 
 export interface PreviewStartOptions {
   root?: string;
@@ -86,43 +82,27 @@ export interface PreviewStatus {
   timings?: PreviewTimings;
 }
 
-export interface PreviewChildLaunch {
-  root: string;
-  sessionsDir: string;
-  logFile: string;
-  projectId: string;
-  instanceId: string;
-  controlToken: string;
-  port: number;
-  strictPort: boolean;
-}
-
-export interface PreviewChildHandle {
-  readonly pid?: number;
-  on(event: string, listener: (...args: unknown[]) => void): unknown;
-  removeListener(event: string, listener: (...args: unknown[]) => void): unknown;
-  kill(signal: NodeJS.Signals): boolean;
-  disconnect?(): void;
-  unref(): void;
-}
-
-export interface PreviewLifecycleDependencies {
+export interface PreviewLifecycleDependencies
+  extends PreviewTransportDependencies,
+    PreviewProcessTimerDependencies,
+    PreviewStartLockDependencies {
+  canonicalizeRoot(root?: string): string;
+  cleanupReserveMs: number;
   createAttemptId(): string;
-  createInstanceId(): string;
   createControlToken(): string;
-  clearTimer(timer: unknown): void;
-  fetch(input: string | URL, init?: RequestInit): Promise<Response>;
-  now(): number;
-  processKill(pid: number, signal: 0): boolean;
-  setTimer(callback: () => void, milliseconds: number): unknown;
-  sleep(milliseconds: number): Promise<void>;
-  spawnChild(launch: PreviewChildLaunch): PreviewChildHandle;
-  writeOutput(text: string): void;
+  createInstanceId(): string;
   lockStaleMs: number;
   pollIntervalMs: number;
+  processKill(pid: number, signal: 0): boolean;
+  removeRuntime(path: string, instanceId: string): boolean;
+  spawnChild(launch: PreviewChildLaunch): PreviewChildHandle;
   startTimeoutMs: number;
   statusTimeoutMs: number;
+  stopCleanupReserveMs: number;
   stopTimeoutMs: number;
+  terminationGraceMs: number;
+  writeOutput(text: string): void;
+  writeRuntime(path: string, runtime: PreviewRuntimeState): void;
 }
 
 export interface PreviewLifecycle {
@@ -131,145 +111,61 @@ export interface PreviewLifecycle {
   stop(root?: string): Promise<boolean>;
 }
 
-function toolVersion(): string {
-  const packageJson: unknown = require('../package.json');
-  if (
-    typeof packageJson === 'object' &&
-    packageJson !== null &&
-    'version' in packageJson &&
-    typeof packageJson.version === 'string'
-  ) {
-    return packageJson.version;
-  }
-  return 'unknown';
-}
-
-function resolvePreviewChildEntry(): string {
-  return fileURLToPath(new URL('./preview-child.js', import.meta.url));
-}
-
-function spawnPreviewChild(launch: PreviewChildLaunch): PreviewChildHandle {
-  const logDescriptor = openSync(launch.logFile, 'a');
-  try {
-    return spawn(process.execPath, [resolvePreviewChildEntry()], {
-      cwd: launch.root,
-      env: {
-        ...process.env,
-        SYNERGY_PROJECT_ROOT: launch.root,
-        SYNERGY_SESSIONS_DIR: launch.sessionsDir,
-        SYNERGY_PROJECT_ID: launch.projectId,
-        SYNERGY_INSTANCE_ID: launch.instanceId,
-        SYNERGY_CONTROL_TOKEN: launch.controlToken,
-        SYNERGY_PORT: String(launch.port),
-        SYNERGY_STRICT_PORT: String(launch.strictPort),
-      },
-      detached: true,
-      stdio: ['ignore', logDescriptor, logDescriptor, 'ipc'],
-    });
-  } finally {
-    closeSync(logDescriptor);
-  }
-}
-
 const DEFAULT_DEPENDENCIES: PreviewLifecycleDependencies = {
-  createAttemptId: randomUUID,
-  createInstanceId: randomUUID,
-  createControlToken: generateControlToken,
+  canonicalizeRoot: (root) => realpathSync(resolveProjectPaths(root).root),
+  cleanupReserveMs: START_CLEANUP_RESERVE_MS,
   clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+  createAttemptId: randomUUID,
+  createControlToken: generateControlToken,
+  createInstanceId: randomUUID,
+  createQuarantineId: randomUUID,
   fetch: (input, init) => fetch(input, init),
+  lockStaleMs: LOCK_STALE_MS,
   now: () => performance.now(),
+  pollIntervalMs: POLL_INTERVAL_MS,
   processKill: (pid, signal) => process.kill(pid, signal),
+  removeRuntime: removeOwnedPreviewRuntime,
   setTimer: (callback, milliseconds) => setTimeout(callback, milliseconds),
   sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
   spawnChild: spawnPreviewChild,
-  writeOutput: (text) => process.stdout.write(text),
-  lockStaleMs: LOCK_STALE_MS,
-  pollIntervalMs: POLL_INTERVAL_MS,
   startTimeoutMs: START_TIMEOUT_MS,
   statusTimeoutMs: STATUS_TIMEOUT_MS,
+  stopCleanupReserveMs: STOP_CLEANUP_RESERVE_MS,
   stopTimeoutMs: STOP_TIMEOUT_MS,
+  terminationGraceMs: TERMINATION_GRACE_MS,
+  wallNow: Date.now,
+  writeOutput: (text) => process.stdout.write(text),
+  writeRuntime: writePreviewRuntime,
 };
 
 function mergeDependencies(
-  dependencies: Partial<PreviewLifecycleDependencies>,
+  overrides: Partial<PreviewLifecycleDependencies>,
 ): PreviewLifecycleDependencies {
-  return { ...DEFAULT_DEPENDENCIES, ...dependencies };
+  return { ...DEFAULT_DEPENDENCIES, ...overrides };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isPort(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65_535;
+function hasErrorCode(error: unknown, code: string): boolean {
+  return isRecord(error) && error.code === code;
 }
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
-function parseChildMessage(value: unknown): PreviewChildMessage | null {
-  if (!isRecord(value) || typeof value.type !== 'string') return null;
-  if (value.type === 'ready') {
-    if (
-      typeof value.instanceId !== 'string' ||
-      !isPositiveInteger(value.pid) ||
-      !isPort(value.port) ||
-      typeof value.listenMs !== 'number' ||
-      !Number.isFinite(value.listenMs) ||
-      value.listenMs < 0
-    ) {
-      return null;
-    }
-    return {
-      type: 'ready',
-      instanceId: value.instanceId,
-      pid: value.pid,
-      port: value.port,
-      listenMs: value.listenMs,
-    };
-  }
+function toolVersion(): string {
+  const packageJson: unknown = require('../package.json');
   if (
-    value.type === 'failed' &&
-    typeof value.instanceId === 'string' &&
-    typeof value.phase === 'string' &&
-    typeof value.message === 'string'
+    isRecord(packageJson) &&
+    'version' in packageJson &&
+    typeof packageJson.version === 'string'
   ) {
-    return {
-      type: 'failed',
-      instanceId: value.instanceId,
-      phase: value.phase,
-      message: value.message,
-    };
+    return packageJson.version;
   }
-  return null;
-}
-
-function parseHealth(value: unknown): PreviewHealth | null {
-  if (!isRecord(value)) return null;
-  const expectedKeys = ['protocolVersion', 'state', 'instanceId', 'projectId', 'pid', 'port'];
-  if (
-    Object.keys(value).length !== expectedKeys.length ||
-    expectedKeys.some((key) => !(key in value)) ||
-    value.protocolVersion !== 1 ||
-    value.state !== 'ready' ||
-    typeof value.instanceId !== 'string' ||
-    value.instanceId.length === 0 ||
-    typeof value.projectId !== 'string' ||
-    value.projectId.length === 0 ||
-    !isPositiveInteger(value.pid) ||
-    !isPort(value.port)
-  ) {
-    return null;
-  }
-  return {
-    protocolVersion: 1,
-    state: 'ready',
-    instanceId: value.instanceId,
-    projectId: value.projectId,
-    pid: value.pid,
-    port: value.port,
-  };
+  return 'unknown';
 }
 
 function healthMatchesRuntime(health: PreviewHealth, runtime: PreviewRuntimeState): boolean {
@@ -286,7 +182,7 @@ function healthMatchesRuntime(health: PreviewHealth, runtime: PreviewRuntimeStat
 function healthMatchesLaunch(
   health: PreviewHealth,
   launch: PreviewChildLaunch,
-  ready: ReadyChild,
+  ready: ReadyPreviewChild,
 ): boolean {
   return (
     health.protocolVersion === 1 &&
@@ -321,87 +217,11 @@ function runningStatus(runtime: PreviewRuntimeState, timings?: PreviewTimings): 
   };
 }
 
-function canonicalProjectPaths(root?: string): ReturnType<typeof resolveProjectPaths> {
-  const unresolved = resolveProjectPaths(root);
-  return resolveProjectPaths(realpathSync(unresolved.root));
-}
-
-function hasErrorCode(error: unknown, code: string): boolean {
-  return isRecord(error) && error.code === code;
-}
-
-function readLockRecord(path: string): StartLockRecord | null {
-  try {
-    const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    if (
-      !isRecord(value) ||
-      typeof value.attemptId !== 'string' ||
-      !isPositiveInteger(value.pid) ||
-      typeof value.createdAt !== 'string'
-    ) {
-      return null;
-    }
-    return { attemptId: value.attemptId, pid: value.pid, createdAt: value.createdAt };
-  } catch {
-    return null;
-  }
-}
-
-function removeLockIfOwned(path: string, attemptId: string): void {
-  if (readLockRecord(path)?.attemptId !== attemptId) return;
-  try {
-    unlinkSync(path);
-  } catch {
-    // Another actor may have already recovered the lock after its ownership changed.
-  }
-}
-
-function recoverStaleLock(path: string, dependencies: PreviewLifecycleDependencies): boolean {
-  try {
-    const ageMs = Date.now() - statSync(path).mtimeMs;
-    if (ageMs < dependencies.lockStaleMs) return false;
-    unlinkSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function acquireStartLock(
-  path: string,
-  attemptId: string,
-  startedAt: number,
-  deadline: number,
+function projectPaths(
+  root: string | undefined,
   dependencies: PreviewLifecycleDependencies,
-): Promise<AcquiredStartLock> {
-  while (dependencies.now() < deadline) {
-    try {
-      const descriptor = openSync(path, 'wx', 0o600);
-      try {
-        const record: StartLockRecord = {
-          attemptId,
-          pid: process.pid,
-          createdAt: new Date().toISOString(),
-        };
-        writeFileSync(descriptor, `${JSON.stringify(record)}\n`);
-      } finally {
-        closeSync(descriptor);
-      }
-      return {
-        lockMs: dependencies.now() - startedAt,
-        release: () => removeLockIfOwned(path, attemptId),
-      };
-    } catch (error) {
-      if (!hasErrorCode(error, 'EEXIST')) throw error;
-      if (recoverStaleLock(path, dependencies)) continue;
-      const remainingMs = deadline - dependencies.now();
-      if (remainingMs <= 0) break;
-      await dependencies.sleep(Math.min(dependencies.pollIntervalMs, remainingMs));
-    }
-  }
-  throw new Error(
-    'Preview did not become ready within 10 seconds while waiting for its start lock',
-  );
+): ReturnType<typeof resolveProjectPaths> {
+  return resolveProjectPaths(dependencies.canonicalizeRoot(root));
 }
 
 function migrateLegacyPid(pidFile: string, dependencies: PreviewLifecycleDependencies): void {
@@ -418,120 +238,105 @@ function migrateLegacyPid(pidFile: string, dependencies: PreviewLifecycleDepende
     try {
       dependencies.processKill(pid, 0);
       return;
-    } catch {
-      // Signal 0 proved this legacy PID is stale; removing its file is safe.
+    } catch (error) {
+      if (!hasErrorCode(error, 'ESRCH')) return;
     }
   }
   try {
     unlinkSync(pidFile);
   } catch {
-    // A concurrent migration may already have removed it.
+    // A concurrent migration may already have removed the stale record.
   }
 }
 
-async function fetchHealth(
-  origin: string,
+function transportDependencies(
+  dependencies: PreviewLifecycleDependencies,
+): PreviewTransportDependencies {
+  return {
+    clearTimer: dependencies.clearTimer,
+    fetch: dependencies.fetch,
+    now: dependencies.now,
+    setTimer: dependencies.setTimer,
+  };
+}
+
+function processTimerDependencies(
+  dependencies: PreviewLifecycleDependencies,
+): PreviewProcessTimerDependencies {
+  return {
+    clearTimer: dependencies.clearTimer,
+    now: dependencies.now,
+    setTimer: dependencies.setTimer,
+  };
+}
+
+function lockDependencies(
+  dependencies: PreviewLifecycleDependencies,
+): PreviewStartLockDependencies {
+  return {
+    createQuarantineId: dependencies.createQuarantineId,
+    now: dependencies.now,
+    wallNow: dependencies.wallNow,
+    sleep: dependencies.sleep,
+  };
+}
+
+async function readVerifiedStatusAtPaths(
+  paths: ReturnType<typeof resolveProjectPaths>,
   timeoutMs: number,
   dependencies: PreviewLifecycleDependencies,
-): Promise<HealthResult> {
-  if (timeoutMs <= 0) return { health: null, reachable: false };
-  try {
-    const response = await dependencies.fetch(`${origin}/api/runtime/health`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs))),
-    });
-    if (!response.ok) return { health: null, reachable: false };
-    return { health: parseHealth(await response.json()), reachable: true };
-  } catch {
-    return { health: null, reachable: false };
+): Promise<PreviewStatus> {
+  const projectId = deriveProjectId(paths.root);
+  const runtime = readPreviewRuntime(paths.previewRuntimeFile);
+  if (runtime === null) {
+    migrateLegacyPid(paths.previewPidFile, dependencies);
+    return stoppedStatus(projectId);
   }
+  if (runtime.projectId !== projectId) return stoppedStatus(projectId);
+  const outcome = await requestPreviewHealth(
+    runtime.origin,
+    timeoutMs,
+    transportDependencies(dependencies),
+  );
+  if (outcome.kind !== 'healthy' || !healthMatchesRuntime(outcome.health, runtime)) {
+    return stoppedStatus(projectId);
+  }
+  return runningStatus(runtime);
 }
 
-function waitForReadyChild(
-  child: PreviewChildHandle,
-  launch: PreviewChildLaunch,
-  remainingMs: number,
+async function readVerifiedStatus(
+  root: string | undefined,
+  timeoutMs: number,
   dependencies: PreviewLifecycleDependencies,
-): Promise<ReadyChild> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let timer: unknown = null;
-    const finish = (result: ReadyChild | Error): void => {
-      if (settled) return;
-      settled = true;
-      if (timer !== null) dependencies.clearTimer(timer);
-      child.removeListener('message', onMessage);
-      child.removeListener('error', onError);
-      child.removeListener('exit', onExit);
-      if (result instanceof Error) reject(result);
-      else resolve(result);
-    };
-    const onMessage = (value: unknown): void => {
-      const message = parseChildMessage(value);
-      if (message === null) {
-        finish(new Error('Preview child sent an invalid readiness message'));
-        return;
-      }
-      if (message.instanceId !== launch.instanceId) {
-        finish(new Error('Preview child readiness identity did not match the launch attempt'));
-        return;
-      }
-      if (message.type === 'failed') {
-        finish(new Error(`Preview child failed during ${message.phase}: ${message.message}`));
-        return;
-      }
-      if (message.pid !== child.pid) {
-        finish(new Error('Preview child readiness identity did not match its process'));
-        return;
-      }
-      finish({ pid: message.pid, port: message.port, listenMs: message.listenMs });
-    };
-    const onError = (error: unknown): void => {
-      finish(
-        new Error(
-          `Preview child failed: ${error instanceof Error ? error.message : String(error)}`,
-        ),
-      );
-    };
-    const onExit = (code: unknown, signal: unknown): void => {
-      finish(
-        new Error(
-          `Preview child exited before readiness (code ${String(code)}, signal ${String(signal)})`,
-        ),
-      );
-    };
-    child.on('message', onMessage);
-    child.on('error', onError);
-    child.on('exit', onExit);
-    timer = dependencies.setTimer(
-      () => {
-        finish(new Error('Preview did not become ready within 10 seconds'));
-      },
-      Math.max(0, remainingMs),
-    );
-  });
+): Promise<PreviewStatus> {
+  return readVerifiedStatusAtPaths(projectPaths(root, dependencies), timeoutMs, dependencies);
 }
 
 async function pollLaunchHealth(
   launch: PreviewChildLaunch,
-  ready: ReadyChild,
+  ready: ReadyPreviewChild,
   deadline: number,
   dependencies: PreviewLifecycleDependencies,
 ): Promise<void> {
   const origin = deriveLoopbackOrigin(ready.port);
   while (dependencies.now() < deadline) {
-    const remainingMs = deadline - dependencies.now();
-    const result = await fetchHealth(origin, remainingMs, dependencies);
-    if (result.health !== null) {
-      if (!healthMatchesLaunch(result.health, launch, ready)) {
+    const outcome = await requestPreviewHealth(
+      origin,
+      deadline - dependencies.now(),
+      transportDependencies(dependencies),
+    );
+    if (outcome.kind === 'healthy') {
+      if (!healthMatchesLaunch(outcome.health, launch, ready)) {
         throw new Error('Preview health identity did not match the launched child');
       }
       return;
     }
-    if (result.reachable) throw new Error('Preview health response was malformed');
-    const afterRequestRemainingMs = deadline - dependencies.now();
-    if (afterRequestRemainingMs <= 0) break;
-    await dependencies.sleep(Math.min(dependencies.pollIntervalMs, afterRequestRemainingMs));
+    if (outcome.kind === 'malformed' || outcome.kind === 'http-error') {
+      throw new Error('Preview health response was not a valid ready response');
+    }
+    const remainingMs = deadline - dependencies.now();
+    if (remainingMs <= 0) break;
+    await dependencies.sleep(Math.min(dependencies.pollIntervalMs, remainingMs));
   }
   throw new Error('Preview did not become ready within 10 seconds');
 }
@@ -559,68 +364,74 @@ function withLogTail(error: unknown, logFile: string): Error {
   return new Error(tail.length === 0 ? message : `${message}\nPreview log tail:\n${tail}`);
 }
 
-function terminateOwnedChild(child: PreviewChildHandle | null): void {
-  if (child === null) return;
-  try {
-    child.kill('SIGTERM');
-  } catch {
-    // The owned child may already have exited.
-  }
-  try {
-    child.disconnect?.();
-  } catch {
-    // The IPC channel may already be closed.
-  }
-  child.unref();
-}
-
-async function verifiedStatus(
-  root: string | undefined,
+function buildRuntime(
+  launch: PreviewChildLaunch,
+  ready: ReadyPreviewChild,
   dependencies: PreviewLifecycleDependencies,
-): Promise<PreviewStatus> {
-  const paths = canonicalProjectPaths(root);
-  const projectId = deriveProjectId(paths.root);
-  const runtime = readPreviewRuntime(paths.previewRuntimeFile);
-  if (runtime === null) {
-    migrateLegacyPid(paths.previewPidFile, dependencies);
-    return stoppedStatus(projectId);
-  }
-  if (runtime.projectId !== projectId) return stoppedStatus(projectId);
-  const result = await fetchHealth(runtime.origin, dependencies.statusTimeoutMs, dependencies);
-  if (result.health === null || !healthMatchesRuntime(result.health, runtime)) {
-    return stoppedStatus(projectId);
-  }
-  return runningStatus(runtime);
+): PreviewRuntimeState {
+  return {
+    schemaVersion: 1,
+    protocolVersion: 1,
+    state: 'ready',
+    instanceId: launch.instanceId,
+    projectId: launch.projectId,
+    pid: ready.pid,
+    host: '127.0.0.1',
+    port: ready.port,
+    origin: deriveLoopbackOrigin(ready.port),
+    preferredPort: launch.port,
+    strictPort: launch.strictPort,
+    startedAt: new Date(dependencies.wallNow()).toISOString(),
+    controlToken: launch.controlToken,
+    toolVersion: toolVersion(),
+  };
 }
 
 async function startPreview(
   options: PreviewStartOptions,
   dependencies: PreviewLifecycleDependencies,
 ): Promise<PreviewStatus> {
-  const startedAt = dependencies.now();
-  const deadline = startedAt + dependencies.startTimeoutMs;
-  const paths = canonicalProjectPaths(options.root);
-  mkdirSync(paths.synergyDir, { recursive: true });
-  const attemptId = dependencies.createAttemptId();
-  const lock = await acquireStartLock(
-    paths.previewLockFile,
-    attemptId,
-    startedAt,
-    deadline,
-    dependencies,
+  const invokedAt = dependencies.now();
+  const totalDeadline = invokedAt + dependencies.startTimeoutMs;
+  const cleanupReserveMs = Math.min(
+    dependencies.cleanupReserveMs,
+    Math.max(1, dependencies.startTimeoutMs / 5),
   );
+  const workDeadline = totalDeadline - cleanupReserveMs;
+  const paths = projectPaths(options.root, dependencies);
+  mkdirSync(paths.synergyDir, { recursive: true });
+  if (dependencies.now() >= workDeadline) {
+    throw new Error('Preview did not become ready within 10 seconds');
+  }
+
+  const attemptId = dependencies.createAttemptId();
+  let lock: AcquiredPreviewStartLock | null = null;
   let child: PreviewChildHandle | null = null;
   let instanceId: string | null = null;
   let hasPublishedRuntime = false;
   try {
-    const existing = await verifiedStatus(paths.root, dependencies);
+    lock = await acquirePreviewStartLock(
+      {
+        path: paths.previewLockFile,
+        attemptId,
+        deadline: workDeadline,
+        staleMs: dependencies.lockStaleMs,
+        pollIntervalMs: dependencies.pollIntervalMs,
+      },
+      lockDependencies(dependencies),
+    );
+    const statusTimeoutMs = Math.max(
+      0,
+      Math.min(dependencies.statusTimeoutMs, workDeadline - dependencies.now()),
+    );
+    const existing = await readVerifiedStatusAtPaths(paths, statusTimeoutMs, dependencies);
     if (existing.running) {
       dependencies.writeOutput(
         `${yellow('!')} Preview already running (pid ${existing.pid}) at ${existing.origin}\n`,
       );
       return existing;
     }
-    if (dependencies.now() >= deadline) {
+    if (dependencies.now() >= workDeadline) {
       throw new Error('Preview did not become ready within 10 seconds');
     }
 
@@ -639,65 +450,79 @@ async function startPreview(
     child = dependencies.spawnChild(launch);
     if (!isPositiveInteger(child.pid)) throw new Error('Failed to spawn preview child');
     const launchMs = dependencies.now() - launchStartedAt;
-    const ready = await waitForReadyChild(
+    const ready = await waitForReadyPreviewChild(
       child,
       launch,
-      deadline - dependencies.now(),
-      dependencies,
+      workDeadline - dependencies.now(),
+      processTimerDependencies(dependencies),
     );
     const healthStartedAt = dependencies.now();
-    await pollLaunchHealth(launch, ready, deadline, dependencies);
+    await pollLaunchHealth(launch, ready, workDeadline, dependencies);
     const healthMs = dependencies.now() - healthStartedAt;
-    const totalMs = dependencies.now() - startedAt;
+    if (dependencies.now() >= workDeadline) {
+      throw new Error('Preview did not become ready within 10 seconds');
+    }
+
+    const runtime = buildRuntime(launch, ready, dependencies);
+    dependencies.writeRuntime(paths.previewRuntimeFile, runtime);
+    hasPublishedRuntime = true;
+    if (dependencies.now() > workDeadline) {
+      throw new Error('Preview did not become ready within 10 seconds');
+    }
     const timings: PreviewTimings = {
       lockMs: lock.lockMs,
       launchMs,
       listenMs: ready.listenMs,
       healthMs,
-      totalMs,
+      totalMs: dependencies.now() - invokedAt,
     };
-    const runtime: PreviewRuntimeState = {
-      schemaVersion: 1,
-      protocolVersion: 1,
-      state: 'ready',
-      instanceId,
-      projectId: launch.projectId,
-      pid: ready.pid,
-      host: '127.0.0.1',
-      port: ready.port,
-      origin: deriveLoopbackOrigin(ready.port),
-      preferredPort: launch.port,
-      strictPort: launch.strictPort,
-      startedAt: new Date().toISOString(),
-      controlToken: launch.controlToken,
-      toolVersion: toolVersion(),
-    };
-    writePreviewRuntime(paths.previewRuntimeFile, runtime);
-    hasPublishedRuntime = true;
-    child.disconnect?.();
-    child.unref();
-    child = null;
+    detachReadyPreviewChild(child);
     dependencies.writeOutput(
       `${green('✓')} Preview started (pid ${runtime.pid}) at ${dim(runtime.origin)}\n`,
     );
     dependencies.writeOutput(`  Log: ${dim(paths.previewLogFile)}\n`);
+    child = null;
     return runningStatus(runtime, timings);
   } catch (error) {
+    const failure = withLogTail(error, paths.previewLogFile);
     if (hasPublishedRuntime && instanceId !== null) {
-      removeOwnedPreviewRuntime(paths.previewRuntimeFile, instanceId);
+      dependencies.removeRuntime(paths.previewRuntimeFile, instanceId);
     }
-    terminateOwnedChild(child);
-    throw withLogTail(error, paths.previewLogFile);
+    if (child !== null) {
+      await terminateOwnedPreviewChild(
+        child,
+        { deadline: totalDeadline, termGraceMs: dependencies.terminationGraceMs },
+        processTimerDependencies(dependencies),
+      );
+    }
+    throw failure;
   } finally {
-    lock.release();
+    lock?.release();
   }
+}
+
+function isDefinitiveDisappearance(
+  outcome: PreviewHealthOutcome,
+  runtime: PreviewRuntimeState,
+): boolean {
+  return (
+    outcome.kind === 'absent' ||
+    (outcome.kind === 'healthy' && !healthMatchesRuntime(outcome.health, runtime))
+  );
 }
 
 async function stopPreview(
   root: string | undefined,
   dependencies: PreviewLifecycleDependencies,
 ): Promise<boolean> {
-  const paths = canonicalProjectPaths(root);
+  const invokedAt = dependencies.now();
+  const totalDeadline = invokedAt + dependencies.stopTimeoutMs;
+  const cleanupReserveMs = Math.min(
+    dependencies.stopCleanupReserveMs,
+    Math.max(1, dependencies.stopTimeoutMs / 5),
+  );
+  const workDeadline = totalDeadline - cleanupReserveMs;
+  const paths = projectPaths(root, dependencies);
   const projectId = deriveProjectId(paths.root);
   const runtime = readPreviewRuntime(paths.previewRuntimeFile);
   if (runtime === null) {
@@ -705,43 +530,45 @@ async function stopPreview(
     dependencies.writeOutput(`${yellow('!')} No verified preview server recorded\n`);
     return false;
   }
-  if (runtime.projectId !== projectId) return false;
-  const initial = await fetchHealth(runtime.origin, dependencies.statusTimeoutMs, dependencies);
-  if (initial.health === null || !healthMatchesRuntime(initial.health, runtime)) return false;
+  if (runtime.projectId !== projectId || dependencies.now() >= workDeadline) return false;
 
-  let response: Response;
-  try {
-    response = await dependencies.fetch(`${runtime.origin}/api/runtime/shutdown`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${runtime.controlToken}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ instanceId: runtime.instanceId }),
-      signal: AbortSignal.timeout(dependencies.statusTimeoutMs),
-    });
-  } catch {
+  const initial = await requestPreviewHealth(
+    runtime.origin,
+    Math.max(0, Math.min(dependencies.statusTimeoutMs, workDeadline - dependencies.now())),
+    transportDependencies(dependencies),
+  );
+  if (
+    initial.kind !== 'healthy' ||
+    !healthMatchesRuntime(initial.health, runtime) ||
+    dependencies.now() >= workDeadline
+  ) {
     return false;
   }
-  if (!response.ok) return false;
 
-  const deadline = dependencies.now() + dependencies.stopTimeoutMs;
-  while (dependencies.now() < deadline) {
-    const remainingMs = deadline - dependencies.now();
-    const result = await fetchHealth(runtime.origin, remainingMs, dependencies);
-    if (result.health === null && !result.reachable) {
-      removeOwnedPreviewRuntime(paths.previewRuntimeFile, runtime.instanceId);
+  const shutdown = await requestPreviewShutdown(
+    runtime.origin,
+    runtime.instanceId,
+    runtime.controlToken,
+    workDeadline - dependencies.now(),
+    transportDependencies(dependencies),
+  );
+  if (shutdown.kind !== 'accepted' || dependencies.now() >= workDeadline) return false;
+
+  while (dependencies.now() < workDeadline) {
+    const outcome = await requestPreviewHealth(
+      runtime.origin,
+      Math.max(0, Math.min(dependencies.statusTimeoutMs, workDeadline - dependencies.now())),
+      transportDependencies(dependencies),
+    );
+    if (isDefinitiveDisappearance(outcome, runtime)) {
+      const removed = dependencies.removeRuntime(paths.previewRuntimeFile, runtime.instanceId);
+      if (!removed || dependencies.now() > totalDeadline) return false;
       dependencies.writeOutput(`${green('✓')} Preview stopped (pid ${runtime.pid})\n`);
       return true;
     }
-    if (result.health !== null && !healthMatchesRuntime(result.health, runtime)) {
-      removeOwnedPreviewRuntime(paths.previewRuntimeFile, runtime.instanceId);
-      dependencies.writeOutput(`${green('✓')} Preview stopped (pid ${runtime.pid})\n`);
-      return true;
-    }
-    const afterRequestRemainingMs = deadline - dependencies.now();
-    if (afterRequestRemainingMs <= 0) break;
-    await dependencies.sleep(Math.min(dependencies.pollIntervalMs, afterRequestRemainingMs));
+    const remainingMs = workDeadline - dependencies.now();
+    if (remainingMs <= 0) break;
+    await dependencies.sleep(Math.min(dependencies.pollIntervalMs, remainingMs));
   }
   return false;
 }
@@ -752,7 +579,7 @@ export function createPreviewLifecycle(
   const dependencies = mergeDependencies(dependencyOverrides);
   return {
     start: (options = {}) => startPreview(options, dependencies),
-    status: (root) => verifiedStatus(root, dependencies),
+    status: (root) => readVerifiedStatus(root, dependencies.statusTimeoutMs, dependencies),
     stop: (root) => stopPreview(root, dependencies),
   };
 }

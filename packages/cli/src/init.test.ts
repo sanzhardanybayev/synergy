@@ -25,6 +25,7 @@ describe('initProject', () => {
     initProject(tmpRoot);
     const gitignore = readFileSync(join(tmpRoot, '.synergy', '.gitignore'), 'utf8');
     expect(gitignore).toContain('preview.runtime.json');
+    expect(gitignore).toContain('preview.runtime.json.mutation.lock');
     expect(gitignore).toContain('preview.start.lock');
     expect(gitignore).toContain('preview.pid');
     expect(gitignore).toContain('preview.log');

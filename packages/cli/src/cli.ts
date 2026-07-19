@@ -13,7 +13,7 @@ import {
 } from './feedback-wait.js';
 import { initProject } from './init.js';
 import { resolveProjectPaths } from './paths.js';
-import { previewStart, previewStatus, previewStop, printStatus } from './preview.js';
+import { registerPreviewCommand } from './preview-cli.js';
 import { registerReviewCommands } from './review-cli.js';
 
 const cli = cac('synergy');
@@ -28,37 +28,7 @@ cli
     initProject(flags.root);
   });
 
-cli
-  .command('preview <action>', 'Manage the preview server (start | stop | status)')
-  .option('--root <dir>', 'Project root (default: cwd)')
-  .option('--port <port>', 'Require a specific port (default: prefer 4321)')
-  .option('--json', 'Print the full preview status as JSON')
-  .action(async (action: string, flags: { root?: string; port?: number; json?: boolean }) => {
-    try {
-      if (action === 'start') {
-        await previewStart({
-          root: flags.root,
-          ...(flags.port === undefined ? {} : { port: Number(flags.port) }),
-        });
-      } else if (action === 'stop') {
-        await previewStop(flags.root);
-      } else if (action === 'status') {
-        const status = await previewStatus(flags.root);
-        if (flags.json) process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
-        else printStatus(status);
-      } else {
-        process.stderr.write(
-          `${red('Error:')} unknown action "${action}" — use start | stop | status\n`,
-        );
-        process.exit(2);
-      }
-    } catch (error) {
-      process.stderr.write(
-        `${red('Error:')} ${error instanceof Error ? error.message : String(error)}\n`,
-      );
-      process.exit(1);
-    }
-  });
+registerPreviewCommand(cli);
 
 const HEARTBEAT_MS = 30_000;
 

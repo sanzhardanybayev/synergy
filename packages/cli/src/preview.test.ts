@@ -27,6 +27,8 @@ class FakeChild extends EventEmitter implements PreviewChildHandle {
   readonly killedSignals: NodeJS.Signals[] = [];
   readonly pid: number;
   disconnected = false;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
   unrefCalled = false;
 
   constructor(pid: number) {
@@ -36,6 +38,10 @@ class FakeChild extends EventEmitter implements PreviewChildHandle {
 
   kill(signal: NodeJS.Signals): boolean {
     this.killedSignals.push(signal);
+    queueMicrotask(() => {
+      this.signalCode = signal;
+      this.emit('exit', null, signal);
+    });
     return true;
   }
 
@@ -239,12 +245,12 @@ describe('preview lifecycle', () => {
 
     await lifecycle.start({ root: rootA });
 
-    expect(scheduled).toHaveLength(1);
+    expect(scheduled.length).toBeGreaterThanOrEqual(2);
     expect(cancelled).toEqual(scheduled);
   });
 
-  it.each(['instance', 'project'] as const)(
-    'rejects a ready child with mismatched %s identity',
+  it.each(['IPC instance', 'HTTP health project'] as const)(
+    'rejects a mismatched %s identity',
     async (mismatch) => {
       const lifecycle = createPreviewLifecycle({
         createInstanceId: () => 'expected-instance',
@@ -255,7 +261,7 @@ describe('preview lifecycle', () => {
           queueMicrotask(() => {
             child.emit('message', {
               type: 'ready',
-              instanceId: mismatch === 'instance' ? 'wrong-instance' : launch.instanceId,
+              instanceId: mismatch === 'IPC instance' ? 'wrong-instance' : launch.instanceId,
               pid: child.pid,
               port: 4321,
               listenMs: 5,
@@ -268,7 +274,8 @@ describe('preview lifecycle', () => {
             protocolVersion: 1,
             state: 'ready',
             instanceId: 'expected-instance',
-            projectId: mismatch === 'project' ? 'sha256:wrong-project' : deriveProjectId(rootA),
+            projectId:
+              mismatch === 'HTTP health project' ? 'sha256:wrong-project' : deriveProjectId(rootA),
             pid: 30_003,
             port: 4321,
           }),
@@ -281,10 +288,16 @@ describe('preview lifecycle', () => {
 
   it('serializes same-project starts so both callers converge on one runtime', async () => {
     let spawnCount = 0;
+    let attemptCount = 0;
+    const attemptIds: string[] = [];
     let launchedRuntime: PreviewRuntimeState | null = null;
     const lifecycle = createPreviewLifecycle({
       createInstanceId: () => 'serialized-instance',
-      createAttemptId: () => `attempt-${spawnCount + 1}`,
+      createAttemptId: () => {
+        const attemptId = `attempt-${++attemptCount}`;
+        attemptIds.push(attemptId);
+        return attemptId;
+      },
       createControlToken: () => CONTROL_TOKEN,
       spawnChild: (launch) => {
         spawnCount += 1;
@@ -316,6 +329,7 @@ describe('preview lifecycle', () => {
     ]);
 
     expect(spawnCount).toBe(1);
+    expect(attemptIds).toEqual(['attempt-1', 'attempt-2']);
     expect(second.instanceId).toBe(first.instanceId);
     expect(second.pid).toBe(first.pid);
   });
@@ -413,7 +427,9 @@ describe('preview lifecycle', () => {
           isShutdown = true;
           return jsonResponse({ ok: true }, 202);
         }
-        if (isShutdown) throw new Error('ECONNREFUSED');
+        if (isShutdown) {
+          throw Object.assign(new Error('connect refused'), { code: 'ECONNREFUSED' });
+        }
         return jsonResponse(healthFor(runtime));
       },
     });
@@ -461,7 +477,7 @@ describe('preview lifecycle', () => {
     const lifecycle = createPreviewLifecycle({
       processKill: (pid, signal) => {
         expect(signal).toBe(0);
-        if (pid === 41_001) throw new Error('ESRCH');
+        if (pid === 41_001) throw Object.assign(new Error('not found'), { code: 'ESRCH' });
         return true;
       },
       fetch: async () => {
@@ -474,6 +490,162 @@ describe('preview lifecycle', () => {
 
     expect(existsSync(pathsA.previewPidFile)).toBe(false);
     expect(existsSync(pathsB.previewPidFile)).toBe(true);
+  });
+
+  it('preserves a legacy PID when signal 0 is denied with EPERM', async () => {
+    const paths = resolveProjectPaths(rootA);
+    mkdirSync(paths.synergyDir, { recursive: true });
+    writeFileSync(paths.previewPidFile, '41003\n');
+    const lifecycle = createPreviewLifecycle({
+      processKill: () => {
+        throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+      },
+    });
+
+    await lifecycle.status(rootA);
+
+    expect(existsSync(paths.previewPidFile)).toBe(true);
+  });
+
+  it.each([
+    ['timeout', 'timeout'] as const,
+    ['malformed response', 'malformed'] as const,
+    ['non-2xx response', 'http'] as const,
+  ])('does not treat a %s after shutdown as proof of disappearance', async (_label, outcome) => {
+    const paths = resolveProjectPaths(rootA);
+    mkdirSync(paths.synergyDir, { recursive: true });
+    const runtime = runtimeFor(rootA);
+    writePreviewRuntime(paths.previewRuntimeFile, runtime);
+    let requestCount = 0;
+    const lifecycle = createPreviewLifecycle({
+      pollIntervalMs: 1,
+      statusTimeoutMs: 10,
+      stopTimeoutMs: 30,
+      fetch: async (_url, init) => {
+        requestCount += 1;
+        if (requestCount === 1) return jsonResponse(healthFor(runtime));
+        if (init?.method === 'POST') return jsonResponse({ ok: true }, 202);
+        if (outcome === 'malformed') return jsonResponse({});
+        if (outcome === 'http') return jsonResponse({}, 503);
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        });
+      },
+    });
+
+    await expect(lifecycle.stop(rootA)).resolves.toBe(false);
+    expect(readPreviewRuntime(paths.previewRuntimeFile)).toEqual(runtime);
+  });
+
+  it('reports stop failure when owned metadata removal does not succeed', async () => {
+    const paths = resolveProjectPaths(rootA);
+    mkdirSync(paths.synergyDir, { recursive: true });
+    const runtime = runtimeFor(rootA);
+    writePreviewRuntime(paths.previewRuntimeFile, runtime);
+    let isShutdown = false;
+    const lifecycle = createPreviewLifecycle({
+      removeRuntime: () => false,
+      fetch: async (_url, init) => {
+        if (init?.method === 'POST') {
+          isShutdown = true;
+          return jsonResponse({ ok: true }, 202);
+        }
+        if (isShutdown) {
+          throw Object.assign(new Error('connect refused'), { code: 'ECONNREFUSED' });
+        }
+        return jsonResponse(healthFor(runtime));
+      },
+    } as Partial<PreviewLifecycleDependencies> & {
+      removeRuntime(path: string, instanceId: string): boolean;
+    });
+
+    await expect(lifecycle.stop(rootA)).resolves.toBe(false);
+    expect(readPreviewRuntime(paths.previewRuntimeFile)).toEqual(runtime);
+  });
+
+  it('reserves startup time for publication cleanup within the invocation deadline', async () => {
+    const paths = resolveProjectPaths(rootA);
+    let now = 0;
+    const lifecycle = createPreviewLifecycle({
+      canonicalizeRoot: () => {
+        now += 2_000;
+        return realpathSync(rootA);
+      },
+      writeRuntime: (path, runtime) => {
+        now += 7_001;
+        writePreviewRuntime(path, runtime);
+      },
+      now: () => now,
+      startTimeoutMs: 10_000,
+      cleanupReserveMs: 1_000,
+      createInstanceId: () => 'deadline-instance',
+      createAttemptId: () => 'deadline-attempt',
+      createControlToken: () => CONTROL_TOKEN,
+      spawnChild: (launch) => {
+        const child = new FakeChild(30_008);
+        queueMicrotask(() =>
+          child.emit('message', {
+            type: 'ready',
+            instanceId: launch.instanceId,
+            pid: child.pid,
+            port: 4321,
+            listenMs: 1,
+          }),
+        );
+        return child;
+      },
+      fetch: async () =>
+        jsonResponse({
+          protocolVersion: 1,
+          state: 'ready',
+          instanceId: 'deadline-instance',
+          projectId: deriveProjectId(realpathSync(rootA)),
+          pid: 30_008,
+          port: 4321,
+        }),
+      writeOutput: () => undefined,
+    } as Partial<PreviewLifecycleDependencies> & {
+      canonicalizeRoot(root?: string): string;
+      writeRuntime(path: string, runtime: PreviewRuntimeState): void;
+      cleanupReserveMs: number;
+    });
+
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/10 seconds/i);
+    expect(now).toBeLessThanOrEqual(10_000);
+    expect(readPreviewRuntime(paths.previewRuntimeFile)).toBeNull();
+  });
+
+  it('bounds stop from invocation instead of resetting its deadline after shutdown', async () => {
+    const paths = resolveProjectPaths(rootA);
+    mkdirSync(paths.synergyDir, { recursive: true });
+    const runtime = runtimeFor(rootA);
+    writePreviewRuntime(paths.previewRuntimeFile, runtime);
+    let now = 0;
+    let requestCount = 0;
+    const lifecycle = createPreviewLifecycle({
+      canonicalizeRoot: () => {
+        now += 1_000;
+        return realpathSync(rootA);
+      },
+      now: () => now,
+      stopTimeoutMs: 3_000,
+      fetch: async (_url, init) => {
+        requestCount += 1;
+        now += requestCount === 1 ? 400 : 1_500;
+        if (requestCount === 1) return jsonResponse(healthFor(runtime));
+        if (init?.method === 'POST') return jsonResponse({ ok: true }, 202);
+        throw Object.assign(new Error('connect refused'), { code: 'ECONNREFUSED' });
+      },
+    } as Partial<PreviewLifecycleDependencies> & {
+      canonicalizeRoot(root?: string): string;
+    });
+
+    await expect(lifecycle.stop(rootA)).resolves.toBe(false);
+    expect(now).toBe(2_900);
+    expect(requestCount).toBe(2);
+    expect(readPreviewRuntime(paths.previewRuntimeFile)).toEqual(runtime);
   });
 
   it.each(['timeout', 'exit'] as const)(
