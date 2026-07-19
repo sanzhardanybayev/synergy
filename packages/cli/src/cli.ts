@@ -15,11 +15,12 @@ import { initProject } from './init.js';
 import { resolveProjectPaths } from './paths.js';
 import { registerPreviewCommand } from './preview-cli.js';
 import { registerReviewCommands } from './review-cli.js';
+import { SYNERGY_VERSION } from './version.js';
 
 const cli = cac('synergy');
 
 cli.help();
-cli.version('0.1.0');
+cli.version(SYNERGY_VERSION);
 
 cli
   .command('init', 'Scaffold .synergy/ in the current directory')

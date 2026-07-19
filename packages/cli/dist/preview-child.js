@@ -34,14 +34,17 @@ function getListeningPort(server) {
 async function runPreviewChild(dependencies) {
   let instanceId = FALLBACK_INSTANCE_ID;
   let phase = "configure";
-  let hasSentMessage = false;
+  let hasSentOutcome = false;
   let isReady = false;
+  let isCommitted = false;
   let isTerminationRequested = false;
   let viteServer = null;
   let closePromise = null;
   const sendMessage = (message) => {
-    if (hasSentMessage) return;
-    hasSentMessage = true;
+    if (message.type !== "committed") {
+      if (hasSentOutcome) return;
+      hasSentOutcome = true;
+    }
     dependencies.send(message);
   };
   const closeServer = async () => {
@@ -65,6 +68,26 @@ async function runPreviewChild(dependencies) {
       dependencies.setExitCode(1);
     });
   });
+  const removeParentMessageListener = dependencies.onParentMessage((message) => {
+    if (!isReady || typeof message !== "object" || message === null || !("type" in message) || message.type !== "commit" || !("instanceId" in message) || message.instanceId !== instanceId) {
+      return;
+    }
+    isCommitted = true;
+    sendMessage({ type: "committed", instanceId });
+  });
+  const removeDisconnectListener = dependencies.onDisconnect(() => {
+    if (isCommitted) return;
+    isTerminationRequested = true;
+    dependencies.setExitCode(1);
+    void closeServer().catch((error) => {
+      dependencies.logError("Failed to close the orphaned Synergy preview server:", error);
+    });
+  });
+  const removeLifecycleListeners = () => {
+    removeSigtermListener();
+    removeParentMessageListener();
+    removeDisconnectListener();
+  };
   try {
     instanceId = readRequiredEnvironment(dependencies.env, "SYNERGY_INSTANCE_ID");
     readRequiredEnvironment(dependencies.env, "SYNERGY_PROJECT_ROOT");
@@ -75,7 +98,7 @@ async function runPreviewChild(dependencies) {
     const strictPort = readStrictPort(dependencies.env);
     const previewDirectory = dependencies.resolvePreviewDirectory();
     if (isTerminationRequested) {
-      removeSigtermListener();
+      removeLifecycleListeners();
       return 1;
     }
     viteServer = await dependencies.createServer({
@@ -89,7 +112,7 @@ async function runPreviewChild(dependencies) {
     });
     if (isTerminationRequested) {
       await closeServer();
-      removeSigtermListener();
+      removeLifecycleListeners();
       return 1;
     }
     phase = "listen";
@@ -97,7 +120,7 @@ async function runPreviewChild(dependencies) {
     await viteServer.listen();
     if (isTerminationRequested) {
       await closeServer();
-      removeSigtermListener();
+      removeLifecycleListeners();
       return 1;
     }
     const actualPort = getListeningPort(viteServer);
@@ -115,7 +138,7 @@ async function runPreviewChild(dependencies) {
     await closeServer().catch((closeError) => {
       dependencies.logError("Failed to clean up the Synergy preview server:", closeError);
     });
-    removeSigtermListener();
+    removeLifecycleListeners();
     return 1;
   }
 }
@@ -131,6 +154,14 @@ function createProductionDependencies() {
     onSigterm(listener) {
       process.once("SIGTERM", listener);
       return () => process.removeListener("SIGTERM", listener);
+    },
+    onParentMessage(listener) {
+      process.on("message", listener);
+      return () => process.removeListener("message", listener);
+    },
+    onDisconnect(listener) {
+      process.once("disconnect", listener);
+      return () => process.removeListener("disconnect", listener);
     },
     setExitCode: (code) => {
       process.exitCode = code;

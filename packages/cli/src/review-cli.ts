@@ -168,7 +168,7 @@ function printCreateResult(
 function printError(error: unknown, exitCode: number, json: boolean | undefined): void {
   if (json && error instanceof PreviewNotReadyError) {
     process.stdout.write(
-      `${JSON.stringify({ error: error.code, message: error.message, root: error.root })}\n`,
+      `${JSON.stringify({ error: error.code, message: error.message, root: error.root, suggestedCommand: error.suggestedCommand })}\n`,
     );
     process.exitCode = exitCode;
     return;

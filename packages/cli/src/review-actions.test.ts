@@ -347,12 +347,30 @@ describe('review lifecycle actions', () => {
       ).rejects.toMatchObject({
         code: 'preview_not_ready',
         root,
-        message: `Preview is not ready. Run: synergy preview start --root ${JSON.stringify(root)}`,
+        message: `Preview is not ready for project root ${JSON.stringify(root)}. Invoke the Synergy executable with argv ${JSON.stringify(['preview', 'start', '--root', root])}.`,
+        suggestedCommand: {
+          command: 'synergy',
+          args: ['preview', 'start', '--root', root],
+        },
       });
       expect(statusCalls).toBe(1);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it('keeps adversarial project roots in argv data instead of executable shell text', () => {
+    const root = '/tmp/$(touch PWNED); `touch ALSO_PWNED`; "quoted"';
+    const error = new PreviewNotReadyError(root);
+
+    expect(error.message).toBe(
+      `Preview is not ready for project root ${JSON.stringify(root)}. Invoke the Synergy executable with argv ${JSON.stringify(['preview', 'start', '--root', root])}.`,
+    );
+    expect(error.message).not.toContain('synergy preview start --root');
+    expect(error.suggestedCommand).toEqual({
+      command: 'synergy',
+      args: ['preview', 'start', '--root', root],
+    });
   });
 
   it('validates the requested review bundle before checking preview status', async () => {

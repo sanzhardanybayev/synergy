@@ -47,9 +47,20 @@ export interface OpenReviewDependencies {
 
 export class PreviewNotReadyError extends Error {
   readonly code = 'preview_not_ready';
+  readonly suggestedCommand: {
+    command: 'synergy';
+    args: ['preview', 'start', '--root', string];
+  };
 
   constructor(readonly root: string) {
-    super(`Preview is not ready. Run: synergy preview start --root ${JSON.stringify(root)}`);
+    const args: ['preview', 'start', '--root', string] = ['preview', 'start', '--root', root];
+    super(
+      `Preview is not ready for project root ${JSON.stringify(root)}. Invoke the Synergy executable with argv ${JSON.stringify(args)}.`,
+    );
+    this.suggestedCommand = {
+      command: 'synergy',
+      args,
+    };
   }
 }
 

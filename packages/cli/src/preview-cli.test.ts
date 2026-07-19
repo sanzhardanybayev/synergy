@@ -45,6 +45,13 @@ const RUNNING_STATUS: PreviewStatus = {
   origin: 'http://127.0.0.1:4321',
   projectId: 'project-1',
   instanceId: 'instance-1',
+  timings: {
+    lockMs: 1,
+    launchMs: 2,
+    listenMs: 3,
+    healthMs: 4,
+    totalMs: 10,
+  },
 };
 
 describe('preview CLI', () => {
@@ -58,21 +65,58 @@ describe('preview CLI', () => {
     expect(result.stderr).toMatch(/Error:.*could not be confirmed/i);
   });
 
-  it.each(['start', 'stop'])(
-    'rejects --json for %s instead of silently ignoring it',
-    async (action) => {
-      const previewStart = vi.fn().mockResolvedValue(RUNNING_STATUS);
-      const previewStop = vi.fn().mockResolvedValue(true);
+  it('emits only the complete start result as JSON', async () => {
+    const previewStart = vi.fn().mockResolvedValue(RUNNING_STATUS);
 
-      const result = await runPreviewCli([action, '--json'], { previewStart, previewStop });
+    const result = await runPreviewCli(['start', '--root', '/project', '--json'], {
+      previewStart,
+    });
 
-      expect(result.exitCode).toBe(2);
+    expect(result.exitCode).toBeUndefined();
+    expect(result.stderr).toBe('');
+    expect(JSON.parse(result.stdout)).toEqual(RUNNING_STATUS);
+    expect(previewStart).toHaveBeenCalledWith({ root: '/project', quiet: true });
+  });
+
+  it('emits a stable stop confirmation as JSON', async () => {
+    const previewStop = vi.fn().mockResolvedValue(true);
+
+    const result = await runPreviewCli(['stop', '--root', '/project', '--json'], {
+      previewStop,
+    });
+
+    expect(result.exitCode).toBeUndefined();
+    expect(result.stderr).toBe('');
+    expect(JSON.parse(result.stdout)).toEqual({ stopped: true });
+    expect(previewStop).toHaveBeenCalledWith('/project', { quiet: true });
+  });
+
+  it.each([
+    ['start', { previewStart: vi.fn().mockRejectedValue(new Error('start failed')) }],
+    ['stop', { previewStop: vi.fn().mockResolvedValue(false) }],
+  ] as const)(
+    'keeps failed JSON %s commands nonzero and JSON-free',
+    async (action, dependencies) => {
+      const result = await runPreviewCli([action, '--json'], dependencies);
+
+      expect(result.exitCode).toBe(1);
       expect(result.stdout).toBe('');
-      expect(result.stderr).toMatch(/Error:.*--json.*status/i);
-      expect(previewStart).not.toHaveBeenCalled();
-      expect(previewStop).not.toHaveBeenCalled();
+      expect(result.stderr).toMatch(/Error:/u);
     },
   );
+
+  it('preserves human start and stop invocation behavior without JSON', async () => {
+    const previewStart = vi.fn().mockResolvedValue(RUNNING_STATUS);
+    const previewStop = vi.fn().mockResolvedValue(true);
+
+    const start = await runPreviewCli(['start', '--root', '/project'], { previewStart });
+    const stop = await runPreviewCli(['stop', '--root', '/project'], { previewStop });
+
+    expect(start).toEqual({ exitCode: undefined, stderr: '', stdout: '' });
+    expect(stop).toEqual({ exitCode: undefined, stderr: '', stdout: '' });
+    expect(previewStart).toHaveBeenCalledWith({ root: '/project' });
+    expect(previewStop).toHaveBeenCalledWith('/project');
+  });
 
   it('emits the complete status result as JSON', async () => {
     const result = await runPreviewCli(['status', '--json'], {

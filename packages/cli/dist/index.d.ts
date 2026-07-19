@@ -7,17 +7,22 @@ declare function initProject(root?: string): {
     synergyDir: string;
 };
 
-interface PreviewStartOptions {
-    root?: string;
-    port?: number;
-    background?: boolean;
-}
 interface PreviewTimings {
     lockMs: number;
     launchMs: number;
     listenMs: number;
     healthMs: number;
     totalMs: number;
+}
+
+interface PreviewStartOptions {
+    root?: string;
+    port?: number;
+    background?: boolean;
+    quiet?: boolean;
+}
+interface PreviewStopOptions {
+    quiet?: boolean;
 }
 interface PreviewStatus {
     running: boolean;
@@ -30,7 +35,7 @@ interface PreviewStatus {
 }
 declare function previewStatus(root?: string): Promise<PreviewStatus>;
 declare function previewStart(options?: PreviewStartOptions): Promise<PreviewStatus>;
-declare function previewStop(root?: string): Promise<boolean>;
+declare function previewStop(root?: string, options?: PreviewStopOptions): Promise<boolean>;
 declare function printStatus(status: PreviewStatus): void;
 
 interface ProjectPaths {
@@ -145,4 +150,4 @@ interface ReviewCliDependencies {
 declare function createReviewSourceFromFlags(flags: ReviewCreateFlags): ReviewCaptureSourceRequest;
 declare function registerReviewCommands(cli: CAC, dependencies?: ReviewCliDependencies): void;
 
-export { type ApplyReviewAnalysisRequest, type CreateReviewRequest, type CreateReviewResult, type LogArgs, PREVIEW_PORT, type PhaseSetArgs, type PreviewStartOptions, type PreviewStatus, type PreviewTimings, type ProgressArgs, type ProjectPaths, type RefreshReviewRequest, type ResumeArgs, type ReviewActionDependencies, type ReviewAnalysis, type ReviewStatusRequest, type ReviewStatusResult, applyReviewAnalysis, createOrResumeReview, createReviewSourceFromFlags, formatReviewStatusJson, getReviewStatus, initProject, listReviews, logFinding, openReview, phaseSet, previewStart, previewStatus, previewStop, printProgress, printReviewStatus, printStatus, refreshReview, registerReviewCommands, resolveProjectPaths, resumeSet };
+export { type ApplyReviewAnalysisRequest, type CreateReviewRequest, type CreateReviewResult, type LogArgs, PREVIEW_PORT, type PhaseSetArgs, type PreviewStartOptions, type PreviewStatus, type PreviewStopOptions, type PreviewTimings, type ProgressArgs, type ProjectPaths, type RefreshReviewRequest, type ResumeArgs, type ReviewActionDependencies, type ReviewAnalysis, type ReviewStatusRequest, type ReviewStatusResult, applyReviewAnalysis, createOrResumeReview, createReviewSourceFromFlags, formatReviewStatusJson, getReviewStatus, initProject, listReviews, logFinding, openReview, phaseSet, previewStart, previewStatus, previewStop, printProgress, printReviewStatus, printStatus, refreshReview, registerReviewCommands, resolveProjectPaths, resumeSet };

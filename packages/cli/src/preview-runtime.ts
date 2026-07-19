@@ -27,6 +27,15 @@ export interface PreviewRuntimeState {
   startedAt: string;
   controlToken: string;
   toolVersion: string;
+  timings?: PreviewTimings;
+}
+
+export interface PreviewTimings {
+  lockMs: number;
+  launchMs: number;
+  listenMs: number;
+  healthMs: number;
+  totalMs: number;
 }
 
 export interface PreviewHealth {
@@ -65,6 +74,29 @@ function isPort(value: unknown): value is number {
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function isDuration(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function parseTimings(value: unknown): PreviewTimings | null {
+  if (!isRecord(value)) return null;
+  const keys = ['lockMs', 'launchMs', 'listenMs', 'healthMs', 'totalMs'];
+  if (Object.keys(value).length !== keys.length || keys.some((key) => !(key in value))) {
+    return null;
+  }
+  const { lockMs, launchMs, listenMs, healthMs, totalMs } = value;
+  if (
+    !isDuration(lockMs) ||
+    !isDuration(launchMs) ||
+    !isDuration(listenMs) ||
+    !isDuration(healthMs) ||
+    !isDuration(totalMs)
+  ) {
+    return null;
+  }
+  return { lockMs, launchMs, listenMs, healthMs, totalMs };
 }
 
 function isIsoTimestamp(value: unknown): value is string {
@@ -115,7 +147,7 @@ function restoreCapturedFile(
 function parsePreviewRuntime(value: unknown): PreviewRuntimeState | null {
   if (!isRecord(value)) return null;
 
-  const expectedKeys = [
+  const requiredKeys = [
     'schemaVersion',
     'protocolVersion',
     'state',
@@ -131,9 +163,10 @@ function parsePreviewRuntime(value: unknown): PreviewRuntimeState | null {
     'controlToken',
     'toolVersion',
   ];
+  const allowedKeys = new Set([...requiredKeys, 'timings']);
   if (
-    Object.keys(value).length !== expectedKeys.length ||
-    expectedKeys.some((key) => !(key in value))
+    requiredKeys.some((key) => !(key in value)) ||
+    Object.keys(value).some((key) => !allowedKeys.has(key))
   ) {
     return null;
   }
@@ -153,6 +186,7 @@ function parsePreviewRuntime(value: unknown): PreviewRuntimeState | null {
     startedAt,
     controlToken,
     toolVersion,
+    timings,
   } = value;
 
   if (
@@ -175,6 +209,12 @@ function parsePreviewRuntime(value: unknown): PreviewRuntimeState | null {
 
   const derivedOrigin = deriveLoopbackOrigin(port);
   if (origin !== derivedOrigin) return null;
+  let parsedTimings: PreviewTimings | undefined;
+  if (timings !== undefined) {
+    const candidate = parseTimings(timings);
+    if (candidate === null) return null;
+    parsedTimings = candidate;
+  }
 
   return {
     schemaVersion,
@@ -191,6 +231,7 @@ function parsePreviewRuntime(value: unknown): PreviewRuntimeState | null {
     startedAt,
     controlToken,
     toolVersion,
+    ...(parsedTimings === undefined ? {} : { timings: parsedTimings }),
   };
 }
 

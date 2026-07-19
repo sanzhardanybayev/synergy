@@ -135,8 +135,12 @@ describe('review CLI source flags', () => {
     expect(result.stderr).toBe('');
     expect(JSON.parse(result.stdout)).toEqual({
       error: 'preview_not_ready',
-      message: `Preview is not ready. Run: synergy preview start --root ${JSON.stringify(canonicalRoot)}`,
+      message: `Preview is not ready for project root ${JSON.stringify(canonicalRoot)}. Invoke the Synergy executable with argv ${JSON.stringify(['preview', 'start', '--root', canonicalRoot])}.`,
       root: canonicalRoot,
+      suggestedCommand: {
+        command: 'synergy',
+        args: ['preview', 'start', '--root', canonicalRoot],
+      },
     });
   });
 
@@ -154,8 +158,9 @@ describe('review CLI source flags', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain(
-      `Error: Preview is not ready. Run: synergy preview start --root ${JSON.stringify(root)}`,
+      `Error: Preview is not ready for project root ${JSON.stringify(root)}. Invoke the Synergy executable with argv ${JSON.stringify(['preview', 'start', '--root', root])}.`,
     );
+    expect(result.stderr).not.toContain('synergy preview start --root');
   });
 
   it('removes direct wait signal handlers after success and failure', async () => {

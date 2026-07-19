@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -45,5 +45,22 @@ describe('initProject', () => {
       initProject(tmpRoot);
       initProject(tmpRoot);
     }).not.toThrow();
+  });
+
+  it('preserves an existing gitignore and appends only missing local artifact rules', () => {
+    const synergyDir = join(tmpRoot, '.synergy');
+    mkdirSync(synergyDir, { recursive: true });
+    writeFileSync(join(synergyDir, '.gitignore'), '# user rule\ncustom.local\npreview.log\n');
+
+    initProject(tmpRoot);
+    initProject(tmpRoot);
+
+    const gitignore = readFileSync(join(synergyDir, '.gitignore'), 'utf8');
+    expect(gitignore).toContain('# user rule\ncustom.local\n');
+    expect(gitignore.match(/^preview\.log$/gmu)).toHaveLength(1);
+    expect(gitignore).toContain('preview.runtime.json.quarantine.*');
+    expect(gitignore).toContain('.preview.runtime.json.*.tmp');
+    expect(gitignore).toContain('preview.start.lock.quarantine.*');
+    expect(gitignore).toContain('preview.start.lock.owner.tmp.*');
   });
 });

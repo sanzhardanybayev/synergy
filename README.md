@@ -84,7 +84,7 @@ Prerequisites: **Node ≥ 20**, **pnpm** (`corepack enable` if missing).
 /synergy-setup
 ```
 
-`/synergy-setup` runs `pnpm install && pnpm build` inside the plugin once. After that, the slash commands and skills are ready.
+`/synergy-setup` runs `pnpm install --frozen-lockfile` inside the plugin once. Runtime artifacts ship with the plugin, so setup does not rebuild or rewrite them. After that, the slash commands and skills are ready.
 
 <details>
 <summary>Install from a local clone</summary>
@@ -129,9 +129,9 @@ implement specification sessions; `/synergy-continue` resumes their execution st
 | `/synergy-handoff [session]` | Capture a mid-work KT baton (`.state/handoff.md`) before you quit, so a future agent resumes inside the current phase. |
 | `/synergy-review <source>` | Create or resume a PR, staged, unstaged, or scoped guided review; open its exact revision and listen for browser questions. |
 | `/synergy-preview-start` | Boot the preview server, preferring port 4321 and selecting a reachable alternate when needed. Idempotent. |
-| `/synergy-preview-stop` | Kill the preview server, remove PID file. |
+| `/synergy-preview-stop` | Ask the verified preview runtime to shut down through its authenticated loopback control endpoint. |
 | `/synergy-preview-status` | Report running / stopped, pid, URL. |
-| `/synergy-setup` | One-time bootstrap (install + build). |
+| `/synergy-setup` | One-time bootstrap (locked dependency install; runtime artifacts already ship with the plugin). |
 
 ### CLI subcommands
 

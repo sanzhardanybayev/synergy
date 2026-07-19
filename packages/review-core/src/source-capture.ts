@@ -139,6 +139,24 @@ interface RepositoryEntry {
   mode: number;
 }
 
+const PREVIEW_RUNTIME_PATHS = new Set<string>([
+  '.synergy/preview.runtime.json',
+  '.synergy/preview.runtime.json.mutation.lock',
+  '.synergy/preview.start.lock',
+  '.synergy/preview.pid',
+  '.synergy/preview.log',
+]);
+
+function isPreviewRuntimePath(path: string): boolean {
+  return (
+    PREVIEW_RUNTIME_PATHS.has(path) ||
+    path.startsWith('.synergy/preview.runtime.json.quarantine.') ||
+    (path.startsWith('.synergy/.preview.runtime.json.') && path.endsWith('.tmp')) ||
+    path.startsWith('.synergy/preview.start.lock.quarantine.') ||
+    path.startsWith('.synergy/preview.start.lock.owner.tmp.')
+  );
+}
+
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
 
 function decodeUtf8(bytes: Buffer): string | undefined {
@@ -407,6 +425,14 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
     'diff',
     '--no-ext-diff',
     '--binary',
+    '--',
+    ':(exclude).synergy/preview.runtime.json',
+    ':(exclude).synergy/preview.runtime.json.*',
+    ':(exclude).synergy/.preview.runtime.json.*.tmp',
+    ':(exclude).synergy/preview.start.lock',
+    ':(exclude).synergy/preview.start.lock.*',
+    ':(exclude).synergy/preview.pid',
+    ':(exclude).synergy/preview.log',
   ]);
   const untrackedPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, 'git', [
@@ -415,7 +441,7 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
       '--exclude-standard',
       '-z',
     ]),
-  );
+  ).filter((path) => !isPreviewRuntimePath(path));
   const untrackedEntries = untrackedPaths.map((path) => ({
     path,
     entry: readRepositoryEntry(options.root, path, options.readFile),

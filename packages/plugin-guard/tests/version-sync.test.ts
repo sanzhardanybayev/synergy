@@ -9,10 +9,15 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'synguard-'));
   mkdirSync(join(root, '.claude-plugin'), { recursive: true });
   mkdirSync(join(root, 'skills/create-spec'), { recursive: true });
+  mkdirSync(join(root, 'packages/cli/src'), { recursive: true });
   writeFileSync(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ version: '0.7.0' }));
   writeFileSync(
     join(root, '.claude-plugin/marketplace.json'),
     '{\n  "plugins": [\n    { "name": "synergy", "version": "0.6.0" }\n  ]\n}\n',
+  );
+  writeFileSync(
+    join(root, 'packages/cli/src/version.ts'),
+    "export const SYNERGY_VERSION = '0.6.0';\n",
   );
   writeFileSync(
     join(root, 'skills/create-spec/SKILL.md'),
@@ -32,6 +37,9 @@ describe('version-sync', () => {
     );
     expect(readFileSync(join(root, 'skills/create-spec/SKILL.md'), 'utf8')).toContain(
       'synergy-version: 0.7.0',
+    );
+    expect(readFileSync(join(root, 'packages/cli/src/version.ts'), 'utf8')).toContain(
+      "export const SYNERGY_VERSION = '0.7.0';",
     );
     expect(run(['--check'], root)).toBe(0); // now consistent
   });

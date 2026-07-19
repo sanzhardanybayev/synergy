@@ -18,6 +18,14 @@ function targets(root: string): Target[] {
       },
       rewrite: setMarketplaceVersion,
     },
+    {
+      path: join(root, 'packages/cli/src/version.ts'),
+      read() {
+        return readFileSync(this.path, 'utf8');
+      },
+      rewrite: (_content, version) =>
+        `// Generated from .claude-plugin/plugin.json by packages/plugin-guard/src/version-sync.ts.\nexport const SYNERGY_VERSION = '${version}';\n`,
+    },
   ];
   const skillsDir = join(root, 'skills');
   let entries: ReturnType<typeof readdirSync>;

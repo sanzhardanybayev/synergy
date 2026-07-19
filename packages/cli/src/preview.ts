@@ -13,8 +13,8 @@ import {
   renameSync,
   unlinkSync,
 } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dim, green, yellow } from 'kleur/colors';
+import { ensureSynergyGitignore } from './init.js';
 import { PREVIEW_PORT, resolveProjectPaths } from './paths.js';
 import {
   type AcquiredPreviewStartLock,
@@ -26,6 +26,7 @@ import {
   type PreviewChildLaunch,
   type PreviewProcessTimerDependencies,
   type ReadyPreviewChild,
+  commitReadyPreviewChild,
   detachReadyPreviewChild,
   spawnPreviewChild,
   terminateOwnedPreviewChild,
@@ -34,6 +35,7 @@ import {
 import {
   type PreviewHealth,
   type PreviewRuntimeState,
+  type PreviewTimings,
   deriveLoopbackOrigin,
   deriveProjectId,
   generateControlToken,
@@ -47,10 +49,11 @@ import {
   requestPreviewHealth,
   requestPreviewShutdown,
 } from './preview-transport.js';
+import { SYNERGY_VERSION } from './version.js';
 
 export type { PreviewChildHandle, PreviewChildLaunch } from './preview-process.js';
+export type { PreviewTimings } from './preview-runtime.js';
 
-const require = createRequire(import.meta.url);
 const START_TIMEOUT_MS = 10_000;
 const START_CLEANUP_RESERVE_MS = 1_000;
 const STOP_TIMEOUT_MS = 3_000;
@@ -65,14 +68,11 @@ export interface PreviewStartOptions {
   root?: string;
   port?: number;
   background?: boolean;
+  quiet?: boolean;
 }
 
-export interface PreviewTimings {
-  lockMs: number;
-  launchMs: number;
-  listenMs: number;
-  healthMs: number;
-  totalMs: number;
+export interface PreviewStopOptions {
+  quiet?: boolean;
 }
 
 export interface PreviewStatus {
@@ -111,7 +111,7 @@ export interface PreviewLifecycleDependencies
 export interface PreviewLifecycle {
   start(options?: PreviewStartOptions): Promise<PreviewStatus>;
   status(root?: string): Promise<PreviewStatus>;
-  stop(root?: string): Promise<boolean>;
+  stop(root?: string, options?: PreviewStopOptions): Promise<boolean>;
 }
 
 const DEFAULT_DEPENDENCIES: PreviewLifecycleDependencies = {
@@ -162,18 +162,6 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
-function toolVersion(): string {
-  const packageJson: unknown = require('../package.json');
-  if (
-    isRecord(packageJson) &&
-    'version' in packageJson &&
-    typeof packageJson.version === 'string'
-  ) {
-    return packageJson.version;
-  }
-  return 'unknown';
-}
-
 function healthMatchesRuntime(health: PreviewHealth, runtime: PreviewRuntimeState): boolean {
   return (
     health.protocolVersion === runtime.protocolVersion &&
@@ -211,7 +199,7 @@ function stoppedStatus(projectId: string): PreviewStatus {
   };
 }
 
-function runningStatus(runtime: PreviewRuntimeState, timings?: PreviewTimings): PreviewStatus {
+function runningStatus(runtime: PreviewRuntimeState): PreviewStatus {
   return {
     running: true,
     pid: runtime.pid,
@@ -219,7 +207,7 @@ function runningStatus(runtime: PreviewRuntimeState, timings?: PreviewTimings): 
     origin: deriveLoopbackOrigin(runtime.port),
     projectId: runtime.projectId,
     instanceId: runtime.instanceId,
-    ...(timings === undefined ? {} : { timings }),
+    ...(runtime.timings === undefined ? {} : { timings: runtime.timings }),
   };
 }
 
@@ -283,7 +271,6 @@ function lockDependencies(
     copyFileExclusive: dependencies.copyFileExclusive,
     createQuarantineId: dependencies.createQuarantineId,
     now: dependencies.now,
-    processKill: dependencies.processKill,
     publishOwnerRecord: dependencies.publishOwnerRecord,
     wallNow: dependencies.wallNow,
     sleep: dependencies.sleep,
@@ -384,6 +371,7 @@ function withCleanupFailures(primary: Error, cleanupFailures: Error[]): Error {
 function buildRuntime(
   launch: PreviewChildLaunch,
   ready: ReadyPreviewChild,
+  timings: PreviewTimings,
   dependencies: PreviewLifecycleDependencies,
 ): PreviewRuntimeState {
   return {
@@ -400,7 +388,8 @@ function buildRuntime(
     strictPort: launch.strictPort,
     startedAt: new Date(dependencies.wallNow()).toISOString(),
     controlToken: launch.controlToken,
-    toolVersion: toolVersion(),
+    toolVersion: SYNERGY_VERSION,
+    timings,
   };
 }
 
@@ -417,6 +406,7 @@ async function startPreview(
   const workDeadline = totalDeadline - cleanupReserveMs;
   const paths = projectPaths(options.root, dependencies);
   mkdirSync(paths.synergyDir, { recursive: true });
+  ensureSynergyGitignore(paths.root);
   if (dependencies.now() >= workDeadline) {
     throw new Error('Preview did not become ready within 10 seconds');
   }
@@ -444,9 +434,11 @@ async function startPreview(
     );
     const existing = await readVerifiedStatusAtPaths(paths, statusTimeoutMs, dependencies);
     if (existing.running) {
-      dependencies.writeOutput(
-        `${yellow('!')} Preview already running (pid ${existing.pid}) at ${existing.origin}\n`,
-      );
+      if (!options.quiet) {
+        dependencies.writeOutput(
+          `${yellow('!')} Preview already running (pid ${existing.pid}) at ${existing.origin}\n`,
+        );
+      }
       return existing;
     }
     if (dependencies.now() >= workDeadline) {
@@ -484,13 +476,25 @@ async function startPreview(
       throw new Error('Preview did not become ready within 10 seconds');
     }
 
-    const runtime = buildRuntime(launch, ready, dependencies);
+    const timings: PreviewTimings = {
+      lockMs: lock.lockMs,
+      launchMs,
+      listenMs: ready.listenMs,
+      healthMs,
+      totalMs: dependencies.now() - invokedAt,
+    };
+    const runtime = buildRuntime(launch, ready, timings, dependencies);
     dependencies.writeRuntime(paths.previewRuntimeFile, runtime);
     hasPublishedRuntime = true;
     if (dependencies.now() > workDeadline) {
       throw new Error('Preview did not become ready within 10 seconds');
     }
-    const lockMs = lock.lockMs;
+    await commitReadyPreviewChild(
+      child,
+      launch.instanceId,
+      workDeadline - dependencies.now(),
+      processTimerDependencies(dependencies),
+    );
     detachReadyPreviewChild(child);
     shouldReleaseLock = false;
     if (!lock.release()) throw new Error('Preview start lock release did not succeed');
@@ -498,19 +502,14 @@ async function startPreview(
     if (dependencies.now() > totalDeadline) {
       throw new Error('Preview did not become ready within 10 seconds');
     }
-    const timings: PreviewTimings = {
-      lockMs,
-      launchMs,
-      listenMs: ready.listenMs,
-      healthMs,
-      totalMs: dependencies.now() - invokedAt,
-    };
-    dependencies.writeOutput(
-      `${green('✓')} Preview started (pid ${runtime.pid}) at ${dim(runtime.origin)}\n`,
-    );
-    dependencies.writeOutput(`  Log: ${dim(paths.previewLogFile)}\n`);
+    if (!options.quiet) {
+      dependencies.writeOutput(
+        `${green('✓')} Preview started (pid ${runtime.pid}) at ${dim(runtime.origin)}\n`,
+      );
+      dependencies.writeOutput(`  Log: ${dim(paths.previewLogFile)}\n`);
+    }
     child = null;
-    return runningStatus(runtime, timings);
+    return runningStatus(runtime);
   } catch (error) {
     const failure = withLogTail(error, paths.previewLogFile);
     const cleanupFailures: Error[] = [];
@@ -567,6 +566,7 @@ function isDefinitiveDisappearance(
 
 async function stopPreview(
   root: string | undefined,
+  options: PreviewStopOptions,
   dependencies: PreviewLifecycleDependencies,
 ): Promise<boolean> {
   const invokedAt = dependencies.now();
@@ -597,7 +597,9 @@ async function stopPreview(
     const runtime = readPreviewRuntime(paths.previewRuntimeFile);
     if (runtime === null) {
       migrateLegacyPid(paths.previewPidFile, dependencies);
-      dependencies.writeOutput(`${yellow('!')} No verified preview server recorded\n`);
+      if (!options.quiet) {
+        dependencies.writeOutput(`${yellow('!')} No verified preview server recorded\n`);
+      }
       return false;
     }
     if (runtime.projectId !== projectId || dependencies.now() >= workDeadline) return false;
@@ -633,7 +635,9 @@ async function stopPreview(
       if (isDefinitiveDisappearance(outcome, runtime)) {
         const removed = dependencies.removeRuntime(paths.previewRuntimeFile, runtime.instanceId);
         if (!removed || dependencies.now() > totalDeadline) return false;
-        dependencies.writeOutput(`${green('✓')} Preview stopped (pid ${runtime.pid})\n`);
+        if (!options.quiet) {
+          dependencies.writeOutput(`${green('✓')} Preview stopped (pid ${runtime.pid})\n`);
+        }
         return true;
       }
       const remainingMs = workDeadline - dependencies.now();
@@ -653,7 +657,7 @@ export function createPreviewLifecycle(
   return {
     start: (options = {}) => startPreview(options, dependencies),
     status: (root) => readVerifiedStatus(root, dependencies.statusTimeoutMs, dependencies),
-    stop: (root) => stopPreview(root, dependencies),
+    stop: (root, options = {}) => stopPreview(root, options, dependencies),
   };
 }
 
@@ -667,8 +671,11 @@ export async function previewStart(options: PreviewStartOptions = {}): Promise<P
   return defaultLifecycle.start(options);
 }
 
-export async function previewStop(root?: string): Promise<boolean> {
-  return defaultLifecycle.stop(root);
+export async function previewStop(
+  root?: string,
+  options: PreviewStopOptions = {},
+): Promise<boolean> {
+  return defaultLifecycle.stop(root, options);
 }
 
 export function printStatus(status: PreviewStatus): void {

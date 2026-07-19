@@ -41,6 +41,13 @@ function createRuntimeState(overrides: Partial<PreviewRuntimeState> = {}): Previ
     startedAt: '2026-07-19T16:00:00.000Z',
     controlToken: 'a'.repeat(64),
     toolVersion: '0.12.1',
+    timings: {
+      lockMs: 1,
+      launchMs: 2,
+      listenMs: 3,
+      healthMs: 4,
+      totalMs: 10,
+    },
     ...overrides,
   };
 }
@@ -130,10 +137,18 @@ describe('preview runtime', () => {
     ['startedAt', 'not-a-date'],
     ['controlToken', ''],
     ['toolVersion', ''],
+    ['timings', { lockMs: -1, launchMs: 2, listenMs: 3, healthMs: 4, totalMs: 10 }],
   ])('rejects an invalid %s field', (field, value) => {
     writeFileSync(runtimePath, JSON.stringify({ ...createRuntimeState(), [field]: value }));
 
     expect(readPreviewRuntime(runtimePath)).toBeNull();
+  });
+
+  it('accepts a legacy runtime record without startup timings', () => {
+    const { timings: _timings, ...legacy } = createRuntimeState();
+    writeFileSync(runtimePath, JSON.stringify(legacy));
+
+    expect(readPreviewRuntime(runtimePath)).toEqual(legacy);
   });
 
   it.each(['random-256-bit-token', 'a'.repeat(63), 'a'.repeat(65), 'A'.repeat(64), 'g'.repeat(64)])(

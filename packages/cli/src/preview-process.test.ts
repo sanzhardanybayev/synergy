@@ -1,6 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
-import { type PreviewChildHandle, terminateOwnedPreviewChild } from './preview-process.js';
+import {
+  type PreviewChildHandle,
+  commitReadyPreviewChild,
+  terminateOwnedPreviewChild,
+} from './preview-process.js';
 
 class SupervisedChild extends EventEmitter implements PreviewChildHandle {
   readonly pid = 12_345;
@@ -22,12 +26,29 @@ class SupervisedChild extends EventEmitter implements PreviewChildHandle {
     return true;
   }
 
+  send(
+    message: { type: 'commit'; instanceId: string },
+    callback: (error: Error | null) => void,
+  ): boolean {
+    queueMicrotask(() => {
+      this.emit('message', { type: 'committed', instanceId: message.instanceId });
+      callback(null);
+    });
+    return true;
+  }
+
   disconnect(): void {}
 
   unref(): void {}
 }
 
 describe('owned preview child cleanup', () => {
+  it('waits for a matching child commit acknowledgement before detaching', async () => {
+    const child = new SupervisedChild();
+
+    await expect(commitReadyPreviewChild(child, 'instance-1', 100)).resolves.toBeUndefined();
+  });
+
   it('waits until SIGTERM exit is observed', async () => {
     const child = new SupervisedChild();
 

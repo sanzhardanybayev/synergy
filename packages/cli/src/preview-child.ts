@@ -7,7 +7,8 @@ import { type InlineConfig, createServer } from 'vite';
 
 export type PreviewChildMessage =
   | { type: 'ready'; instanceId: string; pid: number; port: number; listenMs: number }
-  | { type: 'failed'; instanceId: string; phase: string; message: string };
+  | { type: 'failed'; instanceId: string; phase: string; message: string }
+  | { type: 'committed'; instanceId: string };
 
 export interface PreviewChildServer {
   httpServer: { address(): AddressInfo | string | null } | null;
@@ -23,6 +24,8 @@ export interface PreviewChildDependencies {
   now(): number;
   send(message: PreviewChildMessage): void;
   onSigterm(listener: () => void): () => void;
+  onParentMessage(listener: (message: unknown) => void): () => void;
+  onDisconnect(listener: () => void): () => void;
   setExitCode(code: number): void;
   logError(message: string, error: unknown): void;
 }
@@ -62,15 +65,18 @@ function getListeningPort(server: PreviewChildServer): number {
 export async function runPreviewChild(dependencies: PreviewChildDependencies): Promise<number> {
   let instanceId = FALLBACK_INSTANCE_ID;
   let phase = 'configure';
-  let hasSentMessage = false;
+  let hasSentOutcome = false;
   let isReady = false;
+  let isCommitted = false;
   let isTerminationRequested = false;
   let viteServer: PreviewChildServer | null = null;
   let closePromise: Promise<void> | null = null;
 
   const sendMessage = (message: PreviewChildMessage): void => {
-    if (hasSentMessage) return;
-    hasSentMessage = true;
+    if (message.type !== 'committed') {
+      if (hasSentOutcome) return;
+      hasSentOutcome = true;
+    }
     dependencies.send(message);
   };
 
@@ -96,6 +102,34 @@ export async function runPreviewChild(dependencies: PreviewChildDependencies): P
       dependencies.setExitCode(1);
     });
   });
+  const removeParentMessageListener = dependencies.onParentMessage((message) => {
+    if (
+      !isReady ||
+      typeof message !== 'object' ||
+      message === null ||
+      !('type' in message) ||
+      message.type !== 'commit' ||
+      !('instanceId' in message) ||
+      message.instanceId !== instanceId
+    ) {
+      return;
+    }
+    isCommitted = true;
+    sendMessage({ type: 'committed', instanceId });
+  });
+  const removeDisconnectListener = dependencies.onDisconnect(() => {
+    if (isCommitted) return;
+    isTerminationRequested = true;
+    dependencies.setExitCode(1);
+    void closeServer().catch((error: unknown) => {
+      dependencies.logError('Failed to close the orphaned Synergy preview server:', error);
+    });
+  });
+  const removeLifecycleListeners = (): void => {
+    removeSigtermListener();
+    removeParentMessageListener();
+    removeDisconnectListener();
+  };
 
   try {
     instanceId = readRequiredEnvironment(dependencies.env, 'SYNERGY_INSTANCE_ID');
@@ -107,7 +141,7 @@ export async function runPreviewChild(dependencies: PreviewChildDependencies): P
     const strictPort = readStrictPort(dependencies.env);
     const previewDirectory = dependencies.resolvePreviewDirectory();
     if (isTerminationRequested) {
-      removeSigtermListener();
+      removeLifecycleListeners();
       return 1;
     }
 
@@ -122,7 +156,7 @@ export async function runPreviewChild(dependencies: PreviewChildDependencies): P
     });
     if (isTerminationRequested) {
       await closeServer();
-      removeSigtermListener();
+      removeLifecycleListeners();
       return 1;
     }
 
@@ -131,7 +165,7 @@ export async function runPreviewChild(dependencies: PreviewChildDependencies): P
     await viteServer.listen();
     if (isTerminationRequested) {
       await closeServer();
-      removeSigtermListener();
+      removeLifecycleListeners();
       return 1;
     }
     const actualPort = getListeningPort(viteServer);
@@ -150,7 +184,7 @@ export async function runPreviewChild(dependencies: PreviewChildDependencies): P
     await closeServer().catch((closeError: unknown) => {
       dependencies.logError('Failed to clean up the Synergy preview server:', closeError);
     });
-    removeSigtermListener();
+    removeLifecycleListeners();
     return 1;
   }
 }
@@ -167,6 +201,14 @@ function createProductionDependencies(): PreviewChildDependencies {
     onSigterm(listener) {
       process.once('SIGTERM', listener);
       return () => process.removeListener('SIGTERM', listener);
+    },
+    onParentMessage(listener) {
+      process.on('message', listener);
+      return () => process.removeListener('message', listener);
+    },
+    onDisconnect(listener) {
+      process.once('disconnect', listener);
+      return () => process.removeListener('disconnect', listener);
     },
     setExitCode: (code) => {
       process.exitCode = code;

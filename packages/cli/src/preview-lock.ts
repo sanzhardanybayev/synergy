@@ -19,6 +19,7 @@ interface PreviewStartLockRecord {
   attemptId: string;
   pid: number;
   createdAt: string;
+  leaseExpiresAt: string | null;
 }
 
 export interface PreviewStartLockOptions {
@@ -33,7 +34,6 @@ export interface PreviewStartLockDependencies {
   copyFileExclusive(source: string, destination: string): void;
   createQuarantineId(): string;
   now(): number;
-  processKill(pid: number, signal: 0): boolean;
   publishOwnerRecord(source: string, destination: string): void;
   wallNow(): number;
   sleep(milliseconds: number): Promise<void>;
@@ -50,7 +50,6 @@ const DEFAULT_DEPENDENCIES: PreviewStartLockDependencies = {
     copyFileSync(source, destination, constants.COPYFILE_EXCL),
   createQuarantineId: randomUUID,
   now: () => performance.now(),
-  processKill: (pid, signal) => process.kill(pid, signal),
   publishOwnerRecord: (source, destination) => renameSync(source, destination),
   wallNow: Date.now,
   sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
@@ -77,7 +76,16 @@ function readLockRecord(path: string | number): PreviewStartLockRecord | null {
     ) {
       return null;
     }
-    return { attemptId: value.attemptId, pid: value.pid, createdAt: value.createdAt };
+    const leaseExpiresAt =
+      typeof value.leaseExpiresAt === 'string' && Number.isFinite(Date.parse(value.leaseExpiresAt))
+        ? value.leaseExpiresAt
+        : null;
+    return {
+      attemptId: value.attemptId,
+      pid: value.pid,
+      createdAt: value.createdAt,
+      leaseExpiresAt,
+    };
   } catch {
     return null;
   }
@@ -149,41 +157,30 @@ function recoverCapturedLock(
 ): boolean {
   const capturedPath = captureCurrentLock(path, attemptId, dependencies);
   if (capturedPath === null) return true;
-  return recoverQuarantine(path, capturedPath, staleMs, dependencies);
+  if (discardExpiredQuarantine(capturedPath, staleMs, dependencies)) return true;
+  restoreWithoutOverwrite(capturedPath, path, dependencies);
+  return false;
 }
 
-function recoverQuarantine(
-  path: string,
+function discardExpiredQuarantine(
   capturedPath: string,
   staleMs: number,
   dependencies: PreviewStartLockDependencies,
 ): boolean {
   const capturedRecord = readLockRecord(capturedPath);
-  let capturedAgeMs: number;
+  let isExpired: boolean;
   try {
-    capturedAgeMs = dependencies.wallNow() - statSync(capturedPath).mtimeMs;
+    isExpired =
+      capturedRecord?.leaseExpiresAt !== null && capturedRecord?.leaseExpiresAt !== undefined
+        ? dependencies.wallNow() >= Date.parse(capturedRecord.leaseExpiresAt)
+        : dependencies.wallNow() - statSync(capturedPath).mtimeMs >= staleMs;
   } catch (error) {
-    restoreWithoutOverwrite(capturedPath, path, dependencies);
+    if (hasErrorCode(error, 'ENOENT')) return true;
     throw error;
   }
-  if (capturedAgeMs < staleMs) {
-    restoreWithoutOverwrite(capturedPath, path, dependencies);
-    return false;
-  }
-  if (capturedRecord === null) {
-    unlinkSync(capturedPath);
-    return true;
-  }
-  try {
-    dependencies.processKill(capturedRecord.pid, 0);
-  } catch (error) {
-    if (hasErrorCode(error, 'ESRCH')) {
-      unlinkSync(capturedPath);
-      return true;
-    }
-  }
-  restoreWithoutOverwrite(capturedPath, path, dependencies);
-  return false;
+  if (!isExpired) return false;
+  unlinkSync(capturedPath);
+  return true;
 }
 
 function quarantineBlocksAcquisition(
@@ -193,7 +190,7 @@ function quarantineBlocksAcquisition(
 ): boolean {
   let isBlocked = false;
   for (const capturedPath of listQuarantines(path)) {
-    if (!recoverQuarantine(path, capturedPath, staleMs, dependencies)) isBlocked = true;
+    if (!discardExpiredQuarantine(capturedPath, staleMs, dependencies)) isBlocked = true;
   }
   return isBlocked;
 }
@@ -256,6 +253,7 @@ function updateOwnedLockPid(
   path: string,
   attemptId: string,
   pid: number,
+  staleMs: number,
   dependencies: PreviewStartLockDependencies,
 ): boolean {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
@@ -263,6 +261,7 @@ function updateOwnedLockPid(
     attemptId,
     pid,
     createdAt: new Date(dependencies.wallNow()).toISOString(),
+    leaseExpiresAt: new Date(dependencies.wallNow() + staleMs).toISOString(),
   };
   const childFence = quarantinePath(path, attemptId, dependencies);
   writeRecordFile(childFence, childFenceRecord);
@@ -305,6 +304,7 @@ export async function acquirePreviewStartLock(
           attemptId: options.attemptId,
           pid: process.pid,
           createdAt: new Date(dependencies.wallNow()).toISOString(),
+          leaseExpiresAt: new Date(dependencies.wallNow() + options.staleMs).toISOString(),
         };
         writeFileSync(descriptor, `${JSON.stringify(record)}\n`);
       } finally {
@@ -321,7 +321,7 @@ export async function acquirePreviewStartLock(
         lockMs: dependencies.now() - lockStartedAt,
         release: () => releaseOwnedLock(options.path, options.attemptId, dependencies),
         updateOwnerPid: (pid) =>
-          updateOwnedLockPid(options.path, options.attemptId, pid, dependencies),
+          updateOwnedLockPid(options.path, options.attemptId, pid, options.staleMs, dependencies),
       };
     } catch (error) {
       if (!hasErrorCode(error, 'EEXIST')) throw error;

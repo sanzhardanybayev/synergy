@@ -161,7 +161,7 @@ Failure rules:
 Legacy `.synergy/preview.pid` handling:
 
 - dead or malformed PID: remove it;
-- alive PID with a matching new health identity at its recorded/default port: adopt it;
+- alive PID: preserve it, but do not adopt or signal it. Legacy metadata has no authenticated control token, so fabricating a new runtime record would make verified shutdown impossible. A future adoption flow requires an authenticated proof/handshake;
 - alive PID without matching identity: leave the process untouched, remove no external state, and start this project on another port.
 
 ### URL authority

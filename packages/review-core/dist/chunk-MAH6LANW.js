@@ -433,6 +433,16 @@ function parseNulPaths(value) {
   for (const path of paths) assertSafeRepositoryPath2(path);
   return [...new Set(paths)].sort();
 }
+var PREVIEW_RUNTIME_PATHS = /* @__PURE__ */ new Set([
+  ".synergy/preview.runtime.json",
+  ".synergy/preview.runtime.json.mutation.lock",
+  ".synergy/preview.start.lock",
+  ".synergy/preview.pid",
+  ".synergy/preview.log"
+]);
+function isPreviewRuntimePath(path) {
+  return PREVIEW_RUNTIME_PATHS.has(path) || path.startsWith(".synergy/preview.runtime.json.quarantine.") || path.startsWith(".synergy/.preview.runtime.json.") && path.endsWith(".tmp") || path.startsWith(".synergy/preview.start.lock.quarantine.") || path.startsWith(".synergy/preview.start.lock.owner.tmp.");
+}
 var UTF8_DECODER = new TextDecoder2("utf-8", { fatal: true });
 function decodeUtf8(bytes) {
   try {
@@ -651,7 +661,15 @@ function captureUnstaged(options) {
   const trackedPatch = runChecked(runner, options.root, "git", [
     "diff",
     "--no-ext-diff",
-    "--binary"
+    "--binary",
+    "--",
+    ":(exclude).synergy/preview.runtime.json",
+    ":(exclude).synergy/preview.runtime.json.*",
+    ":(exclude).synergy/.preview.runtime.json.*.tmp",
+    ":(exclude).synergy/preview.start.lock",
+    ":(exclude).synergy/preview.start.lock.*",
+    ":(exclude).synergy/preview.pid",
+    ":(exclude).synergy/preview.log"
   ]);
   const untrackedPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, "git", [
@@ -660,7 +678,7 @@ function captureUnstaged(options) {
       "--exclude-standard",
       "-z"
     ])
-  );
+  ).filter((path) => !isPreviewRuntimePath(path));
   const untrackedEntries = untrackedPaths.map((path) => ({
     path,
     entry: readRepositoryEntry(options.root, path, options.readFile)
@@ -780,4 +798,4 @@ export {
   resolveRepositoryRoot,
   repositoryName
 };
-//# sourceMappingURL=chunk-AVFTZ4KP.js.map
+//# sourceMappingURL=chunk-MAH6LANW.js.map

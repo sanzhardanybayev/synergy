@@ -20,10 +20,22 @@ interface LockRecord {
   attemptId: string;
   pid: number;
   createdAt: string;
+  leaseExpiresAt?: string;
 }
 
-function writeLock(path: string, attemptId: string, padding = '', pid = process.pid): void {
-  const record: LockRecord = { attemptId, pid, createdAt: new Date().toISOString() };
+function writeLock(
+  path: string,
+  attemptId: string,
+  padding = '',
+  pid = process.pid,
+  leaseExpiresAt?: string,
+): void {
+  const record: LockRecord = {
+    attemptId,
+    pid,
+    createdAt: new Date().toISOString(),
+    ...(leaseExpiresAt === undefined ? {} : { leaseExpiresAt }),
+  };
   writeFileSync(path, `${JSON.stringify(record)}${padding}\n`);
 }
 
@@ -98,23 +110,13 @@ describe('preview start lock', () => {
     await waitForFile(readyPath);
 
     await expect(
-      acquirePreviewStartLock(
-        {
-          path: lockPath,
-          attemptId: 'new-attempt',
-          deadline: performance.now() + 150,
-          staleMs: 1_000,
-          pollIntervalMs: 1,
-        },
-        {
-          processKill: (pid) => {
-            if (pid === 91_001) {
-              throw Object.assign(new Error('not found'), { code: 'ESRCH' });
-            }
-            return true;
-          },
-        },
-      ),
+      acquirePreviewStartLock({
+        path: lockPath,
+        attemptId: 'new-attempt',
+        deadline: performance.now() + 150,
+        staleMs: 1_000,
+        pollIntervalMs: 1,
+      }),
     ).rejects.toThrow(/start lock/i);
 
     const [exitCode] = await racerExit;
@@ -127,24 +129,69 @@ describe('preview start lock', () => {
     const oldTime = new Date(Date.now() - 60_000);
     utimesSync(lockPath, oldTime, oldTime);
 
-    const lock = await acquirePreviewStartLock(
-      {
-        path: lockPath,
-        attemptId: 'replacement-attempt',
-        deadline: performance.now() + 1_000,
-        staleMs: 1_000,
-        pollIntervalMs: 1,
-      },
-      {
-        processKill: () => {
-          throw Object.assign(new Error('not found'), { code: 'ESRCH' });
-        },
-      },
-    );
+    const lock = await acquirePreviewStartLock({
+      path: lockPath,
+      attemptId: 'replacement-attempt',
+      deadline: performance.now() + 1_000,
+      staleMs: 1_000,
+      pollIntervalMs: 1,
+    });
 
     expect(readAttemptId(lockPath)).toBe('replacement-attempt');
     expect(lock.release()).toBe(true);
     expect(() => readFileSync(lockPath)).toThrow();
+  });
+
+  it('recovers an expired lease even when its PID has been reused by a live process', async () => {
+    writeLock(lockPath, 'crashed-attempt', '', process.pid);
+    const oldTime = new Date(Date.now() - 60_000);
+    utimesSync(lockPath, oldTime, oldTime);
+
+    const lock = await acquirePreviewStartLock({
+      path: lockPath,
+      attemptId: 'replacement-attempt',
+      deadline: performance.now() + 1_000,
+      staleMs: 1_000,
+      pollIntervalMs: 1,
+    });
+
+    expect(readAttemptId(lockPath)).toBe('replacement-attempt');
+    expect(lock.release()).toBe(true);
+  });
+
+  it('does not restore or consume a fresh release quarantine owned by another attempt', async () => {
+    await acquirePreviewStartLock({
+      path: lockPath,
+      attemptId: 'releasing-attempt',
+      deadline: performance.now() + 1_000,
+      staleMs: 10_000,
+      pollIntervalMs: 1,
+    });
+    const releaseQuarantine = `${lockPath}.quarantine.releasing-attempt.manual`;
+    renameSync(lockPath, releaseQuarantine);
+    let observedReleaseFence = false;
+
+    const contender = await acquirePreviewStartLock(
+      {
+        path: lockPath,
+        attemptId: 'contending-attempt',
+        deadline: performance.now() + 1_000,
+        staleMs: 10_000,
+        pollIntervalMs: 1,
+      },
+      {
+        sleep: async () => {
+          expect(existsSync(lockPath)).toBe(false);
+          expect(existsSync(releaseQuarantine)).toBe(true);
+          observedReleaseFence = true;
+          rmSync(releaseQuarantine);
+        },
+      },
+    );
+
+    expect(observedReleaseFence).toBe(true);
+    expect(readAttemptId(lockPath)).toBe('contending-attempt');
+    expect(contender.release()).toBe(true);
   });
 
   it.each(['EPERM', 'ENOTSUP', 'EIO'])(
@@ -174,7 +221,7 @@ describe('preview start lock', () => {
   );
 
   it('does not retry or discard a captured lock after a transient restore failure', async () => {
-    writeLock(lockPath, 'active-attempt', '', 91_005);
+    writeLock(lockPath, 'active-attempt', '', 91_005, new Date(Date.now() + 60_000).toISOString());
     const oldTime = new Date(Date.now() - 60_000);
     utimesSync(lockPath, oldTime, oldTime);
     let restoreAttempts = 0;
@@ -189,7 +236,6 @@ describe('preview start lock', () => {
           pollIntervalMs: 1,
         },
         {
-          processKill: () => true,
           copyFileExclusive: () => {
             restoreAttempts += 1;
             throw Object.assign(
@@ -204,30 +250,18 @@ describe('preview start lock', () => {
     expect(hasLockQuarantine(lockPath)).toBe(true);
   });
 
-  it.each([
-    ['live', (_pid: number, _signal: 0): boolean => true],
-    [
-      'EPERM',
-      (_pid: number, _signal: 0): boolean => {
-        throw Object.assign(new Error('denied'), { code: 'EPERM' });
-      },
-    ],
-  ] as const)('never recovers an old lock whose owner is %s', async (_label, processKill) => {
-    writeLock(lockPath, 'active-attempt', '', 91_003);
+  it('never recovers an unexpired lease even when its file timestamp looks stale', async () => {
+    writeLock(lockPath, 'active-attempt', '', 91_003, new Date(Date.now() + 60_000).toISOString());
     const oldTime = new Date(Date.now() - 60_000);
     utimesSync(lockPath, oldTime, oldTime);
-
     await expect(
-      acquirePreviewStartLock(
-        {
-          path: lockPath,
-          attemptId: 'replacement-attempt',
-          deadline: performance.now() + 20,
-          staleMs: 1,
-          pollIntervalMs: 1,
-        },
-        { processKill },
-      ),
+      acquirePreviewStartLock({
+        path: lockPath,
+        attemptId: 'replacement-attempt',
+        deadline: performance.now() + 20,
+        staleMs: 1,
+        pollIntervalMs: 1,
+      }),
     ).rejects.toThrow(/start lock/i);
     expect(readAttemptId(lockPath)).toBe('active-attempt');
   });
@@ -308,20 +342,17 @@ describe('preview start lock', () => {
     renameSync(lockPath, quarantinePath);
 
     await expect(
-      acquirePreviewStartLock(
-        {
-          path: lockPath,
-          attemptId: 'attempt-c',
-          deadline: performance.now() + 20,
-          staleMs: 1,
-          pollIntervalMs: 1,
-        },
-        { processKill: () => true },
-      ),
+      acquirePreviewStartLock({
+        path: lockPath,
+        attemptId: 'attempt-c',
+        deadline: performance.now() + 20,
+        staleMs: 1,
+        pollIntervalMs: 1,
+      }),
     ).rejects.toThrow(/start lock/i);
 
-    expect(readAttemptId(lockPath)).toBe('attempt-a');
-    expect(existsSync(quarantinePath)).toBe(false);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(readAttemptId(quarantinePath)).toBe('attempt-a');
   });
 
   it('does not let a later contender acquire after a restore failure leaves quarantine', async () => {
@@ -340,23 +371,20 @@ describe('preview start lock', () => {
       },
     );
     rmSync(lockPath);
-    writeLock(lockPath, 'attempt-b');
+    writeLock(lockPath, 'attempt-b', '', process.pid, new Date(Date.now() + 60_000).toISOString());
     expect(() => lock.release()).toThrow('restore failed');
 
     await expect(
-      acquirePreviewStartLock(
-        {
-          path: lockPath,
-          attemptId: 'attempt-d',
-          deadline: performance.now() + 20,
-          staleMs: 1,
-          pollIntervalMs: 1,
-        },
-        { processKill: () => true },
-      ),
+      acquirePreviewStartLock({
+        path: lockPath,
+        attemptId: 'attempt-d',
+        deadline: performance.now() + 20,
+        staleMs: 1,
+        pollIntervalMs: 1,
+      }),
     ).rejects.toThrow(/start lock/i);
 
-    expect(readAttemptId(lockPath)).toBe('attempt-b');
-    expect(hasLockQuarantine(lockPath)).toBe(false);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(hasLockQuarantine(lockPath)).toBe(true);
   });
 });

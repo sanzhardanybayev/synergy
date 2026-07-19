@@ -5,6 +5,7 @@ export {
   previewStatus,
   printStatus,
   type PreviewStartOptions,
+  type PreviewStopOptions,
   type PreviewStatus,
   type PreviewTimings,
 } from './preview.js';

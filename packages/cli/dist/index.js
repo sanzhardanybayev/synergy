@@ -1,5 +1,5 @@
 // src/init.ts
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { green } from "kleur/colors";
 
@@ -26,8 +26,12 @@ var PREVIEW_PORT = 4321;
 // src/init.ts
 var GITIGNORE_ENTRIES = [
   "preview.runtime.json",
+  "preview.runtime.json.quarantine.*",
+  ".preview.runtime.json.*.tmp",
   "preview.runtime.json.mutation.lock",
   "preview.start.lock",
+  "preview.start.lock.quarantine.*",
+  "preview.start.lock.owner.tmp.*",
   "preview.pid",
   "preview.log",
   "active-session",
@@ -36,10 +40,23 @@ var GITIGNORE_ENTRIES = [
   "active-review.json",
   ""
 ];
+function ensureSynergyGitignore(root = process.cwd()) {
+  const paths = resolveProjectPaths(root);
+  mkdirSync(paths.synergyDir, { recursive: true });
+  const gitignorePath = join(paths.synergyDir, ".gitignore");
+  const current = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf8") : "";
+  const present = new Set(current.split(/\r?\n/u));
+  const missing = GITIGNORE_ENTRIES.filter((entry) => entry.length > 0 && !present.has(entry));
+  if (missing.length === 0) return gitignorePath;
+  const separator = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
+  appendFileSync(gitignorePath, `${separator}${missing.join("\n")}
+`);
+  return gitignorePath;
+}
 function initProject(root = process.cwd()) {
   const paths = resolveProjectPaths(root);
   mkdirSync(paths.sessionsDir, { recursive: true });
-  writeFileSync(join(paths.synergyDir, ".gitignore"), `${GITIGNORE_ENTRIES.join("\n")}`);
+  ensureSynergyGitignore(paths.root);
   process.stdout.write(`${green("\u2713")} Initialized .synergy/ in ${paths.root}
 `);
   return { synergyDir: paths.synergyDir };
@@ -51,17 +68,16 @@ import {
   constants as constants3,
   closeSync as closeSync4,
   copyFileSync as copyFileSync3,
-  existsSync,
+  existsSync as existsSync2,
   fstatSync,
   mkdirSync as mkdirSync2,
   openSync as openSync4,
-  readFileSync as readFileSync3,
+  readFileSync as readFileSync4,
   readSync,
   realpathSync,
   renameSync as renameSync3,
   unlinkSync as unlinkSync3
 } from "node:fs";
-import { createRequire } from "node:module";
 import { dim, green as green2, yellow } from "kleur/colors";
 
 // src/preview-lock.ts
@@ -72,20 +88,19 @@ import {
   copyFileSync,
   fsyncSync,
   openSync,
-  readFileSync,
+  readFileSync as readFileSync2,
   readdirSync,
   renameSync,
   rmSync,
   statSync,
   unlinkSync,
-  writeFileSync as writeFileSync2
+  writeFileSync
 } from "node:fs";
 import { basename, dirname, join as join2 } from "node:path";
 var DEFAULT_DEPENDENCIES = {
   copyFileExclusive: (source, destination) => copyFileSync(source, destination, constants.COPYFILE_EXCL),
   createQuarantineId: randomUUID,
   now: () => performance.now(),
-  processKill: (pid, signal) => process.kill(pid, signal),
   publishOwnerRecord: (source, destination) => renameSync(source, destination),
   wallNow: Date.now,
   sleep: (milliseconds) => new Promise((resolve2) => setTimeout(resolve2, milliseconds))
@@ -98,11 +113,17 @@ function hasErrorCode(error, code) {
 }
 function readLockRecord(path) {
   try {
-    const value = JSON.parse(readFileSync(path, "utf8"));
+    const value = JSON.parse(readFileSync2(path, "utf8"));
     if (!isRecord(value) || typeof value.attemptId !== "string" || typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid <= 0 || typeof value.createdAt !== "string") {
       return null;
     }
-    return { attemptId: value.attemptId, pid: value.pid, createdAt: value.createdAt };
+    const leaseExpiresAt = typeof value.leaseExpiresAt === "string" && Number.isFinite(Date.parse(value.leaseExpiresAt)) ? value.leaseExpiresAt : null;
+    return {
+      attemptId: value.attemptId,
+      pid: value.pid,
+      createdAt: value.createdAt,
+      leaseExpiresAt
+    };
   } catch {
     return null;
   }
@@ -141,40 +162,27 @@ function captureCurrentLock(path, attemptId, dependencies) {
 function recoverCapturedLock(path, attemptId, staleMs, dependencies) {
   const capturedPath = captureCurrentLock(path, attemptId, dependencies);
   if (capturedPath === null) return true;
-  return recoverQuarantine(path, capturedPath, staleMs, dependencies);
-}
-function recoverQuarantine(path, capturedPath, staleMs, dependencies) {
-  const capturedRecord = readLockRecord(capturedPath);
-  let capturedAgeMs;
-  try {
-    capturedAgeMs = dependencies.wallNow() - statSync(capturedPath).mtimeMs;
-  } catch (error) {
-    restoreWithoutOverwrite(capturedPath, path, dependencies);
-    throw error;
-  }
-  if (capturedAgeMs < staleMs) {
-    restoreWithoutOverwrite(capturedPath, path, dependencies);
-    return false;
-  }
-  if (capturedRecord === null) {
-    unlinkSync(capturedPath);
-    return true;
-  }
-  try {
-    dependencies.processKill(capturedRecord.pid, 0);
-  } catch (error) {
-    if (hasErrorCode(error, "ESRCH")) {
-      unlinkSync(capturedPath);
-      return true;
-    }
-  }
+  if (discardExpiredQuarantine(capturedPath, staleMs, dependencies)) return true;
   restoreWithoutOverwrite(capturedPath, path, dependencies);
   return false;
+}
+function discardExpiredQuarantine(capturedPath, staleMs, dependencies) {
+  const capturedRecord = readLockRecord(capturedPath);
+  let isExpired;
+  try {
+    isExpired = capturedRecord?.leaseExpiresAt !== null && capturedRecord?.leaseExpiresAt !== void 0 ? dependencies.wallNow() >= Date.parse(capturedRecord.leaseExpiresAt) : dependencies.wallNow() - statSync(capturedPath).mtimeMs >= staleMs;
+  } catch (error) {
+    if (hasErrorCode(error, "ENOENT")) return true;
+    throw error;
+  }
+  if (!isExpired) return false;
+  unlinkSync(capturedPath);
+  return true;
 }
 function quarantineBlocksAcquisition(path, staleMs, dependencies) {
   let isBlocked = false;
   for (const capturedPath of listQuarantines(path)) {
-    if (!recoverQuarantine(path, capturedPath, staleMs, dependencies)) isBlocked = true;
+    if (!discardExpiredQuarantine(capturedPath, staleMs, dependencies)) isBlocked = true;
   }
   return isBlocked;
 }
@@ -209,7 +217,7 @@ function writeRecordFile(path, record) {
   const descriptor = openSync(path, "wx", 384);
   let isComplete = false;
   try {
-    writeFileSync2(descriptor, `${JSON.stringify(record)}
+    writeFileSync(descriptor, `${JSON.stringify(record)}
 `);
     fsyncSync(descriptor);
     isComplete = true;
@@ -221,12 +229,13 @@ function writeRecordFile(path, record) {
     }
   }
 }
-function updateOwnedLockPid(path, attemptId, pid, dependencies) {
+function updateOwnedLockPid(path, attemptId, pid, staleMs, dependencies) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   const childFenceRecord = {
     attemptId,
     pid,
-    createdAt: new Date(dependencies.wallNow()).toISOString()
+    createdAt: new Date(dependencies.wallNow()).toISOString(),
+    leaseExpiresAt: new Date(dependencies.wallNow() + staleMs).toISOString()
   };
   const childFence = quarantinePath(path, attemptId, dependencies);
   writeRecordFile(childFence, childFenceRecord);
@@ -264,9 +273,10 @@ async function acquirePreviewStartLock(options, dependencyOverrides = {}) {
         const record = {
           attemptId: options.attemptId,
           pid: process.pid,
-          createdAt: new Date(dependencies.wallNow()).toISOString()
+          createdAt: new Date(dependencies.wallNow()).toISOString(),
+          leaseExpiresAt: new Date(dependencies.wallNow() + options.staleMs).toISOString()
         };
-        writeFileSync2(descriptor, `${JSON.stringify(record)}
+        writeFileSync(descriptor, `${JSON.stringify(record)}
 `);
       } finally {
         closeSync(descriptor);
@@ -281,7 +291,7 @@ async function acquirePreviewStartLock(options, dependencyOverrides = {}) {
       return {
         lockMs: dependencies.now() - lockStartedAt,
         release: () => releaseOwnedLock(options.path, options.attemptId, dependencies),
-        updateOwnerPid: (pid) => updateOwnedLockPid(options.path, options.attemptId, pid, dependencies)
+        updateOwnerPid: (pid) => updateOwnedLockPid(options.path, options.attemptId, pid, options.staleMs, dependencies)
       };
     } catch (error) {
       if (!hasErrorCode(error, "EEXIST")) throw error;
@@ -326,6 +336,9 @@ function parseChildMessage(value) {
       port: value.port,
       listenMs: value.listenMs
     };
+  }
+  if (value.type === "committed" && typeof value.instanceId === "string") {
+    return { type: "committed", instanceId: value.instanceId };
   }
   if (value.type === "failed" && typeof value.instanceId === "string" && typeof value.phase === "string" && typeof value.message === "string") {
     return {
@@ -387,6 +400,10 @@ function waitForReadyPreviewChild(child, launch, timeoutMs, dependencyOverrides 
         finish(new Error("Preview child readiness identity did not match the launch attempt"));
         return;
       }
+      if (message.type === "committed") {
+        finish(new Error("Preview child sent a commit acknowledgement before readiness"));
+        return;
+      }
       if (message.type === "failed") {
         finish(new Error(`Preview child failed during ${message.phase}: ${message.message}`));
         return;
@@ -418,6 +435,67 @@ function waitForReadyPreviewChild(child, launch, timeoutMs, dependencyOverrides 
       () => finish(new Error("Preview did not become ready within 10 seconds")),
       Math.max(0, timeoutMs)
     );
+  });
+}
+function commitReadyPreviewChild(child, instanceId, timeoutMs, dependencyOverrides = {}) {
+  const dependencies = { ...DEFAULT_TIMER_DEPENDENCIES, ...dependencyOverrides };
+  return new Promise((resolve2, reject) => {
+    let settled = false;
+    let timer = null;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) dependencies.clearTimer(timer);
+      child.removeListener("message", onMessage);
+      child.removeListener("error", onError);
+      child.removeListener("exit", onExit);
+      if (error === void 0) resolve2();
+      else reject(error);
+    };
+    const onMessage = (value) => {
+      const message = parseChildMessage(value);
+      if (message?.type !== "committed" || message.instanceId !== instanceId) {
+        finish(new Error("Preview child commit acknowledgement did not match the launch instance"));
+        return;
+      }
+      finish();
+    };
+    const onError = (error) => {
+      finish(
+        new Error(
+          `Preview child failed before commit: ${error instanceof Error ? error.message : String(error)}`
+        )
+      );
+    };
+    const onExit = (code, signal) => {
+      finish(
+        new Error(
+          `Preview child exited before commit (code ${String(code)}, signal ${String(signal)})`
+        )
+      );
+    };
+    if (child.send === void 0) {
+      finish(new Error("Preview child IPC channel is unavailable before commit"));
+      return;
+    }
+    child.on("message", onMessage);
+    child.on("error", onError);
+    child.on("exit", onExit);
+    timer = dependencies.setTimer(
+      () => finish(new Error("Preview child did not acknowledge runtime commit")),
+      Math.max(0, timeoutMs)
+    );
+    try {
+      child.send({ type: "commit", instanceId }, (error) => {
+        if (error !== null) finish(new Error(`Preview child commit failed: ${error.message}`));
+      });
+    } catch (error) {
+      finish(
+        new Error(
+          `Preview child commit failed: ${error instanceof Error ? error.message : String(error)}`
+        )
+      );
+    }
   });
 }
 function childHasExited(child) {
@@ -493,7 +571,7 @@ import {
   closeSync as closeSync3,
   copyFileSync as copyFileSync2,
   openSync as openSync3,
-  readFileSync as readFileSync2,
+  readFileSync as readFileSync3,
   readdirSync as readdirSync2,
   renameSync as renameSync2,
   unlinkSync as unlinkSync2,
@@ -517,6 +595,21 @@ function isPort2(value) {
 }
 function isPositiveInteger2(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+function isDuration(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+function parseTimings(value) {
+  if (!isRecord3(value)) return null;
+  const keys = ["lockMs", "launchMs", "listenMs", "healthMs", "totalMs"];
+  if (Object.keys(value).length !== keys.length || keys.some((key) => !(key in value))) {
+    return null;
+  }
+  const { lockMs, launchMs, listenMs, healthMs, totalMs } = value;
+  if (!isDuration(lockMs) || !isDuration(launchMs) || !isDuration(listenMs) || !isDuration(healthMs) || !isDuration(totalMs)) {
+    return null;
+  }
+  return { lockMs, launchMs, listenMs, healthMs, totalMs };
 }
 function isIsoTimestamp(value) {
   if (!isNonEmptyString(value)) return false;
@@ -552,7 +645,7 @@ function restoreCapturedFile(capturedPath, destinationPath, dependencies) {
 }
 function parsePreviewRuntime(value) {
   if (!isRecord3(value)) return null;
-  const expectedKeys = [
+  const requiredKeys = [
     "schemaVersion",
     "protocolVersion",
     "state",
@@ -568,7 +661,8 @@ function parsePreviewRuntime(value) {
     "controlToken",
     "toolVersion"
   ];
-  if (Object.keys(value).length !== expectedKeys.length || expectedKeys.some((key) => !(key in value))) {
+  const allowedKeys = /* @__PURE__ */ new Set([...requiredKeys, "timings"]);
+  if (requiredKeys.some((key) => !(key in value)) || Object.keys(value).some((key) => !allowedKeys.has(key))) {
     return null;
   }
   const {
@@ -585,13 +679,20 @@ function parsePreviewRuntime(value) {
     strictPort,
     startedAt,
     controlToken,
-    toolVersion: toolVersion2
+    toolVersion,
+    timings
   } = value;
-  if (schemaVersion !== 1 || protocolVersion !== 1 || state !== "ready" || !isNonEmptyString(instanceId) || !isNonEmptyString(projectId) || !isPositiveInteger2(pid) || host !== LOOPBACK_HOST || !isPort2(port) || !isPort2(preferredPort) || typeof strictPort !== "boolean" || !isIsoTimestamp(startedAt) || !isControlToken(controlToken) || !isNonEmptyString(toolVersion2)) {
+  if (schemaVersion !== 1 || protocolVersion !== 1 || state !== "ready" || !isNonEmptyString(instanceId) || !isNonEmptyString(projectId) || !isPositiveInteger2(pid) || host !== LOOPBACK_HOST || !isPort2(port) || !isPort2(preferredPort) || typeof strictPort !== "boolean" || !isIsoTimestamp(startedAt) || !isControlToken(controlToken) || !isNonEmptyString(toolVersion)) {
     return null;
   }
   const derivedOrigin = deriveLoopbackOrigin(port);
   if (origin !== derivedOrigin) return null;
+  let parsedTimings;
+  if (timings !== void 0) {
+    const candidate = parseTimings(timings);
+    if (candidate === null) return null;
+    parsedTimings = candidate;
+  }
   return {
     schemaVersion,
     protocolVersion,
@@ -606,7 +707,8 @@ function parsePreviewRuntime(value) {
     strictPort,
     startedAt,
     controlToken,
-    toolVersion: toolVersion2
+    toolVersion,
+    ...parsedTimings === void 0 ? {} : { timings: parsedTimings }
   };
 }
 function deriveProjectId(canonicalRoot) {
@@ -621,7 +723,7 @@ function generateControlToken() {
 }
 function readRuntimeFile(path) {
   try {
-    return parsePreviewRuntime(JSON.parse(readFileSync2(path, "utf8")));
+    return parsePreviewRuntime(JSON.parse(readFileSync3(path, "utf8")));
   } catch {
     return null;
   }
@@ -818,8 +920,10 @@ async function requestPreviewShutdown(origin, instanceId, controlToken, timeoutM
   return outcome;
 }
 
+// src/version.ts
+var SYNERGY_VERSION = "0.12.1";
+
 // src/preview.ts
-var require2 = createRequire(import.meta.url);
 var START_TIMEOUT_MS = 1e4;
 var START_CLEANUP_RESERVE_MS = 1e3;
 var STOP_TIMEOUT_MS = 3e3;
@@ -869,13 +973,6 @@ function hasErrorCode3(error, code) {
 function isPositiveInteger4(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
-function toolVersion() {
-  const packageJson = require2("../package.json");
-  if (isRecord5(packageJson) && "version" in packageJson && typeof packageJson.version === "string") {
-    return packageJson.version;
-  }
-  return "unknown";
-}
 function healthMatchesRuntime(health, runtime) {
   return health.protocolVersion === runtime.protocolVersion && health.state === runtime.state && health.instanceId === runtime.instanceId && health.projectId === runtime.projectId && health.pid === runtime.pid && health.port === runtime.port;
 }
@@ -892,7 +989,7 @@ function stoppedStatus(projectId) {
     instanceId: null
   };
 }
-function runningStatus(runtime, timings) {
+function runningStatus(runtime) {
   return {
     running: true,
     pid: runtime.pid,
@@ -900,17 +997,17 @@ function runningStatus(runtime, timings) {
     origin: deriveLoopbackOrigin(runtime.port),
     projectId: runtime.projectId,
     instanceId: runtime.instanceId,
-    ...timings === void 0 ? {} : { timings }
+    ...runtime.timings === void 0 ? {} : { timings: runtime.timings }
   };
 }
 function projectPaths(root, dependencies) {
   return resolveProjectPaths(dependencies.canonicalizeRoot(root));
 }
 function migrateLegacyPid(pidFile, dependencies) {
-  if (!existsSync(pidFile)) return;
+  if (!existsSync2(pidFile)) return;
   let pid = null;
   try {
-    const raw = readFileSync3(pidFile, "utf8").trim();
+    const raw = readFileSync4(pidFile, "utf8").trim();
     const parsed = Number(raw);
     if (/^[1-9]\d*$/u.test(raw) && isPositiveInteger4(parsed)) pid = parsed;
   } catch {
@@ -949,7 +1046,6 @@ function lockDependencies(dependencies) {
     copyFileExclusive: dependencies.copyFileExclusive,
     createQuarantineId: dependencies.createQuarantineId,
     now: dependencies.now,
-    processKill: dependencies.processKill,
     publishOwnerRecord: dependencies.publishOwnerRecord,
     wallNow: dependencies.wallNow,
     sleep: dependencies.sleep
@@ -1000,7 +1096,7 @@ async function pollLaunchHealth(launch, ready, deadline, dependencies) {
   throw new Error("Preview did not become ready within 10 seconds");
 }
 function readLogTail(path) {
-  if (!existsSync(path)) return "";
+  if (!existsSync2(path)) return "";
   let descriptor = null;
   try {
     descriptor = openSync4(path, "r");
@@ -1030,7 +1126,7 @@ Preview cleanup failed: ${details}`, {
     cause: new AggregateError([primary, ...cleanupFailures])
   });
 }
-function buildRuntime(launch, ready, dependencies) {
+function buildRuntime(launch, ready, timings, dependencies) {
   return {
     schemaVersion: 1,
     protocolVersion: 1,
@@ -1045,7 +1141,8 @@ function buildRuntime(launch, ready, dependencies) {
     strictPort: launch.strictPort,
     startedAt: new Date(dependencies.wallNow()).toISOString(),
     controlToken: launch.controlToken,
-    toolVersion: toolVersion()
+    toolVersion: SYNERGY_VERSION,
+    timings
   };
 }
 async function startPreview(options, dependencies) {
@@ -1058,6 +1155,7 @@ async function startPreview(options, dependencies) {
   const workDeadline = totalDeadline - cleanupReserveMs;
   const paths = projectPaths(options.root, dependencies);
   mkdirSync2(paths.synergyDir, { recursive: true });
+  ensureSynergyGitignore(paths.root);
   if (dependencies.now() >= workDeadline) {
     throw new Error("Preview did not become ready within 10 seconds");
   }
@@ -1084,10 +1182,12 @@ async function startPreview(options, dependencies) {
     );
     const existing = await readVerifiedStatusAtPaths(paths, statusTimeoutMs, dependencies);
     if (existing.running) {
-      dependencies.writeOutput(
-        `${yellow("!")} Preview already running (pid ${existing.pid}) at ${existing.origin}
+      if (!options.quiet) {
+        dependencies.writeOutput(
+          `${yellow("!")} Preview already running (pid ${existing.pid}) at ${existing.origin}
 `
-      );
+        );
+      }
       return existing;
     }
     if (dependencies.now() >= workDeadline) {
@@ -1123,13 +1223,25 @@ async function startPreview(options, dependencies) {
     if (dependencies.now() >= workDeadline) {
       throw new Error("Preview did not become ready within 10 seconds");
     }
-    const runtime = buildRuntime(launch, ready, dependencies);
+    const timings = {
+      lockMs: lock.lockMs,
+      launchMs,
+      listenMs: ready.listenMs,
+      healthMs,
+      totalMs: dependencies.now() - invokedAt
+    };
+    const runtime = buildRuntime(launch, ready, timings, dependencies);
     dependencies.writeRuntime(paths.previewRuntimeFile, runtime);
     hasPublishedRuntime = true;
     if (dependencies.now() > workDeadline) {
       throw new Error("Preview did not become ready within 10 seconds");
     }
-    const lockMs = lock.lockMs;
+    await commitReadyPreviewChild(
+      child,
+      launch.instanceId,
+      workDeadline - dependencies.now(),
+      processTimerDependencies(dependencies)
+    );
     detachReadyPreviewChild(child);
     shouldReleaseLock = false;
     if (!lock.release()) throw new Error("Preview start lock release did not succeed");
@@ -1137,21 +1249,16 @@ async function startPreview(options, dependencies) {
     if (dependencies.now() > totalDeadline) {
       throw new Error("Preview did not become ready within 10 seconds");
     }
-    const timings = {
-      lockMs,
-      launchMs,
-      listenMs: ready.listenMs,
-      healthMs,
-      totalMs: dependencies.now() - invokedAt
-    };
-    dependencies.writeOutput(
-      `${green2("\u2713")} Preview started (pid ${runtime.pid}) at ${dim(runtime.origin)}
+    if (!options.quiet) {
+      dependencies.writeOutput(
+        `${green2("\u2713")} Preview started (pid ${runtime.pid}) at ${dim(runtime.origin)}
 `
-    );
-    dependencies.writeOutput(`  Log: ${dim(paths.previewLogFile)}
+      );
+      dependencies.writeOutput(`  Log: ${dim(paths.previewLogFile)}
 `);
+    }
     child = null;
-    return runningStatus(runtime, timings);
+    return runningStatus(runtime);
   } catch (error) {
     const failure = withLogTail(error, paths.previewLogFile);
     const cleanupFailures = [];
@@ -1198,7 +1305,7 @@ async function startPreview(options, dependencies) {
 function isDefinitiveDisappearance(outcome, runtime) {
   return outcome.kind === "absent" || outcome.kind === "healthy" && !healthMatchesRuntime(outcome.health, runtime);
 }
-async function stopPreview(root, dependencies) {
+async function stopPreview(root, options, dependencies) {
   const invokedAt = dependencies.now();
   const totalDeadline = invokedAt + dependencies.stopTimeoutMs;
   const cleanupReserveMs = Math.min(
@@ -1227,8 +1334,10 @@ async function stopPreview(root, dependencies) {
     const runtime = readPreviewRuntime(paths.previewRuntimeFile);
     if (runtime === null) {
       migrateLegacyPid(paths.previewPidFile, dependencies);
-      dependencies.writeOutput(`${yellow("!")} No verified preview server recorded
+      if (!options.quiet) {
+        dependencies.writeOutput(`${yellow("!")} No verified preview server recorded
 `);
+      }
       return false;
     }
     if (runtime.projectId !== projectId || dependencies.now() >= workDeadline) return false;
@@ -1257,8 +1366,10 @@ async function stopPreview(root, dependencies) {
       if (isDefinitiveDisappearance(outcome, runtime)) {
         const removed = dependencies.removeRuntime(paths.previewRuntimeFile, runtime.instanceId);
         if (!removed || dependencies.now() > totalDeadline) return false;
-        dependencies.writeOutput(`${green2("\u2713")} Preview stopped (pid ${runtime.pid})
+        if (!options.quiet) {
+          dependencies.writeOutput(`${green2("\u2713")} Preview stopped (pid ${runtime.pid})
 `);
+        }
         return true;
       }
       const remainingMs = workDeadline - dependencies.now();
@@ -1275,7 +1386,7 @@ function createPreviewLifecycle(dependencyOverrides = {}) {
   return {
     start: (options = {}) => startPreview(options, dependencies),
     status: (root) => readVerifiedStatus(root, dependencies.statusTimeoutMs, dependencies),
-    stop: (root) => stopPreview(root, dependencies)
+    stop: (root, options = {}) => stopPreview(root, options, dependencies)
   };
 }
 var defaultLifecycle = createPreviewLifecycle();
@@ -1285,8 +1396,8 @@ async function previewStatus(root) {
 async function previewStart(options = {}) {
   return defaultLifecycle.start(options);
 }
-async function previewStop(root) {
-  return defaultLifecycle.stop(root);
+async function previewStop(root, options = {}) {
+  return defaultLifecycle.stop(root, options);
 }
 function printStatus(status) {
   if (status.running) {
@@ -1299,7 +1410,7 @@ function printStatus(status) {
 }
 
 // src/execstate.ts
-import { existsSync as existsSync2 } from "node:fs";
+import { existsSync as existsSync3 } from "node:fs";
 import { join as join4 } from "node:path";
 import {
   appendFinding,
@@ -1321,7 +1432,7 @@ var STATUS_VALUES = [
 function resolveSessionDir(root, session) {
   const paths = resolveProjectPaths(root);
   const dir = join4(paths.sessionsDir, session);
-  if (!existsSync2(dir)) {
+  if (!existsSync3(dir)) {
     throw new Error(`session "${session}" not found at ${dir}`);
   }
   return dir;
@@ -1402,10 +1513,18 @@ import {
 // src/review-actions.ts
 var PreviewNotReadyError = class extends Error {
   constructor(root) {
-    super(`Preview is not ready. Run: synergy preview start --root ${JSON.stringify(root)}`);
+    const args = ["preview", "start", "--root", root];
+    super(
+      `Preview is not ready for project root ${JSON.stringify(root)}. Invoke the Synergy executable with argv ${JSON.stringify(args)}.`
+    );
     this.root = root;
+    this.suggestedCommand = {
+      command: "synergy",
+      args
+    };
   }
   code = "preview_not_ready";
+  suggestedCommand;
 };
 var GROUP_ID = /^[a-z0-9][a-z0-9_-]*$/u;
 var MAX_DESCRIPTION_LENGTH = 600;
@@ -1706,7 +1825,7 @@ function printReviewStatus(request) {
 
 // src/review-cli.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-import { readFileSync as readFileSync4 } from "node:fs";
+import { readFileSync as readFileSync5 } from "node:fs";
 import {
   assertSafeReviewSegment,
   claimQuestion,
@@ -1963,7 +2082,7 @@ ${dim3("Open:")} ${result.url}
 function printError(error, exitCode, json) {
   if (json && error instanceof PreviewNotReadyError) {
     process.stdout.write(
-      `${JSON.stringify({ error: error.code, message: error.message, root: error.root })}
+      `${JSON.stringify({ error: error.code, message: error.message, root: error.root, suggestedCommand: error.suggestedCommand })}
 `
     );
     process.exitCode = exitCode;
@@ -1984,7 +2103,7 @@ function parseUsageReviewRef(value) {
 }
 function readUsageAnalysis(path) {
   try {
-    return readAnalysis(readFileSync4(path, "utf8"));
+    return readAnalysis(readFileSync5(path, "utf8"));
   } catch (error) {
     const detail = error instanceof Error ? error.message : "invalid analysis body";
     throw new ReviewUsageError(detail);
@@ -1992,7 +2111,7 @@ function readUsageAnalysis(path) {
 }
 function readUsageAnswer(path) {
   try {
-    const body = readFileSync4(path, "utf8");
+    const body = readFileSync5(path, "utf8");
     if (body.trim().length === 0) throw new Error("answer body must not be empty");
     return body;
   } catch (error) {

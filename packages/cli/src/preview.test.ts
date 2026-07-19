@@ -56,6 +56,17 @@ class FakeChild extends EventEmitter implements PreviewChildHandle {
     return true;
   }
 
+  send(
+    message: { type: 'commit'; instanceId: string },
+    callback: (error: Error | null) => void,
+  ): boolean {
+    queueMicrotask(() => {
+      this.emit('message', { type: 'committed', instanceId: message.instanceId });
+      callback(null);
+    });
+    return true;
+  }
+
   disconnect(): void {
     this.disconnected = true;
   }
@@ -142,6 +153,9 @@ describe('preview lifecycle', () => {
   });
 
   it('uses 4321 as a preferred port and publishes the reachable dynamic port', async () => {
+    const oldGitignore = '# existing project rule\ncustom.local\npreview.log\n';
+    mkdirSync(resolveProjectPaths(rootA).synergyDir, { recursive: true });
+    writeFileSync(join(resolveProjectPaths(rootA).synergyDir, '.gitignore'), oldGitignore);
     const launches: PreviewChildLaunch[] = [];
     let expectedHealth: PreviewHealth | null = null;
     const lifecycle = createPreviewLifecycle({
@@ -192,6 +206,19 @@ describe('preview lifecycle', () => {
       totalMs: expect.any(Number),
     });
     expect(readPreviewRuntime(resolveProjectPaths(rootA).previewRuntimeFile)?.port).toBe(43_222);
+    expect(readPreviewRuntime(resolveProjectPaths(rootA).previewRuntimeFile)?.toolVersion).toBe(
+      '0.12.1',
+    );
+    await expect(lifecycle.status(rootA)).resolves.toMatchObject({
+      timings: status.timings,
+    });
+    const migratedGitignore = readFileSync(
+      join(resolveProjectPaths(rootA).synergyDir, '.gitignore'),
+      'utf8',
+    );
+    expect(migratedGitignore).toContain(oldGitignore);
+    expect(migratedGitignore).toContain('preview.runtime.json.quarantine.*');
+    expect(migratedGitignore.match(/^preview\.log$/gmu)).toHaveLength(1);
   });
 
   it('rejects an occupied explicit port without printing success', async () => {
@@ -602,6 +629,7 @@ describe('preview lifecycle', () => {
         attemptId: 'active-start',
         pid: process.pid,
         createdAt: new Date().toISOString(),
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       })}\n`,
     );
     const fetch = vi.fn(async () => jsonResponse(healthFor(runtime)));
@@ -718,7 +746,7 @@ describe('preview lifecycle', () => {
     expect(readPreviewRuntime(paths.previewRuntimeFile)?.instanceId).toBe('committed-instance');
   });
 
-  it('retains a child-PID lock fence when termination cannot be confirmed', async () => {
+  it('expires a child-PID fence when termination cannot be confirmed', async () => {
     const paths = resolveProjectPaths(rootA);
     let attempt = 0;
     let spawnCount = 0;
@@ -728,11 +756,6 @@ describe('preview lifecycle', () => {
       createControlToken: () => CONTROL_TOKEN,
       lockStaleMs: 1,
       pollIntervalMs: 1,
-      processKill: (pid, signal) => {
-        expect(pid).toBe(30_010);
-        expect(signal).toBe(0);
-        return true;
-      },
       spawnChild: () => {
         spawnCount += 1;
         return new StuckChild(30_010);
@@ -748,12 +771,12 @@ describe('preview lifecycle', () => {
       pid: 30_010,
     });
 
-    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/start lock/i);
-    expect(spawnCount).toBe(1);
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/10 seconds/i);
+    expect(spawnCount).toBe(2);
     expect(existsSync(paths.previewLockFile)).toBe(true);
   });
 
-  it('retains a live child fence when canonical ownership moves before transfer validation', async () => {
+  it('expires a child fence when canonical ownership moves before transfer validation', async () => {
     const paths = resolveProjectPaths(rootA);
     const fetch = vi.fn(async () =>
       jsonResponse({
@@ -810,11 +833,11 @@ describe('preview lifecycle', () => {
       .map((entry) => JSON.parse(readFileSync(join(paths.synergyDir, entry), 'utf8')));
     expect(quarantineRecords).toContainEqual(expect.objectContaining({ pid: 30_012 }));
 
-    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/start lock/i);
-    expect(spawnCount).toBe(1);
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/10 seconds/i);
+    expect(spawnCount).toBe(2);
   });
 
-  it('retains a live child quarantine when atomic ownership transfer and termination both fail', async () => {
+  it('expires a child quarantine when atomic ownership transfer and termination both fail', async () => {
     const paths = resolveProjectPaths(rootA);
     let attempt = 0;
     let spawnCount = 0;
@@ -856,8 +879,8 @@ describe('preview lifecycle', () => {
       pid: 30_013,
     });
 
-    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/start lock/i);
-    expect(spawnCount).toBe(1);
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow('publish interrupted');
+    expect(spawnCount).toBe(2);
   });
 
   it('removes parent and child ownership records after failed transfer when termination is confirmed', async () => {
@@ -885,7 +908,7 @@ describe('preview lifecycle', () => {
     ).toBe(false);
   });
 
-  it('measures total startup time through child detachment and lock release', async () => {
+  it('durably measures startup time through verified readiness publication', async () => {
     let now = 0;
     let hasDetached = false;
     const lifecycle = createPreviewLifecycle({
@@ -929,7 +952,8 @@ describe('preview lifecycle', () => {
 
     const status = await lifecycle.start({ root: rootA });
 
-    expect(status.timings?.totalMs).toBe(12);
+    expect(status.timings?.totalMs).toBe(0);
+    await expect(lifecycle.status(rootA)).resolves.toMatchObject({ timings: status.timings });
   });
 
   it('bounds stop from invocation instead of resetting its deadline after shutdown', async () => {

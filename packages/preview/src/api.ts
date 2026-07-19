@@ -1,7 +1,7 @@
 /**
  * Typed fetch client for all /api/* endpoints exposed by vite-plugin-edit.
  *
- * All endpoints are same-origin (port 4321). "file" paths are relative to
+ * All endpoints are same-origin on the preview runtime's negotiated loopback origin. "file" paths are relative to
  * sessionsDir (e.g. "2026-05-25-foo/00-overview.mdx").
  *
  * Error modelling:

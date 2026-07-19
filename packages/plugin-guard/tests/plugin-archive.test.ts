@@ -155,6 +155,12 @@ function makeRunnerFixture(options: RunnerFixtureOptions = {}): RunnerFixture {
         );
       }
       if (options.startThrowsAfterPublish) throw new Error('preview start failed after publish');
+      return {
+        stdout: `${JSON.stringify({
+          ...RUNNING_STATUS,
+          instanceId: options.runningInstanceId ?? RUNNING_STATUS.instanceId,
+        })}\n`,
+      };
     }
 
     if (label.includes('preview stop')) {
@@ -167,6 +173,7 @@ function makeRunnerFixture(options: RunnerFixtureOptions = {}): RunnerFixture {
         );
       }
       if (options.stopThrows) throw new Error('preview stop failed');
+      return { stdout: '{"stopped":true}\n' };
     }
 
     if (label.includes('preview status')) {
@@ -245,15 +252,14 @@ describe('plugin archive smoke', () => {
       `node packages/cli/dist/cli.js review create --staged --root ${join(temporaryRoot, 'consumer')} --json`,
     );
     expect(labels).toContain(
-      `node packages/cli/dist/cli.js preview start --root ${join(temporaryRoot, 'consumer')}`,
+      `node packages/cli/dist/cli.js preview start --root ${join(temporaryRoot, 'consumer')} --json`,
     );
     expect(labels).toContain(
-      `node packages/cli/dist/cli.js preview stop --root ${join(temporaryRoot, 'consumer')}`,
+      `node packages/cli/dist/cli.js preview stop --root ${join(temporaryRoot, 'consumer')} --json`,
     );
     expect(
       labels.filter((label) => label.includes('preview status --root') && label.endsWith('--json')),
     ).toHaveLength(2);
-    expect(labels.some((label) => /preview (?:start|stop).*--json/u.test(label))).toBe(false);
     expect(labels.some((label) => /(?:^|\s)(?:build|tsup|vite)(?:\s|$)/u.test(label))).toBe(false);
     expect(runner.events).toContain(`fetch ${RUNTIME_ORIGIN}/api/runtime/health`);
     expect(runner.events.indexOf(`fetch ${RUNTIME_ORIGIN}/api/runtime/health`)).toBeLessThan(

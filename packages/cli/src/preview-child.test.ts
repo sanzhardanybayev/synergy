@@ -25,12 +25,16 @@ interface LauncherHarness {
   close: ReturnType<typeof vi.fn<PreviewChildServer['close']>>;
   createServer: ReturnType<typeof vi.fn<PreviewChildDependencies['createServer']>>;
   emitSigterm(): void;
+  emitParentMessage(message: unknown): void;
+  emitDisconnect(): void;
 }
 
 function createHarness(
   env: Readonly<Record<string, string | undefined>> = VALID_ENV,
 ): LauncherHarness {
   let sigtermListener: (() => void) | undefined;
+  let parentMessageListener: ((message: unknown) => void) | undefined;
+  let disconnectListener: (() => void) | undefined;
   const messages: PreviewChildMessage[] = [];
   const listen = vi.fn<PreviewChildServer['listen']>().mockResolvedValue(undefined);
   const close = vi.fn<PreviewChildServer['close']>().mockResolvedValue(undefined);
@@ -54,6 +58,18 @@ function createHarness(
         if (sigtermListener === listener) sigtermListener = undefined;
       };
     },
+    onParentMessage(listener) {
+      parentMessageListener = listener;
+      return () => {
+        if (parentMessageListener === listener) parentMessageListener = undefined;
+      };
+    },
+    onDisconnect(listener) {
+      disconnectListener = listener;
+      return () => {
+        if (disconnectListener === listener) disconnectListener = undefined;
+      };
+    },
     setExitCode: vi.fn(),
     logError: vi.fn(),
   };
@@ -67,6 +83,12 @@ function createHarness(
     createServer,
     emitSigterm() {
       sigtermListener?.();
+    },
+    emitParentMessage(message) {
+      parentMessageListener?.(message);
+    },
+    emitDisconnect() {
+      disconnectListener?.();
     },
   };
 }
@@ -151,5 +173,31 @@ describe('runPreviewChild', () => {
         listenMs: 25,
       },
     ]);
+  });
+
+  it('closes a ready server when its parent disconnects before committing ownership', async () => {
+    const harness = createHarness();
+
+    await expect(runPreviewChild(harness.dependencies)).resolves.toBe(0);
+    harness.emitDisconnect();
+    await vi.waitFor(() => expect(harness.close).toHaveBeenCalledOnce());
+
+    expect(harness.dependencies.setExitCode).toHaveBeenCalledWith(1);
+  });
+
+  it('survives parent disconnect only after acknowledging the matching commit', async () => {
+    const harness = createHarness();
+
+    await expect(runPreviewChild(harness.dependencies)).resolves.toBe(0);
+    harness.emitParentMessage({ type: 'commit', instanceId: VALID_ENV.SYNERGY_INSTANCE_ID });
+    harness.emitDisconnect();
+    await Promise.resolve();
+
+    expect(harness.messages).toContainEqual({
+      type: 'committed',
+      instanceId: VALID_ENV.SYNERGY_INSTANCE_ID,
+    });
+    expect(harness.close).not.toHaveBeenCalled();
+    expect(harness.dependencies.setExitCode).not.toHaveBeenCalled();
   });
 });

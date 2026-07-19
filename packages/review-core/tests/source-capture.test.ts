@@ -45,7 +45,8 @@ describe('review source freshness', () => {
           }
           if (
             commandKey === 'git diff --cached --no-ext-diff --binary' ||
-            commandKey === 'git diff --no-ext-diff --binary'
+            commandKey ===
+              'git diff --no-ext-diff --binary -- :(exclude).synergy/preview.runtime.json :(exclude).synergy/preview.runtime.json.* :(exclude).synergy/.preview.runtime.json.*.tmp :(exclude).synergy/preview.start.lock :(exclude).synergy/preview.start.lock.* :(exclude).synergy/preview.pid :(exclude).synergy/preview.log'
           ) {
             return { exitCode: 0, stdout: patch, stderr: '' };
           }

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +22,9 @@ const TRACKED_PATCH = [
   '+export const value = 2;',
   '',
 ].join('\n');
+
+const UNSTAGED_DIFF_COMMAND =
+  'git diff --no-ext-diff --binary -- :(exclude).synergy/preview.runtime.json :(exclude).synergy/preview.runtime.json.* :(exclude).synergy/.preview.runtime.json.*.tmp :(exclude).synergy/preview.start.lock :(exclude).synergy/preview.start.lock.* :(exclude).synergy/preview.pid :(exclude).synergy/preview.log';
 
 function commandKey(command: string, args: readonly string[]): string {
   return [command, ...args].join(' ');
@@ -49,8 +53,9 @@ describe('review source capture', () => {
   });
   it('captures unstaged tracked and non-ignored untracked files', () => {
     const runner = createFixtureRunner({
-      'git diff --no-ext-diff --binary': TRACKED_PATCH,
-      'git ls-files --others --exclude-standard -z': 'src/new.ts\0',
+      [UNSTAGED_DIFF_COMMAND]: TRACKED_PATCH,
+      'git ls-files --others --exclude-standard -z':
+        'src/new.ts\0.synergy/preview.runtime.json\0.synergy/preview.start.lock.quarantine.attempt\0',
     });
 
     const result = captureUnstaged({
@@ -63,11 +68,37 @@ describe('review source capture', () => {
     expect(result.eligiblePaths).toContain('src/new.ts');
     expect(result.eligiblePaths).toContain('src/existing.ts');
     expect(result.eligiblePaths).not.toContain('node_modules/pkg/index.js');
+    expect(result.eligiblePaths).not.toContain('.synergy/preview.runtime.json');
+  });
+
+  it('excludes tracked and untracked preview control artifacts from an existing project', () => {
+    const root = join(tmpdir(), `synergy-review-runtime-artifacts-${Date.now()}`);
+    temporaryRoots.push(root);
+    mkdirSync(join(root, 'src'), { recursive: true });
+    mkdirSync(join(root, '.synergy'), { recursive: true });
+    writeFileSync(join(root, 'src/app.ts'), 'export const value = 1;\n');
+    writeFileSync(join(root, '.synergy/preview.runtime.json'), '{"controlToken":"old-secret"}\n');
+    execFileSync('git', ['init', '--quiet'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'review@example.test'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Review Test'], { cwd: root });
+    execFileSync('git', ['add', '--', 'src/app.ts', '.synergy/preview.runtime.json'], {
+      cwd: root,
+    });
+    execFileSync('git', ['commit', '--quiet', '-m', 'baseline'], { cwd: root });
+    writeFileSync(join(root, 'src/app.ts'), 'export const value = 2;\n');
+    writeFileSync(join(root, '.synergy/preview.runtime.json'), '{"controlToken":"new-secret"}\n');
+    writeFileSync(join(root, '.synergy/preview.start.lock'), '{"pid":123}\n');
+
+    const result = captureUnstaged({ root });
+
+    expect(result.eligiblePaths).toEqual(['src/app.ts']);
+    expect(result.patch).not.toContain('controlToken');
+    expect(result.patch).not.toContain('preview.start.lock');
   });
 
   it('keeps spaces in NUL-delimited untracked paths', () => {
     const runner = createFixtureRunner({
-      'git diff --no-ext-diff --binary': '',
+      [UNSTAGED_DIFF_COMMAND]: '',
       'git ls-files --others --exclude-standard -z': 'src/new file.ts\0',
     });
 
@@ -80,7 +111,7 @@ describe('review source capture', () => {
   it('preserves a newline in a NUL-delimited untracked filename', () => {
     const path = 'src/new\nfile.ts';
     const runner = createFixtureRunner({
-      'git diff --no-ext-diff --binary': '',
+      [UNSTAGED_DIFF_COMMAND]: '',
       'git ls-files --others --exclude-standard -z': `${path}\0`,
     });
 
@@ -94,7 +125,7 @@ describe('review source capture', () => {
     const runner: CommandRunner = {
       run(command, args): CommandResult {
         const key = commandKey(command, args);
-        if (key === 'git diff --no-ext-diff --binary') {
+        if (key === UNSTAGED_DIFF_COMMAND) {
           return { exitCode: 0, stdout: '', stderr: '' };
         }
         if (key === 'git ls-files --others --exclude-standard -z') {
@@ -118,7 +149,7 @@ describe('review source capture', () => {
     const runner: CommandRunner = {
       run(command, args): CommandResult {
         const key = commandKey(command, args);
-        if (key === 'git diff --no-ext-diff --binary') {
+        if (key === UNSTAGED_DIFF_COMMAND) {
           return { exitCode: 0, stdout: '', stderr: '' };
         }
         if (key === 'git ls-files --others --exclude-standard -z') {
@@ -232,7 +263,7 @@ describe('review source capture', () => {
 
   it('fingerprints different binary bytes at the same untracked path', () => {
     const runner = createFixtureRunner({
-      'git diff --no-ext-diff --binary': '',
+      [UNSTAGED_DIFF_COMMAND]: '',
       'git ls-files --others --exclude-standard -z': 'assets/logo.bin\0',
     });
     let content = 'one\0binary';
@@ -284,7 +315,7 @@ describe('review source capture', () => {
     chmodSync(join(root, 'bin', 'run'), 0o755);
     writeFileSync(join(root, 'empty.txt'), '');
     const runner = createFixtureRunner({
-      'git diff --no-ext-diff --binary': '',
+      [UNSTAGED_DIFF_COMMAND]: '',
       'git ls-files --others --exclude-standard -z': 'bin/run\0empty.txt\0',
     });
 

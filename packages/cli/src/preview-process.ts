@@ -4,7 +4,13 @@ import { fileURLToPath } from 'node:url';
 
 type PreviewChildMessage =
   | { type: 'ready'; instanceId: string; pid: number; port: number; listenMs: number }
-  | { type: 'failed'; instanceId: string; phase: string; message: string };
+  | { type: 'failed'; instanceId: string; phase: string; message: string }
+  | { type: 'committed'; instanceId: string };
+
+interface PreviewParentMessage {
+  type: 'commit';
+  instanceId: string;
+}
 
 export interface PreviewChildLaunch {
   root: string;
@@ -24,6 +30,7 @@ export interface PreviewChildHandle {
   on(event: string, listener: (...args: unknown[]) => void): unknown;
   removeListener(event: string, listener: (...args: unknown[]) => void): unknown;
   kill(signal: NodeJS.Signals): boolean;
+  send?(message: PreviewParentMessage, callback: (error: Error | null) => void): boolean;
   disconnect?(): void;
   unref(): void;
 }
@@ -81,6 +88,9 @@ function parseChildMessage(value: unknown): PreviewChildMessage | null {
       port: value.port,
       listenMs: value.listenMs,
     };
+  }
+  if (value.type === 'committed' && typeof value.instanceId === 'string') {
+    return { type: 'committed', instanceId: value.instanceId };
   }
   if (
     value.type === 'failed' &&
@@ -155,6 +165,10 @@ export function waitForReadyPreviewChild(
         finish(new Error('Preview child readiness identity did not match the launch attempt'));
         return;
       }
+      if (message.type === 'committed') {
+        finish(new Error('Preview child sent a commit acknowledgement before readiness'));
+        return;
+      }
       if (message.type === 'failed') {
         finish(new Error(`Preview child failed during ${message.phase}: ${message.message}`));
         return;
@@ -186,6 +200,73 @@ export function waitForReadyPreviewChild(
       () => finish(new Error('Preview did not become ready within 10 seconds')),
       Math.max(0, timeoutMs),
     );
+  });
+}
+
+export function commitReadyPreviewChild(
+  child: PreviewChildHandle,
+  instanceId: string,
+  timeoutMs: number,
+  dependencyOverrides: Partial<PreviewProcessTimerDependencies> = {},
+): Promise<void> {
+  const dependencies = { ...DEFAULT_TIMER_DEPENDENCIES, ...dependencyOverrides };
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer: unknown = null;
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) dependencies.clearTimer(timer);
+      child.removeListener('message', onMessage);
+      child.removeListener('error', onError);
+      child.removeListener('exit', onExit);
+      if (error === undefined) resolve();
+      else reject(error);
+    };
+    const onMessage = (value: unknown): void => {
+      const message = parseChildMessage(value);
+      if (message?.type !== 'committed' || message.instanceId !== instanceId) {
+        finish(new Error('Preview child commit acknowledgement did not match the launch instance'));
+        return;
+      }
+      finish();
+    };
+    const onError = (error: unknown): void => {
+      finish(
+        new Error(
+          `Preview child failed before commit: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    };
+    const onExit = (code: unknown, signal: unknown): void => {
+      finish(
+        new Error(
+          `Preview child exited before commit (code ${String(code)}, signal ${String(signal)})`,
+        ),
+      );
+    };
+    if (child.send === undefined) {
+      finish(new Error('Preview child IPC channel is unavailable before commit'));
+      return;
+    }
+    child.on('message', onMessage);
+    child.on('error', onError);
+    child.on('exit', onExit);
+    timer = dependencies.setTimer(
+      () => finish(new Error('Preview child did not acknowledge runtime commit')),
+      Math.max(0, timeoutMs),
+    );
+    try {
+      child.send({ type: 'commit', instanceId }, (error) => {
+        if (error !== null) finish(new Error(`Preview child commit failed: ${error.message}`));
+      });
+    } catch (error) {
+      finish(
+        new Error(
+          `Preview child commit failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    }
   });
 }
 

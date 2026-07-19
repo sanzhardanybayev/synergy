@@ -244,8 +244,8 @@ function parseReviewReference(stdout: string): string {
   return payload.reference;
 }
 
-function parseRunningStatus(stdout: string): RunningPreviewStatus {
-  const payload = parseJson(stdout, 'Preview status');
+function parseRunningStatus(stdout: string, label = 'Preview status'): RunningPreviewStatus {
+  const payload = parseJson(stdout, label);
   if (
     !isRecord(payload) ||
     payload.running !== true ||
@@ -266,6 +266,13 @@ function parseRunningStatus(stdout: string): RunningPreviewStatus {
     projectId: payload.projectId,
     instanceId: payload.instanceId,
   };
+}
+
+function assertStopConfirmation(stdout: string): void {
+  const payload = parseJson(stdout, 'Preview stop');
+  if (!isRecord(payload) || payload.stopped !== true || Object.keys(payload).length !== 1) {
+    throw new Error('Preview stop response was malformed');
+  }
 }
 
 function assertStoppedStatus(stdout: string, expectedProjectId: string | null): void {
@@ -429,11 +436,12 @@ async function provePreviewStopped(options: {
 }): Promise<Error | null> {
   let failure: Error | null = null;
   try {
-    await options.runCommand({
+    const stop = await options.runCommand({
       command: 'node',
-      args: [CLI_PATH, 'preview', 'stop', '--root', options.fixtureRoot],
+      args: [CLI_PATH, 'preview', 'stop', '--root', options.fixtureRoot, '--json'],
       cwd: options.archiveRoot,
     });
+    assertStopConfirmation(stop.stdout);
   } catch (error) {
     failure = asError(error);
   }
@@ -509,11 +517,12 @@ export async function runPluginArchiveSmoke(
       parseReviewReference(review.stdout);
 
       previewStartAttempted = true;
-      await runCommand({
+      const start = await runCommand({
         command: 'node',
-        args: [CLI_PATH, 'preview', 'start', '--root', fixtureRoot],
+        args: [CLI_PATH, 'preview', 'start', '--root', fixtureRoot, '--json'],
         cwd: archiveRoot,
       });
+      const startedStatus = parseRunningStatus(start.stdout, 'Preview start');
       const statusResult = await runCommand({
         command: 'node',
         args: [CLI_PATH, 'preview', 'status', '--root', fixtureRoot, '--json'],
@@ -522,6 +531,7 @@ export async function runPluginArchiveSmoke(
       const status = parseRunningStatus(statusResult.stdout);
       expectedProjectId = status.projectId;
       const runtime = readRuntimeMetadata(fixtureRoot);
+      assertStatusMatchesRuntime(startedStatus, runtime);
       assertStatusMatchesRuntime(status, runtime);
       await assertHealthyPreview(status, runtime, fetch);
     } catch (error) {
