@@ -12,22 +12,17 @@ import {
   constants as constants3,
   closeSync as closeSync4,
   copyFileSync as copyFileSync3,
-  existsSync as existsSync2,
+  existsSync,
   fstatSync,
-  mkdirSync as mkdirSync2,
+  mkdirSync,
   openSync as openSync4,
-  readFileSync as readFileSync4,
+  readFileSync as readFileSync3,
   readSync,
   realpathSync,
   renameSync as renameSync3,
   unlinkSync as unlinkSync3
 } from "node:fs";
-import { dim, green as green2, yellow } from "kleur/colors";
-
-// src/init.ts
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { green } from "kleur/colors";
+import { dim, green, yellow } from "kleur/colors";
 
 // src/paths.ts
 import { resolve } from "node:path";
@@ -49,45 +44,6 @@ function resolveProjectPaths(root = process.cwd()) {
 }
 var PREVIEW_PORT = 4321;
 
-// src/init.ts
-var GITIGNORE_ENTRIES = [
-  "preview.runtime.json",
-  "preview.runtime.json.quarantine.*",
-  ".preview.runtime.json.*.tmp",
-  "preview.runtime.json.mutation.lock",
-  "preview.start.lock",
-  "preview.start.lock.quarantine.*",
-  "preview.start.lock.owner.tmp.*",
-  "preview.pid",
-  "preview.log",
-  "active-session",
-  "review-state.json",
-  "reviews/",
-  "active-review.json",
-  ""
-];
-function ensureSynergyGitignore(root = process.cwd()) {
-  const paths = resolveProjectPaths(root);
-  mkdirSync(paths.synergyDir, { recursive: true });
-  const gitignorePath = join(paths.synergyDir, ".gitignore");
-  const current = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf8") : "";
-  const present = new Set(current.split(/\r?\n/u));
-  const missing = GITIGNORE_ENTRIES.filter((entry) => entry.length > 0 && !present.has(entry));
-  if (missing.length === 0) return gitignorePath;
-  const separator = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
-  appendFileSync(gitignorePath, `${separator}${missing.join("\n")}
-`);
-  return gitignorePath;
-}
-function initProject(root = process.cwd()) {
-  const paths = resolveProjectPaths(root);
-  mkdirSync(paths.sessionsDir, { recursive: true });
-  ensureSynergyGitignore(paths.root);
-  process.stdout.write(`${green("\u2713")} Initialized .synergy/ in ${paths.root}
-`);
-  return { synergyDir: paths.synergyDir };
-}
-
 // src/preview-lock.ts
 import { randomUUID } from "node:crypto";
 import {
@@ -96,7 +52,7 @@ import {
   copyFileSync,
   fsyncSync,
   openSync,
-  readFileSync as readFileSync2,
+  readFileSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -104,12 +60,13 @@ import {
   unlinkSync,
   writeFileSync
 } from "node:fs";
-import { basename, dirname, join as join2 } from "node:path";
+import { basename, dirname, join } from "node:path";
 var DEFAULT_DEPENDENCIES = {
   copyFileExclusive: (source, destination) => copyFileSync(source, destination, constants.COPYFILE_EXCL),
   createQuarantineId: randomUUID,
   now: () => performance.now(),
   publishOwnerRecord: (source, destination) => renameSync(source, destination),
+  unlinkFile: unlinkSync,
   wallNow: Date.now,
   sleep: (milliseconds) => new Promise((resolve3) => setTimeout(resolve3, milliseconds))
 };
@@ -121,7 +78,7 @@ function hasErrorCode(error, code) {
 }
 function readLockRecord(path) {
   try {
-    const value = JSON.parse(readFileSync2(path, "utf8"));
+    const value = JSON.parse(readFileSync(path, "utf8"));
     if (!isRecord(value) || typeof value.attemptId !== "string" || typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid <= 0 || typeof value.createdAt !== "string") {
       return null;
     }
@@ -142,10 +99,17 @@ function quarantinePath(path, attemptId, dependencies) {
 function listQuarantines(path) {
   const directory = dirname(path);
   const prefix = `${basename(path)}.quarantine.`;
-  return readdirSync(directory).filter((entry) => entry.startsWith(prefix)).map((entry) => join2(directory, entry));
+  return readdirSync(directory).filter((entry) => entry.startsWith(prefix)).map((entry) => join(directory, entry));
 }
 function sameLockOwner(first, second) {
   return first !== null && second !== null && first.attemptId === second.attemptId && first.pid === second.pid;
+}
+function unlinkIfPresent(path, dependencies) {
+  try {
+    dependencies.unlinkFile(path);
+  } catch (error) {
+    if (!hasErrorCode(error, "ENOENT")) throw error;
+  }
 }
 function restoreWithoutOverwrite(capturedPath, lockPath, dependencies) {
   try {
@@ -154,7 +118,7 @@ function restoreWithoutOverwrite(capturedPath, lockPath, dependencies) {
     if (!hasErrorCode(error, "EEXIST")) throw error;
     if (!sameLockOwner(readLockRecord(capturedPath), readLockRecord(lockPath))) return false;
   }
-  unlinkSync(capturedPath);
+  unlinkIfPresent(capturedPath, dependencies);
   return true;
 }
 function captureCurrentLock(path, attemptId, dependencies) {
@@ -184,7 +148,7 @@ function discardExpiredQuarantine(capturedPath, staleMs, dependencies) {
     throw error;
   }
   if (!isExpired) return false;
-  unlinkSync(capturedPath);
+  unlinkIfPresent(capturedPath, dependencies);
   return true;
 }
 function quarantineBlocksAcquisition(path, staleMs, dependencies) {
@@ -207,7 +171,7 @@ function releaseOwnedLock(path, attemptId, dependencies) {
   if (capturedPath !== null) {
     const capturedRecord = readLockRecord(capturedPath);
     if (capturedRecord?.attemptId === attemptId) {
-      unlinkSync(capturedPath);
+      unlinkIfPresent(capturedPath, dependencies);
       didReleaseCanonical = true;
     } else {
       restoreWithoutOverwrite(capturedPath, path, dependencies);
@@ -216,10 +180,39 @@ function releaseOwnedLock(path, attemptId, dependencies) {
   let didReleaseFence = false;
   for (const quarantine of listQuarantines(path)) {
     if (readLockRecord(quarantine)?.attemptId !== attemptId) continue;
-    unlinkSync(quarantine);
+    unlinkIfPresent(quarantine, dependencies);
     didReleaseFence = true;
   }
   return didReleaseCanonical || didReleaseFence;
+}
+function releaseOwnedLockAfter(path, attemptId, dependencies, finalizer) {
+  const capturedPath = captureCurrentLock(path, attemptId, dependencies);
+  if (capturedPath === null) return false;
+  if (readLockRecord(capturedPath)?.attemptId !== attemptId) {
+    restoreWithoutOverwrite(capturedPath, path, dependencies);
+    return false;
+  }
+  try {
+    finalizer();
+  } catch (error) {
+    try {
+      if (!restoreWithoutOverwrite(capturedPath, path, dependencies)) {
+        throw new Error("Preview start lock ownership could not be restored");
+      }
+    } catch (restoreError) {
+      throw new AggregateError(
+        [error, restoreError],
+        "Preview finalization failed and start lock ownership could not be restored"
+      );
+    }
+    throw error;
+  }
+  unlinkIfPresent(capturedPath, dependencies);
+  for (const quarantine of listQuarantines(path)) {
+    if (readLockRecord(quarantine)?.attemptId !== attemptId) continue;
+    unlinkIfPresent(quarantine, dependencies);
+  }
+  return true;
 }
 function writeRecordFile(path, record) {
   const descriptor = openSync(path, "wx", 384);
@@ -259,7 +252,7 @@ function updateOwnedLockPid(path, attemptId, pid, staleMs, dependencies) {
     dependencies.publishOwnerRecord(ownerTemp, path);
     hasOwnerTemp = false;
     if (!sameLockOwner(readLockRecord(path), childRecord)) return false;
-    unlinkSync(childFence);
+    unlinkIfPresent(childFence, dependencies);
     return true;
   } finally {
     if (hasOwnerTemp) rmSync(ownerTemp, { force: true });
@@ -299,6 +292,7 @@ async function acquirePreviewStartLock(options, dependencyOverrides = {}) {
       return {
         lockMs: dependencies.now() - lockStartedAt,
         release: () => releaseOwnedLock(options.path, options.attemptId, dependencies),
+        releaseAfter: (finalizer) => releaseOwnedLockAfter(options.path, options.attemptId, dependencies, finalizer),
         updateOwnerPid: (pid) => updateOwnedLockPid(options.path, options.attemptId, pid, options.staleMs, dependencies)
       };
     } catch (error) {
@@ -579,13 +573,13 @@ import {
   closeSync as closeSync3,
   copyFileSync as copyFileSync2,
   openSync as openSync3,
-  readFileSync as readFileSync3,
+  readFileSync as readFileSync2,
   readdirSync as readdirSync2,
   renameSync as renameSync2,
   unlinkSync as unlinkSync2,
   writeSync
 } from "node:fs";
-import { basename as basename2, dirname as dirname2, join as join3 } from "node:path";
+import { basename as basename2, dirname as dirname2, join as join2 } from "node:path";
 var LOOPBACK_HOST = "127.0.0.1";
 var MAX_PORT = 65535;
 var CONTROL_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
@@ -637,7 +631,7 @@ function listRuntimeQuarantines(path) {
   const directory = dirname2(path);
   const prefix = `${basename2(path)}.quarantine.`;
   try {
-    return readdirSync2(directory).filter((entry) => entry.startsWith(prefix)).map((entry) => join3(directory, entry));
+    return readdirSync2(directory).filter((entry) => entry.startsWith(prefix)).map((entry) => join2(directory, entry));
   } catch (error) {
     if (hasErrorCode2(error, "ENOENT")) return [];
     throw error;
@@ -731,7 +725,7 @@ function generateControlToken() {
 }
 function readRuntimeFile(path) {
   try {
-    return parsePreviewRuntime(JSON.parse(readFileSync3(path, "utf8")));
+    return parsePreviewRuntime(JSON.parse(readFileSync2(path, "utf8")));
   } catch {
     return null;
   }
@@ -748,7 +742,7 @@ function readPreviewRuntime(path) {
 function writePreviewRuntime(path, state) {
   const validatedState = parsePreviewRuntime(state);
   if (validatedState === null) throw new TypeError("Invalid preview runtime state");
-  const tempPath = join3(dirname2(path), `.${basename2(path)}.${process.pid}.${randomUUID2()}.tmp`);
+  const tempPath = join2(dirname2(path), `.${basename2(path)}.${process.pid}.${randomUUID2()}.tmp`);
   const fileDescriptor = openSync3(tempPath, "wx", 384);
   let shouldRemoveTempFile = true;
   try {
@@ -956,6 +950,7 @@ var DEFAULT_DEPENDENCIES3 = {
   pollIntervalMs: POLL_INTERVAL_MS,
   processKill: (pid, signal) => process.kill(pid, signal),
   publishOwnerRecord: (source, destination) => renameSync3(source, destination),
+  unlinkFile: unlinkSync3,
   removeRuntime: removeOwnedPreviewRuntime,
   setTimer: (callback, milliseconds) => setTimeout(callback, milliseconds),
   sleep: (milliseconds) => new Promise((resolve3) => setTimeout(resolve3, milliseconds)),
@@ -1012,10 +1007,10 @@ function projectPaths(root, dependencies) {
   return resolveProjectPaths(dependencies.canonicalizeRoot(root));
 }
 function migrateLegacyPid(pidFile, dependencies) {
-  if (!existsSync2(pidFile)) return;
+  if (!existsSync(pidFile)) return;
   let pid = null;
   try {
-    const raw = readFileSync4(pidFile, "utf8").trim();
+    const raw = readFileSync3(pidFile, "utf8").trim();
     const parsed = Number(raw);
     if (/^[1-9]\d*$/u.test(raw) && isPositiveInteger4(parsed)) pid = parsed;
   } catch {
@@ -1055,6 +1050,7 @@ function lockDependencies(dependencies) {
     createQuarantineId: dependencies.createQuarantineId,
     now: dependencies.now,
     publishOwnerRecord: dependencies.publishOwnerRecord,
+    unlinkFile: dependencies.unlinkFile,
     wallNow: dependencies.wallNow,
     sleep: dependencies.sleep
   };
@@ -1104,7 +1100,7 @@ async function pollLaunchHealth(launch, ready, deadline, dependencies) {
   throw new Error("Preview did not become ready within 10 seconds");
 }
 function readLogTail(path) {
-  if (!existsSync2(path)) return "";
+  if (!existsSync(path)) return "";
   let descriptor = null;
   try {
     descriptor = openSync4(path, "r");
@@ -1134,7 +1130,7 @@ Preview cleanup failed: ${details}`, {
     cause: new AggregateError([primary, ...cleanupFailures])
   });
 }
-function buildRuntime(launch, ready, timings, dependencies) {
+function buildRuntime(launch, ready, dependencies) {
   return {
     schemaVersion: 1,
     protocolVersion: 1,
@@ -1149,8 +1145,7 @@ function buildRuntime(launch, ready, timings, dependencies) {
     strictPort: launch.strictPort,
     startedAt: new Date(dependencies.wallNow()).toISOString(),
     controlToken: launch.controlToken,
-    toolVersion: SYNERGY_VERSION,
-    timings
+    toolVersion: SYNERGY_VERSION
   };
 }
 async function startPreview(options, dependencies) {
@@ -1162,8 +1157,7 @@ async function startPreview(options, dependencies) {
   );
   const workDeadline = totalDeadline - cleanupReserveMs;
   const paths = projectPaths(options.root, dependencies);
-  mkdirSync2(paths.synergyDir, { recursive: true });
-  ensureSynergyGitignore(paths.root);
+  mkdirSync(paths.synergyDir, { recursive: true });
   if (dependencies.now() >= workDeadline) {
     throw new Error("Preview did not become ready within 10 seconds");
   }
@@ -1231,14 +1225,7 @@ async function startPreview(options, dependencies) {
     if (dependencies.now() >= workDeadline) {
       throw new Error("Preview did not become ready within 10 seconds");
     }
-    const timings = {
-      lockMs: lock.lockMs,
-      launchMs,
-      listenMs: ready.listenMs,
-      healthMs,
-      totalMs: dependencies.now() - invokedAt
-    };
-    const runtime = buildRuntime(launch, ready, timings, dependencies);
+    const runtime = buildRuntime(launch, ready, dependencies);
     dependencies.writeRuntime(paths.previewRuntimeFile, runtime);
     hasPublishedRuntime = true;
     if (dependencies.now() > workDeadline) {
@@ -1251,22 +1238,43 @@ async function startPreview(options, dependencies) {
       processTimerDependencies(dependencies)
     );
     detachReadyPreviewChild(child);
+    const publication = {};
+    const acquiredLock = lock;
+    if (!acquiredLock.releaseAfter(() => {
+      const measuredRuntime = {
+        ...runtime,
+        timings: {
+          lockMs: acquiredLock.lockMs,
+          launchMs,
+          listenMs: ready.listenMs,
+          healthMs,
+          totalMs: dependencies.now() - invokedAt
+        }
+      };
+      dependencies.writeRuntime(paths.previewRuntimeFile, measuredRuntime);
+      publication.runtime = measuredRuntime;
+    })) {
+      throw new Error("Preview start lock release did not succeed");
+    }
     shouldReleaseLock = false;
-    if (!lock.release()) throw new Error("Preview start lock release did not succeed");
     lock = null;
     if (dependencies.now() > totalDeadline) {
       throw new Error("Preview did not become ready within 10 seconds");
     }
+    const finalizedRuntime = publication.runtime;
+    if (finalizedRuntime === void 0) {
+      throw new Error("Preview runtime finalization did not succeed");
+    }
     if (!options.quiet) {
       dependencies.writeOutput(
-        `${green2("\u2713")} Preview started (pid ${runtime.pid}) at ${dim(runtime.origin)}
+        `${green("\u2713")} Preview started (pid ${finalizedRuntime.pid}) at ${dim(finalizedRuntime.origin)}
 `
       );
       dependencies.writeOutput(`  Log: ${dim(paths.previewLogFile)}
 `);
     }
     child = null;
-    return runningStatus(runtime);
+    return runningStatus(finalizedRuntime);
   } catch (error) {
     const failure = withLogTail(error, paths.previewLogFile);
     const cleanupFailures = [];
@@ -1375,7 +1383,7 @@ async function stopPreview(root, options, dependencies) {
         const removed = dependencies.removeRuntime(paths.previewRuntimeFile, runtime.instanceId);
         if (!removed || dependencies.now() > totalDeadline) return false;
         if (!options.quiet) {
-          dependencies.writeOutput(`${green2("\u2713")} Preview stopped (pid ${runtime.pid})
+          dependencies.writeOutput(`${green("\u2713")} Preview stopped (pid ${runtime.pid})
 `);
         }
         return true;
@@ -1409,7 +1417,7 @@ async function previewStop(root, options = {}) {
 }
 function printStatus(status) {
   if (status.running) {
-    process.stdout.write(`${green2("\u25CF")} running  pid ${status.pid}  ${status.origin}
+    process.stdout.write(`${green("\u25CF")} running  pid ${status.pid}  ${status.origin}
 `);
   } else {
     process.stdout.write(`${dim("\u25CB")} stopped
@@ -1442,8 +1450,8 @@ async function tryDaemon(root, method, path, body) {
 }
 
 // src/execstate.ts
-import { existsSync as existsSync3 } from "node:fs";
-import { join as join4 } from "node:path";
+import { existsSync as existsSync2 } from "node:fs";
+import { join as join3 } from "node:path";
 import {
   appendFinding,
   deriveProgress,
@@ -1452,7 +1460,7 @@ import {
   setResume,
   writeHandoff
 } from "@synergy/state";
-import { bold, dim as dim2, green as green3 } from "kleur/colors";
+import { bold, dim as dim2, green as green2 } from "kleur/colors";
 var STATUS_VALUES = [
   "draft",
   "proposed",
@@ -1463,8 +1471,8 @@ var STATUS_VALUES = [
 ];
 function resolveSessionDir(root, session) {
   const paths = resolveProjectPaths(root);
-  const dir = join4(paths.sessionsDir, session);
-  if (!existsSync3(dir)) {
+  const dir = join3(paths.sessionsDir, session);
+  if (!existsSync2(dir)) {
     throw new Error(`session "${session}" not found at ${dir}`);
   }
   return dir;
@@ -1476,7 +1484,7 @@ function phaseSet(args) {
   const sessionDir = resolveSessionDir(args.root, args.session);
   setPhaseStatus(sessionDir, args.phaseId, args.status, { note: args.note });
   process.stdout.write(
-    `${green3("\u2713")} ${args.session} ${dim2("\u203A")} phase ${bold(args.phaseId)} \u2192 ${args.status}
+    `${green2("\u2713")} ${args.session} ${dim2("\u203A")} phase ${bold(args.phaseId)} \u2192 ${args.status}
 `
   );
 }
@@ -1487,13 +1495,13 @@ function logFinding(args) {
   const sessionDir = resolveSessionDir(args.root, args.session);
   appendFinding(sessionDir, args.global ? { global: true } : { phase: args.phase }, args.text);
   const where = args.global ? "global" : `phase ${args.phase}`;
-  process.stdout.write(`${green3("\u2713")} logged finding to ${dim2(where)}
+  process.stdout.write(`${green2("\u2713")} logged finding to ${dim2(where)}
 `);
 }
 function resumeSet(args) {
   const sessionDir = resolveSessionDir(args.root, args.session);
   setResume(sessionDir, { nextPhase: args.next, note: args.note });
-  process.stdout.write(`${green3("\u2713")} resume \u2192 ${bold(args.next ?? "(unset)")}
+  process.stdout.write(`${green2("\u2713")} resume \u2192 ${bold(args.next ?? "(unset)")}
 `);
 }
 function printProgress(args) {
@@ -1521,32 +1529,32 @@ function handoffSet(args) {
     nextPhase: args.next,
     note: `See .state/handoff.md (captured ${stamp})`
   });
-  process.stdout.write(`${green3("\u2713")} handoff written \u2192 ${dim2(".state/handoff.md")}
+  process.stdout.write(`${green2("\u2713")} handoff written \u2192 ${dim2(".state/handoff.md")}
 `);
 }
 
 // src/feedback-wait.ts
 import {
-  existsSync as existsSync4,
-  mkdirSync as mkdirSync3,
-  readFileSync as readFileSync5,
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync2,
+  readFileSync as readFileSync4,
   readdirSync as readdirSync3,
   rmSync as rmSync2,
   watch,
   writeFileSync as writeFileSync2
 } from "node:fs";
-import { join as join5 } from "node:path";
+import { join as join4 } from "node:path";
 import { LISTENING_FILE, REVIEW_DONE_FILE } from "@synergy/state";
 import matter from "gray-matter";
 var LISTENING_HEARTBEAT_MS = 3e4;
 function scanOpenComments(feedbackDir, session) {
-  const sessionDir = join5(feedbackDir, session);
-  if (!existsSync4(sessionDir)) return [];
+  const sessionDir = join4(feedbackDir, session);
+  if (!existsSync3(sessionDir)) return [];
   const comments = [];
   for (const filename of readdirSync3(sessionDir)) {
     if (!filename.endsWith(".md")) continue;
     try {
-      const raw = readFileSync5(join5(sessionDir, filename), "utf8");
+      const raw = readFileSync4(join4(sessionDir, filename), "utf8");
       const parsed = matter(raw);
       const data = parsed.data;
       if (data.status !== "open") continue;
@@ -1575,15 +1583,15 @@ function parseDuration(value) {
 var WATCH_DEBOUNCE_MS = 60;
 function waitForFeedback(options) {
   const { feedbackDir, session, timeoutMs, watchImpl = watch } = options;
-  const sessionDir = join5(feedbackDir, session);
-  mkdirSync3(sessionDir, { recursive: true });
-  const doneFile = join5(sessionDir, REVIEW_DONE_FILE);
+  const sessionDir = join4(feedbackDir, session);
+  mkdirSync2(sessionDir, { recursive: true });
+  const doneFile = join4(sessionDir, REVIEW_DONE_FILE);
   rmSync2(doneFile, { force: true });
   const queued = scanOpenComments(feedbackDir, session);
   if (queued.length > 0) {
     return Promise.resolve({ status: "feedback", comments: queued });
   }
-  const listeningFile = join5(sessionDir, LISTENING_FILE);
+  const listeningFile = join4(sessionDir, LISTENING_FILE);
   const touchListening = () => {
     try {
       writeFileSync2(listeningFile, `${(/* @__PURE__ */ new Date()).toISOString()}
@@ -1621,7 +1629,7 @@ function waitForFeedback(options) {
     const check = () => {
       if (settled) return;
       const open = scanOpenComments(feedbackDir, session);
-      if (existsSync4(doneFile)) {
+      if (existsSync3(doneFile)) {
         rmSync2(doneFile, { force: true });
         finish({ status: "ended", comments: open });
         return;
@@ -1639,6 +1647,48 @@ function waitForFeedback(options) {
     }
     schedule();
   });
+}
+
+// src/init.ts
+import { appendFileSync, existsSync as existsSync4, mkdirSync as mkdirSync3, readFileSync as readFileSync5 } from "node:fs";
+import { join as join5 } from "node:path";
+import { green as green3 } from "kleur/colors";
+var GITIGNORE_ENTRIES = [
+  "preview.runtime.json",
+  "preview.runtime.json.quarantine.*",
+  ".preview.runtime.json.*.tmp",
+  "preview.runtime.json.mutation.lock",
+  "preview.start.lock",
+  "preview.start.lock.quarantine.*",
+  "preview.start.lock.owner.tmp.*",
+  "preview.pid",
+  "preview.log",
+  "active-session",
+  "review-state.json",
+  "reviews/",
+  "active-review.json",
+  ""
+];
+function ensureSynergyGitignore(root = process.cwd()) {
+  const paths = resolveProjectPaths(root);
+  mkdirSync3(paths.synergyDir, { recursive: true });
+  const gitignorePath = join5(paths.synergyDir, ".gitignore");
+  const current = existsSync4(gitignorePath) ? readFileSync5(gitignorePath, "utf8") : "";
+  const present = new Set(current.split(/\r?\n/u));
+  const missing = GITIGNORE_ENTRIES.filter((entry) => entry.length > 0 && !present.has(entry));
+  if (missing.length === 0) return gitignorePath;
+  const separator = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
+  appendFileSync(gitignorePath, `${separator}${missing.join("\n")}
+`);
+  return gitignorePath;
+}
+function initProject(root = process.cwd()) {
+  const paths = resolveProjectPaths(root);
+  mkdirSync3(paths.sessionsDir, { recursive: true });
+  ensureSynergyGitignore(paths.root);
+  process.stdout.write(`${green3("\u2713")} Initialized .synergy/ in ${paths.root}
+`);
+  return { synergyDir: paths.synergyDir };
 }
 
 // src/preview-cli.ts

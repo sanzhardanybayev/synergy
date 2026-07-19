@@ -14,7 +14,6 @@ import {
   unlinkSync,
 } from 'node:fs';
 import { dim, green, yellow } from 'kleur/colors';
-import { ensureSynergyGitignore } from './init.js';
 import { PREVIEW_PORT, resolveProjectPaths } from './paths.js';
 import {
   type AcquiredPreviewStartLock,
@@ -130,6 +129,7 @@ const DEFAULT_DEPENDENCIES: PreviewLifecycleDependencies = {
   pollIntervalMs: POLL_INTERVAL_MS,
   processKill: (pid, signal) => process.kill(pid, signal),
   publishOwnerRecord: (source, destination) => renameSync(source, destination),
+  unlinkFile: unlinkSync,
   removeRuntime: removeOwnedPreviewRuntime,
   setTimer: (callback, milliseconds) => setTimeout(callback, milliseconds),
   sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
@@ -272,6 +272,7 @@ function lockDependencies(
     createQuarantineId: dependencies.createQuarantineId,
     now: dependencies.now,
     publishOwnerRecord: dependencies.publishOwnerRecord,
+    unlinkFile: dependencies.unlinkFile,
     wallNow: dependencies.wallNow,
     sleep: dependencies.sleep,
   };
@@ -371,7 +372,6 @@ function withCleanupFailures(primary: Error, cleanupFailures: Error[]): Error {
 function buildRuntime(
   launch: PreviewChildLaunch,
   ready: ReadyPreviewChild,
-  timings: PreviewTimings,
   dependencies: PreviewLifecycleDependencies,
 ): PreviewRuntimeState {
   return {
@@ -389,7 +389,6 @@ function buildRuntime(
     startedAt: new Date(dependencies.wallNow()).toISOString(),
     controlToken: launch.controlToken,
     toolVersion: SYNERGY_VERSION,
-    timings,
   };
 }
 
@@ -406,7 +405,6 @@ async function startPreview(
   const workDeadline = totalDeadline - cleanupReserveMs;
   const paths = projectPaths(options.root, dependencies);
   mkdirSync(paths.synergyDir, { recursive: true });
-  ensureSynergyGitignore(paths.root);
   if (dependencies.now() >= workDeadline) {
     throw new Error('Preview did not become ready within 10 seconds');
   }
@@ -476,14 +474,7 @@ async function startPreview(
       throw new Error('Preview did not become ready within 10 seconds');
     }
 
-    const timings: PreviewTimings = {
-      lockMs: lock.lockMs,
-      launchMs,
-      listenMs: ready.listenMs,
-      healthMs,
-      totalMs: dependencies.now() - invokedAt,
-    };
-    const runtime = buildRuntime(launch, ready, timings, dependencies);
+    const runtime = buildRuntime(launch, ready, dependencies);
     dependencies.writeRuntime(paths.previewRuntimeFile, runtime);
     hasPublishedRuntime = true;
     if (dependencies.now() > workDeadline) {
@@ -496,20 +487,43 @@ async function startPreview(
       processTimerDependencies(dependencies),
     );
     detachReadyPreviewChild(child);
+    const publication: { runtime?: PreviewRuntimeState } = {};
+    const acquiredLock = lock;
+    if (
+      !acquiredLock.releaseAfter(() => {
+        const measuredRuntime: PreviewRuntimeState = {
+          ...runtime,
+          timings: {
+            lockMs: acquiredLock.lockMs,
+            launchMs,
+            listenMs: ready.listenMs,
+            healthMs,
+            totalMs: dependencies.now() - invokedAt,
+          },
+        };
+        dependencies.writeRuntime(paths.previewRuntimeFile, measuredRuntime);
+        publication.runtime = measuredRuntime;
+      })
+    ) {
+      throw new Error('Preview start lock release did not succeed');
+    }
     shouldReleaseLock = false;
-    if (!lock.release()) throw new Error('Preview start lock release did not succeed');
     lock = null;
     if (dependencies.now() > totalDeadline) {
       throw new Error('Preview did not become ready within 10 seconds');
     }
+    const finalizedRuntime = publication.runtime;
+    if (finalizedRuntime === undefined) {
+      throw new Error('Preview runtime finalization did not succeed');
+    }
     if (!options.quiet) {
       dependencies.writeOutput(
-        `${green('✓')} Preview started (pid ${runtime.pid}) at ${dim(runtime.origin)}\n`,
+        `${green('✓')} Preview started (pid ${finalizedRuntime.pid}) at ${dim(finalizedRuntime.origin)}\n`,
       );
       dependencies.writeOutput(`  Log: ${dim(paths.previewLogFile)}\n`);
     }
     child = null;
-    return runningStatus(runtime);
+    return runningStatus(finalizedRuntime);
   } catch (error) {
     const failure = withLogTail(error, paths.previewLogFile);
     const cleanupFailures: Error[] = [];

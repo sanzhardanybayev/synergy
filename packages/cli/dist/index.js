@@ -102,6 +102,7 @@ var DEFAULT_DEPENDENCIES = {
   createQuarantineId: randomUUID,
   now: () => performance.now(),
   publishOwnerRecord: (source, destination) => renameSync(source, destination),
+  unlinkFile: unlinkSync,
   wallNow: Date.now,
   sleep: (milliseconds) => new Promise((resolve2) => setTimeout(resolve2, milliseconds))
 };
@@ -139,6 +140,13 @@ function listQuarantines(path) {
 function sameLockOwner(first, second) {
   return first !== null && second !== null && first.attemptId === second.attemptId && first.pid === second.pid;
 }
+function unlinkIfPresent(path, dependencies) {
+  try {
+    dependencies.unlinkFile(path);
+  } catch (error) {
+    if (!hasErrorCode(error, "ENOENT")) throw error;
+  }
+}
 function restoreWithoutOverwrite(capturedPath, lockPath, dependencies) {
   try {
     dependencies.copyFileExclusive(capturedPath, lockPath);
@@ -146,7 +154,7 @@ function restoreWithoutOverwrite(capturedPath, lockPath, dependencies) {
     if (!hasErrorCode(error, "EEXIST")) throw error;
     if (!sameLockOwner(readLockRecord(capturedPath), readLockRecord(lockPath))) return false;
   }
-  unlinkSync(capturedPath);
+  unlinkIfPresent(capturedPath, dependencies);
   return true;
 }
 function captureCurrentLock(path, attemptId, dependencies) {
@@ -176,7 +184,7 @@ function discardExpiredQuarantine(capturedPath, staleMs, dependencies) {
     throw error;
   }
   if (!isExpired) return false;
-  unlinkSync(capturedPath);
+  unlinkIfPresent(capturedPath, dependencies);
   return true;
 }
 function quarantineBlocksAcquisition(path, staleMs, dependencies) {
@@ -199,7 +207,7 @@ function releaseOwnedLock(path, attemptId, dependencies) {
   if (capturedPath !== null) {
     const capturedRecord = readLockRecord(capturedPath);
     if (capturedRecord?.attemptId === attemptId) {
-      unlinkSync(capturedPath);
+      unlinkIfPresent(capturedPath, dependencies);
       didReleaseCanonical = true;
     } else {
       restoreWithoutOverwrite(capturedPath, path, dependencies);
@@ -208,10 +216,39 @@ function releaseOwnedLock(path, attemptId, dependencies) {
   let didReleaseFence = false;
   for (const quarantine of listQuarantines(path)) {
     if (readLockRecord(quarantine)?.attemptId !== attemptId) continue;
-    unlinkSync(quarantine);
+    unlinkIfPresent(quarantine, dependencies);
     didReleaseFence = true;
   }
   return didReleaseCanonical || didReleaseFence;
+}
+function releaseOwnedLockAfter(path, attemptId, dependencies, finalizer) {
+  const capturedPath = captureCurrentLock(path, attemptId, dependencies);
+  if (capturedPath === null) return false;
+  if (readLockRecord(capturedPath)?.attemptId !== attemptId) {
+    restoreWithoutOverwrite(capturedPath, path, dependencies);
+    return false;
+  }
+  try {
+    finalizer();
+  } catch (error) {
+    try {
+      if (!restoreWithoutOverwrite(capturedPath, path, dependencies)) {
+        throw new Error("Preview start lock ownership could not be restored");
+      }
+    } catch (restoreError) {
+      throw new AggregateError(
+        [error, restoreError],
+        "Preview finalization failed and start lock ownership could not be restored"
+      );
+    }
+    throw error;
+  }
+  unlinkIfPresent(capturedPath, dependencies);
+  for (const quarantine of listQuarantines(path)) {
+    if (readLockRecord(quarantine)?.attemptId !== attemptId) continue;
+    unlinkIfPresent(quarantine, dependencies);
+  }
+  return true;
 }
 function writeRecordFile(path, record) {
   const descriptor = openSync(path, "wx", 384);
@@ -251,7 +288,7 @@ function updateOwnedLockPid(path, attemptId, pid, staleMs, dependencies) {
     dependencies.publishOwnerRecord(ownerTemp, path);
     hasOwnerTemp = false;
     if (!sameLockOwner(readLockRecord(path), childRecord)) return false;
-    unlinkSync(childFence);
+    unlinkIfPresent(childFence, dependencies);
     return true;
   } finally {
     if (hasOwnerTemp) rmSync(ownerTemp, { force: true });
@@ -291,6 +328,7 @@ async function acquirePreviewStartLock(options, dependencyOverrides = {}) {
       return {
         lockMs: dependencies.now() - lockStartedAt,
         release: () => releaseOwnedLock(options.path, options.attemptId, dependencies),
+        releaseAfter: (finalizer) => releaseOwnedLockAfter(options.path, options.attemptId, dependencies, finalizer),
         updateOwnerPid: (pid) => updateOwnedLockPid(options.path, options.attemptId, pid, options.staleMs, dependencies)
       };
     } catch (error) {
@@ -948,6 +986,7 @@ var DEFAULT_DEPENDENCIES3 = {
   pollIntervalMs: POLL_INTERVAL_MS,
   processKill: (pid, signal) => process.kill(pid, signal),
   publishOwnerRecord: (source, destination) => renameSync3(source, destination),
+  unlinkFile: unlinkSync3,
   removeRuntime: removeOwnedPreviewRuntime,
   setTimer: (callback, milliseconds) => setTimeout(callback, milliseconds),
   sleep: (milliseconds) => new Promise((resolve2) => setTimeout(resolve2, milliseconds)),
@@ -1047,6 +1086,7 @@ function lockDependencies(dependencies) {
     createQuarantineId: dependencies.createQuarantineId,
     now: dependencies.now,
     publishOwnerRecord: dependencies.publishOwnerRecord,
+    unlinkFile: dependencies.unlinkFile,
     wallNow: dependencies.wallNow,
     sleep: dependencies.sleep
   };
@@ -1126,7 +1166,7 @@ Preview cleanup failed: ${details}`, {
     cause: new AggregateError([primary, ...cleanupFailures])
   });
 }
-function buildRuntime(launch, ready, timings, dependencies) {
+function buildRuntime(launch, ready, dependencies) {
   return {
     schemaVersion: 1,
     protocolVersion: 1,
@@ -1141,8 +1181,7 @@ function buildRuntime(launch, ready, timings, dependencies) {
     strictPort: launch.strictPort,
     startedAt: new Date(dependencies.wallNow()).toISOString(),
     controlToken: launch.controlToken,
-    toolVersion: SYNERGY_VERSION,
-    timings
+    toolVersion: SYNERGY_VERSION
   };
 }
 async function startPreview(options, dependencies) {
@@ -1155,7 +1194,6 @@ async function startPreview(options, dependencies) {
   const workDeadline = totalDeadline - cleanupReserveMs;
   const paths = projectPaths(options.root, dependencies);
   mkdirSync2(paths.synergyDir, { recursive: true });
-  ensureSynergyGitignore(paths.root);
   if (dependencies.now() >= workDeadline) {
     throw new Error("Preview did not become ready within 10 seconds");
   }
@@ -1223,14 +1261,7 @@ async function startPreview(options, dependencies) {
     if (dependencies.now() >= workDeadline) {
       throw new Error("Preview did not become ready within 10 seconds");
     }
-    const timings = {
-      lockMs: lock.lockMs,
-      launchMs,
-      listenMs: ready.listenMs,
-      healthMs,
-      totalMs: dependencies.now() - invokedAt
-    };
-    const runtime = buildRuntime(launch, ready, timings, dependencies);
+    const runtime = buildRuntime(launch, ready, dependencies);
     dependencies.writeRuntime(paths.previewRuntimeFile, runtime);
     hasPublishedRuntime = true;
     if (dependencies.now() > workDeadline) {
@@ -1243,22 +1274,43 @@ async function startPreview(options, dependencies) {
       processTimerDependencies(dependencies)
     );
     detachReadyPreviewChild(child);
+    const publication = {};
+    const acquiredLock = lock;
+    if (!acquiredLock.releaseAfter(() => {
+      const measuredRuntime = {
+        ...runtime,
+        timings: {
+          lockMs: acquiredLock.lockMs,
+          launchMs,
+          listenMs: ready.listenMs,
+          healthMs,
+          totalMs: dependencies.now() - invokedAt
+        }
+      };
+      dependencies.writeRuntime(paths.previewRuntimeFile, measuredRuntime);
+      publication.runtime = measuredRuntime;
+    })) {
+      throw new Error("Preview start lock release did not succeed");
+    }
     shouldReleaseLock = false;
-    if (!lock.release()) throw new Error("Preview start lock release did not succeed");
     lock = null;
     if (dependencies.now() > totalDeadline) {
       throw new Error("Preview did not become ready within 10 seconds");
     }
+    const finalizedRuntime = publication.runtime;
+    if (finalizedRuntime === void 0) {
+      throw new Error("Preview runtime finalization did not succeed");
+    }
     if (!options.quiet) {
       dependencies.writeOutput(
-        `${green2("\u2713")} Preview started (pid ${runtime.pid}) at ${dim(runtime.origin)}
+        `${green2("\u2713")} Preview started (pid ${finalizedRuntime.pid}) at ${dim(finalizedRuntime.origin)}
 `
       );
       dependencies.writeOutput(`  Log: ${dim(paths.previewLogFile)}
 `);
     }
     child = null;
-    return runningStatus(runtime);
+    return runningStatus(finalizedRuntime);
   } catch (error) {
     const failure = withLogTail(error, paths.previewLogFile);
     const cleanupFailures = [];

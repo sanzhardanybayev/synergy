@@ -85,6 +85,47 @@ describe('preview start lock', () => {
     expect(readAttemptId(lockPath)).toBe('attempt-b');
   });
 
+  it('runs finalization inside the owned release quarantine', async () => {
+    const lock = await acquirePreviewStartLock({
+      path: lockPath,
+      attemptId: 'finalized-attempt',
+      deadline: performance.now() + 1_000,
+      staleMs: 10_000,
+      pollIntervalMs: 1,
+    });
+    let didFinalize = false;
+
+    expect(
+      lock.releaseAfter(() => {
+        expect(existsSync(lockPath)).toBe(false);
+        expect(hasLockQuarantine(lockPath)).toBe(true);
+        didFinalize = true;
+      }),
+    ).toBe(true);
+    expect(didFinalize).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(hasLockQuarantine(lockPath)).toBe(false);
+  });
+
+  it('restores canonical ownership when release finalization fails', async () => {
+    const lock = await acquirePreviewStartLock({
+      path: lockPath,
+      attemptId: 'failed-finalization-attempt',
+      deadline: performance.now() + 1_000,
+      staleMs: 10_000,
+      pollIntervalMs: 1,
+    });
+
+    expect(() =>
+      lock.releaseAfter(() => {
+        throw new Error('finalization failed');
+      }),
+    ).toThrow('finalization failed');
+    expect(readAttemptId(lockPath)).toBe('failed-finalization-attempt');
+    expect(hasLockQuarantine(lockPath)).toBe(false);
+    expect(lock.release()).toBe(true);
+  });
+
   it('does not delete a fresh replacement raced into a stale-lock takeover', async () => {
     writeLock(lockPath, 'stale-attempt', ' '.repeat(75_000_000), 91_001);
     const oldTime = new Date(Date.now() - 60_000);
@@ -192,6 +233,62 @@ describe('preview start lock', () => {
     expect(observedReleaseFence).toBe(true);
     expect(readAttemptId(lockPath)).toBe('contending-attempt');
     expect(contender.release()).toBe(true);
+  });
+
+  it('continues when another contender removes the same expired quarantine first', async () => {
+    const expiredQuarantine = `${lockPath}.quarantine.crashed-attempt.manual`;
+    writeLock(expiredQuarantine, 'crashed-attempt');
+    const oldTime = new Date(Date.now() - 60_000);
+    utimesSync(expiredQuarantine, oldTime, oldTime);
+    let unlinkCalls = 0;
+
+    const contender = await acquirePreviewStartLock(
+      {
+        path: lockPath,
+        attemptId: 'winning-contender',
+        deadline: performance.now() + 1_000,
+        staleMs: 1_000,
+        pollIntervalMs: 1,
+      },
+      {
+        unlinkFile: (path) => {
+          unlinkCalls += 1;
+          rmSync(path);
+          throw Object.assign(new Error('already removed by another contender'), {
+            code: 'ENOENT',
+          });
+        },
+      },
+    );
+
+    expect(unlinkCalls).toBe(1);
+    expect(readAttemptId(lockPath)).toBe('winning-contender');
+    expect(contender.release()).toBe(true);
+  });
+
+  it('propagates non-ENOENT failures while removing an expired quarantine', async () => {
+    const expiredQuarantine = `${lockPath}.quarantine.crashed-attempt.manual`;
+    writeLock(expiredQuarantine, 'crashed-attempt');
+    const oldTime = new Date(Date.now() - 60_000);
+    utimesSync(expiredQuarantine, oldTime, oldTime);
+
+    await expect(
+      acquirePreviewStartLock(
+        {
+          path: lockPath,
+          attemptId: 'blocked-contender',
+          deadline: performance.now() + 1_000,
+          staleMs: 1_000,
+          pollIntervalMs: 1,
+        },
+        {
+          unlinkFile: () => {
+            throw Object.assign(new Error('storage failure'), { code: 'EIO' });
+          },
+        },
+      ),
+    ).rejects.toThrow('storage failure');
+    expect(existsSync(expiredQuarantine)).toBe(true);
   });
 
   it.each(['EPERM', 'ENOTSUP', 'EIO'])(

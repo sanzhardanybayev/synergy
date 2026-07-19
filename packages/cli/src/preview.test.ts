@@ -28,6 +28,7 @@ import {
   type PreviewChildHandle,
   type PreviewChildLaunch,
   type PreviewLifecycleDependencies,
+  type PreviewStatus,
   createPreviewLifecycle,
 } from './preview.js';
 
@@ -152,7 +153,7 @@ describe('preview lifecycle', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('uses 4321 as a preferred port and publishes the reachable dynamic port', async () => {
+  it('uses 4321 as a preferred port without mutating an existing project gitignore', async () => {
     const oldGitignore = '# existing project rule\ncustom.local\npreview.log\n';
     mkdirSync(resolveProjectPaths(rootA).synergyDir, { recursive: true });
     writeFileSync(join(resolveProjectPaths(rootA).synergyDir, '.gitignore'), oldGitignore);
@@ -212,13 +213,11 @@ describe('preview lifecycle', () => {
     await expect(lifecycle.status(rootA)).resolves.toMatchObject({
       timings: status.timings,
     });
-    const migratedGitignore = readFileSync(
+    const unchangedGitignore = readFileSync(
       join(resolveProjectPaths(rootA).synergyDir, '.gitignore'),
       'utf8',
     );
-    expect(migratedGitignore).toContain(oldGitignore);
-    expect(migratedGitignore).toContain('preview.runtime.json.quarantine.*');
-    expect(migratedGitignore.match(/^preview\.log$/gmu)).toHaveLength(1);
+    expect(unchangedGitignore).toBe(oldGitignore);
   });
 
   it('rejects an occupied explicit port without printing success', async () => {
@@ -911,6 +910,8 @@ describe('preview lifecycle', () => {
   it('durably measures startup time through verified readiness publication', async () => {
     let now = 0;
     let hasDetached = false;
+    const publishedRuntime: PreviewRuntimeState[] = [];
+    const concurrentRead: { status?: Promise<PreviewStatus> } = {};
     const lifecycle = createPreviewLifecycle({
       now: () => now,
       createQuarantineId: () => {
@@ -947,13 +948,67 @@ describe('preview lifecycle', () => {
           pid: 30_011,
           port: 4321,
         }),
+      writeRuntime: (path, runtime) => {
+        writePreviewRuntime(path, runtime);
+        publishedRuntime.push(runtime);
+        if (publishedRuntime.length === 1) concurrentRead.status = lifecycle.status(rootA);
+      },
       writeOutput: () => undefined,
     });
 
     const status = await lifecycle.start({ root: rootA });
 
-    expect(status.timings?.totalMs).toBe(0);
+    expect(publishedRuntime).toHaveLength(2);
+    expect(publishedRuntime[0]?.timings).toBeUndefined();
+    expect(publishedRuntime[1]?.timings?.totalMs).toBe(12);
+    expect(status.timings?.totalMs).toBe(12);
+    const statusDuringPublication = await concurrentRead.status;
+    expect(statusDuringPublication).toMatchObject({ running: true });
+    expect(statusDuringPublication).not.toHaveProperty('timings');
     await expect(lifecycle.status(rootA)).resolves.toMatchObject({ timings: status.timings });
+  });
+
+  it('cleans up the runtime and child when final timing publication fails', async () => {
+    const paths = resolveProjectPaths(rootA);
+    let writes = 0;
+    const child = new FakeChild(30_015);
+    const lifecycle = createPreviewLifecycle({
+      createInstanceId: () => 'timing-failure-instance',
+      createAttemptId: () => 'timing-failure-attempt',
+      createControlToken: () => CONTROL_TOKEN,
+      spawnChild: (launch) => {
+        queueMicrotask(() =>
+          child.emit('message', {
+            type: 'ready',
+            instanceId: launch.instanceId,
+            pid: child.pid,
+            port: 4321,
+            listenMs: 1,
+          }),
+        );
+        return child;
+      },
+      fetch: async () =>
+        jsonResponse({
+          protocolVersion: 1,
+          state: 'ready',
+          instanceId: 'timing-failure-instance',
+          projectId: deriveProjectId(realpathSync(rootA)),
+          pid: child.pid,
+          port: 4321,
+        }),
+      writeRuntime: (path, runtime) => {
+        writes += 1;
+        if (writes === 2) throw new Error('final timing write failed');
+        writePreviewRuntime(path, runtime);
+      },
+      writeOutput: () => undefined,
+    });
+
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow('final timing write failed');
+    expect(readPreviewRuntime(paths.previewRuntimeFile)).toBeNull();
+    expect(child.killedSignals).toContain('SIGTERM');
+    expect(existsSync(paths.previewLockFile)).toBe(false);
   });
 
   it('bounds stop from invocation instead of resetting its deadline after shutdown', async () => {

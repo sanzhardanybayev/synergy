@@ -9,6 +9,7 @@ import {
   capturePr,
   captureReviewSource,
   captureScope,
+  captureStaged,
   captureUnstaged,
 } from './review-capture.js';
 
@@ -45,9 +46,29 @@ function createFixtureRunner(
   };
 }
 
-describe('review source capture', () => {
-  const temporaryRoots: string[] = [];
+const temporaryRoots: string[] = [];
 
+function makeRuntimeSecretRepository(): string {
+  const root = join(tmpdir(), `synergy-review-secrets-${Date.now()}-${Math.random()}`);
+  temporaryRoots.push(root);
+  mkdirSync(join(root, 'src'), { recursive: true });
+  mkdirSync(join(root, '.synergy/sessions/example'), { recursive: true });
+  writeFileSync(join(root, 'src/app.ts'), 'export const value = 1;\n');
+  writeFileSync(join(root, '.synergy/sessions/example/00-overview.mdx'), '# Before\n');
+  writeFileSync(join(root, '.synergy/preview.runtime.json'), '{"controlToken":"old-secret"}\n');
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'review@example.test'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 'Review Test'], { cwd: root });
+  execFileSync('git', ['add', '.'], { cwd: root });
+  execFileSync('git', ['commit', '--quiet', '-m', 'baseline'], { cwd: root });
+  writeFileSync(join(root, 'src/app.ts'), 'export const value = 2;\n');
+  writeFileSync(join(root, '.synergy/sessions/example/00-overview.mdx'), '# After\n');
+  writeFileSync(join(root, '.synergy/preview.runtime.json'), '{"controlToken":"new-secret"}\n');
+  writeFileSync(join(root, '.synergy/preview.start.lock'), '{"pid":123}\n');
+  return root;
+}
+
+describe('review source capture', () => {
   afterEach(() => {
     for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
@@ -94,6 +115,63 @@ describe('review source capture', () => {
     expect(result.eligiblePaths).toEqual(['src/app.ts']);
     expect(result.patch).not.toContain('controlToken');
     expect(result.patch).not.toContain('preview.start.lock');
+  });
+
+  it('excludes a tracked runtime token from staged capture while keeping Synergy content', () => {
+    const root = makeRuntimeSecretRepository();
+    execFileSync('git', ['add', '-u'], { cwd: root });
+
+    const result = captureStaged({ root });
+
+    expect(result.eligiblePaths).toEqual([
+      '.synergy/sessions/example/00-overview.mdx',
+      'src/app.ts',
+    ]);
+    expect(result.patch).not.toContain('controlToken');
+  });
+
+  it('filters a real Git patch returned by PR capture without hiding Synergy content', () => {
+    const root = makeRuntimeSecretRepository();
+    execFileSync('git', ['add', '-u'], { cwd: root });
+    const patch = execFileSync('git', ['diff', '--cached', '--binary'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    const metadata = JSON.stringify({
+      number: 317,
+      title: 'Secret filtering',
+      url: 'https://github.com/acme/repo/pull/317',
+      baseRefOid: 'base',
+      headRefOid: 'head',
+    });
+    const runner = createFixtureRunner({
+      'gh pr view 317 --json number,title,url,baseRefOid,headRefOid': metadata,
+      'gh pr diff https://github.com/acme/repo/pull/317 --patch': patch,
+      'gh pr view https://github.com/acme/repo/pull/317 --json number,title,url,baseRefOid,headRefOid':
+        metadata,
+    });
+
+    const result = capturePr({ root, selector: '317', runner });
+
+    expect(result.eligiblePaths).toEqual([
+      '.synergy/sessions/example/00-overview.mdx',
+      'src/app.ts',
+    ]);
+    expect(result.patch).not.toContain('controlToken');
+  });
+
+  it('excludes runtime and lock files from scoped capture while keeping Synergy content', () => {
+    const root = makeRuntimeSecretRepository();
+
+    const result = captureScope({ root, patterns: ['.synergy', 'src'] });
+
+    expect(result.eligiblePaths).toEqual([
+      '.synergy/sessions/example/00-overview.mdx',
+      'src/app.ts',
+    ]);
+    expect(
+      result.files?.map((file) => file.lines.map((line) => line.text).join('\n')).join('\n'),
+    ).not.toContain('secret');
   });
 
   it('keeps spaces in NUL-delimited untracked paths', () => {

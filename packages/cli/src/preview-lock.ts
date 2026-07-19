@@ -35,6 +35,7 @@ export interface PreviewStartLockDependencies {
   createQuarantineId(): string;
   now(): number;
   publishOwnerRecord(source: string, destination: string): void;
+  unlinkFile(path: string): void;
   wallNow(): number;
   sleep(milliseconds: number): Promise<void>;
 }
@@ -42,6 +43,7 @@ export interface PreviewStartLockDependencies {
 export interface AcquiredPreviewStartLock {
   lockMs: number;
   release(): boolean;
+  releaseAfter(finalizer: () => void): boolean;
   updateOwnerPid(pid: number): boolean;
 }
 
@@ -51,6 +53,7 @@ const DEFAULT_DEPENDENCIES: PreviewStartLockDependencies = {
   createQuarantineId: randomUUID,
   now: () => performance.now(),
   publishOwnerRecord: (source, destination) => renameSync(source, destination),
+  unlinkFile: unlinkSync,
   wallNow: Date.now,
   sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
 };
@@ -119,6 +122,14 @@ function sameLockOwner(
   );
 }
 
+function unlinkIfPresent(path: string, dependencies: PreviewStartLockDependencies): void {
+  try {
+    dependencies.unlinkFile(path);
+  } catch (error) {
+    if (!hasErrorCode(error, 'ENOENT')) throw error;
+  }
+}
+
 function restoreWithoutOverwrite(
   capturedPath: string,
   lockPath: string,
@@ -130,7 +141,7 @@ function restoreWithoutOverwrite(
     if (!hasErrorCode(error, 'EEXIST')) throw error;
     if (!sameLockOwner(readLockRecord(capturedPath), readLockRecord(lockPath))) return false;
   }
-  unlinkSync(capturedPath);
+  unlinkIfPresent(capturedPath, dependencies);
   return true;
 }
 
@@ -179,7 +190,7 @@ function discardExpiredQuarantine(
     throw error;
   }
   if (!isExpired) return false;
-  unlinkSync(capturedPath);
+  unlinkIfPresent(capturedPath, dependencies);
   return true;
 }
 
@@ -217,7 +228,7 @@ function releaseOwnedLock(
   if (capturedPath !== null) {
     const capturedRecord = readLockRecord(capturedPath);
     if (capturedRecord?.attemptId === attemptId) {
-      unlinkSync(capturedPath);
+      unlinkIfPresent(capturedPath, dependencies);
       didReleaseCanonical = true;
     } else {
       restoreWithoutOverwrite(capturedPath, path, dependencies);
@@ -227,10 +238,47 @@ function releaseOwnedLock(
   let didReleaseFence = false;
   for (const quarantine of listQuarantines(path)) {
     if (readLockRecord(quarantine)?.attemptId !== attemptId) continue;
-    unlinkSync(quarantine);
+    unlinkIfPresent(quarantine, dependencies);
     didReleaseFence = true;
   }
   return didReleaseCanonical || didReleaseFence;
+}
+
+function releaseOwnedLockAfter(
+  path: string,
+  attemptId: string,
+  dependencies: PreviewStartLockDependencies,
+  finalizer: () => void,
+): boolean {
+  const capturedPath = captureCurrentLock(path, attemptId, dependencies);
+  if (capturedPath === null) return false;
+  if (readLockRecord(capturedPath)?.attemptId !== attemptId) {
+    restoreWithoutOverwrite(capturedPath, path, dependencies);
+    return false;
+  }
+
+  try {
+    finalizer();
+  } catch (error) {
+    try {
+      if (!restoreWithoutOverwrite(capturedPath, path, dependencies)) {
+        throw new Error('Preview start lock ownership could not be restored');
+      }
+    } catch (restoreError) {
+      throw new AggregateError(
+        [error, restoreError],
+        'Preview finalization failed and start lock ownership could not be restored',
+      );
+    }
+    throw error;
+  }
+
+  unlinkIfPresent(capturedPath, dependencies);
+  for (const quarantine of listQuarantines(path)) {
+    if (readLockRecord(quarantine)?.attemptId !== attemptId) continue;
+    unlinkIfPresent(quarantine, dependencies);
+  }
+  return true;
 }
 
 function writeRecordFile(path: string, record: PreviewStartLockRecord): void {
@@ -277,7 +325,7 @@ function updateOwnedLockPid(
     dependencies.publishOwnerRecord(ownerTemp, path);
     hasOwnerTemp = false;
     if (!sameLockOwner(readLockRecord(path), childRecord)) return false;
-    unlinkSync(childFence);
+    unlinkIfPresent(childFence, dependencies);
     return true;
   } finally {
     if (hasOwnerTemp) rmSync(ownerTemp, { force: true });
@@ -320,6 +368,8 @@ export async function acquirePreviewStartLock(
       return {
         lockMs: dependencies.now() - lockStartedAt,
         release: () => releaseOwnedLock(options.path, options.attemptId, dependencies),
+        releaseAfter: (finalizer) =>
+          releaseOwnedLockAfter(options.path, options.attemptId, dependencies, finalizer),
         updateOwnerPid: (pid) =>
           updateOwnedLockPid(options.path, options.attemptId, pid, options.staleMs, dependencies),
       };

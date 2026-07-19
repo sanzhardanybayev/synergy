@@ -140,7 +140,7 @@ For terminal users — available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist
 | Command | Flags | Purpose |
 |---|---|---|
 | `synergy init` | `--root <dir>` | Scaffold `.synergy/` |
-| `synergy preview <action>` | `--root`, `--port` (preferred default 4321), `--json` | `start \| stop \| status`; JSON status reports the verified runtime origin |
+| `synergy preview <action>` | `--root`; `--port` for start (preferred default 4321); `--json` | `start \| stop \| status`; JSON returns the complete running status for start/status and a confirmed stopped result for stop |
 | `synergy validate [session]` | `--root` | Validate sessions in `.synergy/sessions/` |
 | `synergy phase set <session> <id> <status>` | `--root`, `--note` | Record a phase status + optional boundary note |
 | `synergy log <session> <text>` | `--root`, `--phase <id>`, `--global` | Append a finding to a phase or the global journal |
@@ -208,7 +208,7 @@ Four rules. Full text in [AGENTS.md](AGENTS.md).
 
 ## Troubleshooting
 
-**"vite binary not found" or "command not found"** — the plugin's workspace isn't built. Run `/synergy-setup`. If pnpm itself is missing, `corepack enable` or `npm i -g pnpm`.
+**"vite binary not found" or "command not found"** — the installed plugin is incomplete or its dependencies were not installed correctly. Run `/synergy-setup` to repair the installation. If a shipped `dist` file is missing, update or reinstall the plugin; users should not need to build the plugin workspace. If pnpm itself is missing, run `corepack enable` or `npm i -g pnpm` first.
 
 **Need a predictable preview port?** — startup prefers 4321 and otherwise selects a reachable alternate. Pass `--port <port>` only when a specific port is required, then consume the verified origin from `synergy preview status --json` or the full URL from `synergy review open`.
 

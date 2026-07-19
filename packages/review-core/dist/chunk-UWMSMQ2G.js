@@ -443,6 +443,15 @@ var PREVIEW_RUNTIME_PATHS = /* @__PURE__ */ new Set([
 function isPreviewRuntimePath(path) {
   return PREVIEW_RUNTIME_PATHS.has(path) || path.startsWith(".synergy/preview.runtime.json.quarantine.") || path.startsWith(".synergy/.preview.runtime.json.") && path.endsWith(".tmp") || path.startsWith(".synergy/preview.start.lock.quarantine.") || path.startsWith(".synergy/preview.start.lock.owner.tmp.");
 }
+function filterPreviewRuntimePatch(patch) {
+  return patch.split(/(?=^diff --git )/mu).filter((chunk) => {
+    const files = parseUnifiedDiff(chunk);
+    if (files.length === 0) return true;
+    return files.every(
+      (file) => !isPreviewRuntimePath(file.path) && (file.previousPath === void 0 || !isPreviewRuntimePath(file.previousPath))
+    );
+  }).join("");
+}
 var UTF8_DECODER = new TextDecoder2("utf-8", { fatal: true });
 function decodeUtf8(bytes) {
   try {
@@ -613,7 +622,9 @@ function capturePr(options) {
         "number,title,url,baseRefOid,headRefOid"
       ])
     );
-    const patch = runChecked(runner, options.root, "gh", ["pr", "diff", before.url, "--patch"]);
+    const patch = filterPreviewRuntimePatch(
+      runChecked(runner, options.root, "gh", ["pr", "diff", before.url, "--patch"])
+    );
     const after = parsePullRequestView(
       runChecked(runner, options.root, "gh", [
         "pr",
@@ -646,31 +657,35 @@ function capturePr(options) {
 }
 function captureStaged(options) {
   const runner = options.runner ?? systemCommandRunner;
-  const patch = runChecked(runner, options.root, "git", [
-    "diff",
-    "--cached",
-    "--no-ext-diff",
-    "--binary"
-  ]);
+  const patch = filterPreviewRuntimePatch(
+    runChecked(runner, options.root, "git", [
+      "diff",
+      "--cached",
+      "--no-ext-diff",
+      "--binary"
+    ])
+  );
   const source = { kind: "staged", headSha: "" };
   const eligiblePaths = assertCapturedPatch(patch, "staged");
   return { source, patch, eligiblePaths, fingerprint: sourceFingerprint(source, patch) };
 }
 function captureUnstaged(options) {
   const runner = options.runner ?? systemCommandRunner;
-  const trackedPatch = runChecked(runner, options.root, "git", [
-    "diff",
-    "--no-ext-diff",
-    "--binary",
-    "--",
-    ":(exclude).synergy/preview.runtime.json",
-    ":(exclude).synergy/preview.runtime.json.*",
-    ":(exclude).synergy/.preview.runtime.json.*.tmp",
-    ":(exclude).synergy/preview.start.lock",
-    ":(exclude).synergy/preview.start.lock.*",
-    ":(exclude).synergy/preview.pid",
-    ":(exclude).synergy/preview.log"
-  ]);
+  const trackedPatch = filterPreviewRuntimePatch(
+    runChecked(runner, options.root, "git", [
+      "diff",
+      "--no-ext-diff",
+      "--binary",
+      "--",
+      ":(exclude).synergy/preview.runtime.json",
+      ":(exclude).synergy/preview.runtime.json.*",
+      ":(exclude).synergy/.preview.runtime.json.*.tmp",
+      ":(exclude).synergy/preview.start.lock",
+      ":(exclude).synergy/preview.start.lock.*",
+      ":(exclude).synergy/preview.pid",
+      ":(exclude).synergy/preview.log"
+    ])
+  );
   const untrackedPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, "git", [
       "ls-files",
@@ -719,7 +734,7 @@ function captureScope(options) {
       "--",
       ...patterns
     ])
-  );
+  ).filter((path) => !isPreviewRuntimePath(path));
   if (paths.length === 0)
     throw new Error("Scope resolved to no eligible files. Choose a different path.");
   const source = { kind: "scope", patterns, headSha: "" };
@@ -798,4 +813,4 @@ export {
   resolveRepositoryRoot,
   repositoryName
 };
-//# sourceMappingURL=chunk-MAH6LANW.js.map
+//# sourceMappingURL=chunk-UWMSMQ2G.js.map
