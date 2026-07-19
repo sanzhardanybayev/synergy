@@ -24,6 +24,8 @@ describe('initProject', () => {
   it('writes .gitignore with all required local-artifact entries', () => {
     initProject(tmpRoot);
     const gitignore = readFileSync(join(tmpRoot, '.synergy', '.gitignore'), 'utf8');
+    expect(gitignore).toContain('preview.runtime.json');
+    expect(gitignore).toContain('preview.start.lock');
     expect(gitignore).toContain('preview.pid');
     expect(gitignore).toContain('preview.log');
     expect(gitignore).toContain('active-session');

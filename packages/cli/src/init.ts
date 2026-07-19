@@ -4,6 +4,8 @@ import { green } from 'kleur/colors';
 import { resolveProjectPaths } from './paths.js';
 
 const GITIGNORE_ENTRIES = [
+  'preview.runtime.json',
+  'preview.start.lock',
   'preview.pid',
   'preview.log',
   'active-session',
