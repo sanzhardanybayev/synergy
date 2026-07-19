@@ -10,6 +10,7 @@ dist/
 !/packages/state/dist/**
 !/packages/validator/dist/
 !/packages/validator/dist/**
+/packages/*/dist/**/node_modules/
 .turbo/
 .vite/
 *.log

@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -98,6 +106,23 @@ describe('runtime artifact contract', () => {
     fixture.track('.gitignore');
 
     expect(inspectRuntimeArtifacts(fixture.root).untracked).toEqual([path]);
+  });
+
+  it('keeps nested runtime node_modules ignored while allowing normal dist files', () => {
+    const fixture = makeArtifactFixture();
+    const runtimeArtifact = 'packages/cli/dist/control.js';
+    const nestedDependency = 'packages/cli/dist/node_modules/pkg/index.js';
+    fixture.write(
+      '.gitignore',
+      readFileSync(new URL('../../../.gitignore', import.meta.url), 'utf8'),
+    );
+    fixture.write(runtimeArtifact);
+    fixture.write(nestedDependency);
+
+    expect(() =>
+      git(fixture.root, ['check-ignore', '--quiet', '--', nestedDependency]),
+    ).not.toThrow();
+    expect(() => git(fixture.root, ['check-ignore', '--quiet', '--', runtimeArtifact])).toThrow();
   });
 
   it('requires the non-static source capture worker', () => {
