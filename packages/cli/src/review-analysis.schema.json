@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Synergy review analysis input",
-  "description": "Strict external payload accepted by review analysis-set. Diff reviews keep durable captured item IDs; scope reviews use temporary local section keys.",
+  "description": "Strict structural envelope accepted by review analysis-set. Diff reviews keep durable captured item IDs; scope reviews use temporary local section keys. Cross-reference ownership and uniqueness are validated semantically by the CLI parser because JSON Schema cannot express those relationships.",
   "oneOf": [{ "$ref": "#/$defs/diffAnalysis" }, { "$ref": "#/$defs/scopeAnalysis" }],
   "$defs": {
     "confidence": {

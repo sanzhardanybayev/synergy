@@ -185,7 +185,7 @@ Descriptions must be one or two sentences explaining the section's application r
 repository context gathered above. Do not merely paraphrase the selected syntax. Diff reviews
 keep the existing `groups` plus `items` payload and use the captured diff item IDs as-is.
 
-Generate one temporary payload that conforms to
+Generate one temporary payload that structurally conforms to
 `<synergy-root>/packages/cli/src/review-analysis.schema.json`. Do not generate an executable
 helper and do not place the payload in the review artifact tree. Submit it only through:
 
@@ -193,9 +193,10 @@ helper and do not place the payload in the review artifact tree. Submit it only 
 node "<synergy-root>/packages/cli/dist/cli.js" review analysis-set <workspace@revision> --body-file <temporary-analysis-json> --json --root "<project-root>"
 ```
 
-The CLI validates keys, ranges, exact coverage, evidence paths, relationships, and immutability,
-then publishes the complete analysis atomically. Fix the temporary payload when validation
-fails; never bypass the command or patch the artifacts.
+The schema owns the strict JSON shape; the CLI additionally validates cross-reference ownership
+and uniqueness, keys, ranges, exact coverage, evidence paths, relationships, and immutability,
+then publishes the complete analysis atomically. Fix the temporary payload when validation fails;
+never bypass the command or patch the artifacts.
 
 Consume the JSON result. `analysisFinalizedInMs` reports the persisted capture-to-finalization
 interval. Analysis finalization does not depend on preview availability: `previewReady: false`

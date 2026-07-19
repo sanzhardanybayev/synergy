@@ -97,9 +97,12 @@ describe('synergy review skill contract', () => {
     if (!existsSync(analysisSchemaPath)) return;
 
     const schema = JSON.parse(readFileSync(analysisSchemaPath, 'utf8')) as {
+      description?: string;
       oneOf?: Array<Record<string, unknown>>;
     };
     expect(schema.oneOf).toHaveLength(2);
+    expect(schema.description).toMatch(/strict structural envelope/iu);
+    expect(schema.description).toMatch(/validated semantically by the CLI parser/iu);
     expect(JSON.stringify(schema)).toContain('sectionKeys');
     expect(JSON.stringify(schema)).toContain('reviewItemIds');
 
@@ -131,6 +134,10 @@ describe('synergy review skill contract', () => {
       expect(performanceDocument).toContain(phase);
     }
     expect(performanceDocument).toMatch(/do not fabricate/iu);
+    expect(performanceDocument).toMatch(
+      /between the capture command returning and the `analysis-set` command starting/iu,
+    );
+    expect(performanceDocument).toMatch(/excludes publication/iu);
     expect(performanceDocument).toContain('Environment');
     expect(performanceDocument).toContain('Revision');
     expect(performanceDocument).toContain('Unit count');

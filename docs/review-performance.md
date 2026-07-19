@@ -7,11 +7,13 @@ interval, publication, and preview readiness so regressions remain attributable.
 ## Measurement modes
 
 - **Fixture replay** runs the normal CLI capture, `analysis-set --json`, and preview-readiness
-  flow five times. Its `agentAnalysis` phase comes from a previously measured interval in the
-  fixture; it does not execute or time a live model.
-- **Dogfood** is the authoritative end-to-end measurement. Record wall-clock capture and
-  finalization timestamps from a real agent session, then use those measured intervals in the
-  replay fixture. Do not fabricate, estimate, or copy latency values between runs.
+  flow five times. Its `agentAnalysis` phase comes from the previously measured wall-clock
+  interval between the capture command returning and the `analysis-set` command starting; it
+  excludes publication because the harness measures publication separately. Replay does not
+  execute or time a live model.
+- **Dogfood** is the authoritative end-to-end measurement. Record the agent-analysis interval
+  described above from each real agent session, then use those measured intervals in the replay
+  fixture. Do not fabricate, estimate, or copy latency values between runs.
 
 Keep five independent pending review inputs in one fixture. Each input must capture its own
 revision because a finalized Synergy revision is immutable. For the representative dogfood,
@@ -34,8 +36,9 @@ if the CLI guidance or semantic boundaries produce a count outside that range, r
 }
 ```
 
-The example is structural only: replace the zero with that run's measured capture-to-analysis
-interval and provide exactly five run entries. Never report the example as performance evidence.
+The example is structural only: replace the zero with that run's measured interval from capture
+completion to the start of `analysis-set`, and provide exactly five run entries. Never report the
+example as performance evidence.
 Paths in `analysisBodyFile` resolve relative to the fixture JSON. The five selectors must resolve
 to independent pending revisions; the harness rejects a resumed finalized revision.
 
