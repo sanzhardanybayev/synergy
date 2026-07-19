@@ -29,15 +29,21 @@ export {
   openReview,
   printReviewStatus,
   refreshReview,
+  type ApplyReviewAnalysisDependencies,
   type ApplyReviewAnalysisRequest,
   type CreateReviewRequest,
   type CreateReviewResult,
   type RefreshReviewRequest,
   type ReviewActionDependencies,
-  type ReviewAnalysis,
   type ReviewStatusRequest,
   type ReviewStatusResult,
 } from './review-actions.js';
+export {
+  parseReviewAnalysisInput,
+  type ReviewAnalysisInput,
+  type ScopeAnalysisGroupInput,
+  type ScopeAnalysisSectionInput,
+} from './review-analysis.js';
 export {
   capturePr,
   captureReviewSource,

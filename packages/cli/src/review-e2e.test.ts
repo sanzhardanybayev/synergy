@@ -6,14 +6,18 @@ import {
   type ProposedCodeSection,
   type ReviewRef,
   type ReviewSnapshot,
-  applyCodeSections,
   createQuestionQueue,
   createReviewStore,
   deriveReviewReadiness,
   resolveReviewItemContext,
 } from '@synergy/review-core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { applyReviewAnalysis, createOrResumeReview, refreshReview } from './review-actions.js';
+import {
+  type ApplyReviewAnalysisDependencies,
+  applyReviewAnalysis,
+  createOrResumeReview,
+  refreshReview,
+} from './review-actions.js';
 import { waitForReviewQuestions } from './review-wait.js';
 
 const repositories = new Set<string>();
@@ -51,6 +55,7 @@ function applyCompleteDiffAnalysis(root: string, reference: ReviewRef): void {
     root,
     reference,
     analysis: {
+      kind: 'diff',
       groups: [
         {
           id: 'staged-changes',
@@ -72,30 +77,34 @@ function applyCompleteScopeAnalysis(
   root: string,
   reference: ReviewRef,
   sections: ProposedCodeSection[],
+  dependencies: ApplyReviewAnalysisDependencies = {},
 ): void {
   const bundle = createReviewStore(root).readBundle(reference.workspaceId, reference.revisionId);
   if (bundle.snapshot.kind !== 'scope') throw new Error('expected a scoped snapshot');
-  const analyzedSnapshot = applyCodeSections(bundle.snapshot, sections);
-  applyReviewAnalysis({
-    root,
-    reference,
-    analysis: {
-      sections,
-      groups: [
-        {
-          id: 'scoped-sections',
-          label: 'Scoped sections',
-          reviewItemIds: analyzedSnapshot.items.map((item) => item.id),
-        },
-      ],
-      items: analyzedSnapshot.items.map((item) => ({
-        reviewItemId: item.id,
-        description: `Reviews ${item.label} in the selected scope.`,
-        confidence: 'high' as const,
-        evidencePaths: [item.path],
-      })),
+  applyReviewAnalysis(
+    {
+      root,
+      reference,
+      analysis: {
+        kind: 'scope',
+        sections: sections.map((section, index) => ({
+          key: `section-${index + 1}`,
+          ...section,
+          description: `Reviews ${section.label} in the selected scope.`,
+          confidence: 'high' as const,
+          evidencePaths: [section.path],
+        })),
+        groups: [
+          {
+            id: 'scoped-sections',
+            label: 'Scoped sections',
+            sectionKeys: sections.map((_section, index) => `section-${index + 1}`),
+          },
+        ],
+      },
     },
-  });
+    dependencies,
+  );
 }
 
 function createTwoHunkReview(): { root: string; reference: ReviewRef } {
@@ -240,28 +249,28 @@ describe('integrated review workflow', () => {
 
     if (captured.snapshot.kind !== 'scope') throw new Error('expected a scoped snapshot');
     const sections = [
-      { path: sourcePath, label: 'useSubscription', start: 1, end: 3 },
-      { path: screenPath, label: 'Paywall', start: 1, end: 1 },
+      { path: sourcePath, label: 'useSubscription', start: 1, end: 4 },
+      { path: screenPath, label: 'Paywall', start: 1, end: 2 },
     ];
-    const analyzedSnapshot = applyCodeSections(captured.snapshot, sections);
     applyReviewAnalysis({
       root,
       reference: created.reference,
       analysis: {
-        sections,
+        kind: 'scope',
+        sections: sections.map((section, index) => ({
+          key: `subscription-${index + 1}`,
+          ...section,
+          description: `Reviews ${section.label} in the subscription scope.`,
+          confidence: 'high' as const,
+          evidencePaths: [section.path],
+        })),
         groups: [
           {
             id: 'subscriptions',
             label: 'Subscription access',
-            reviewItemIds: analyzedSnapshot.items.map((item) => item.id),
+            sectionKeys: sections.map((_section, index) => `subscription-${index + 1}`),
           },
         ],
-        items: analyzedSnapshot.items.map((item) => ({
-          reviewItemId: item.id,
-          description: `Reviews ${item.label} in the subscription scope.`,
-          confidence: 'high' as const,
-          evidencePaths: [item.path],
-        })),
       },
     });
 
@@ -301,8 +310,8 @@ describe('integrated review workflow', () => {
     );
     commitAll(root, 'subscription scope');
     const sections = [
-      { path: changedPath, label: 'useSubscription', start: 1, end: 3 },
-      { path: unchangedPath, label: 'formatPlan', start: 1, end: 3 },
+      { path: changedPath, label: 'useSubscription', start: 1, end: 5 },
+      { path: unchangedPath, label: 'formatPlan', start: 1, end: 5 },
     ];
     const created = createOrResumeReview({
       root,
@@ -336,7 +345,33 @@ describe('integrated review workflow', () => {
       'utf8',
     );
     const refreshed = refreshReview({ root, workspaceId: created.reference.workspaceId });
-    applyCompleteScopeAnalysis(root, refreshed.reference, sections);
+    let predecessorReads = 0;
+    const trackingStore = {
+      ...store,
+      readBundle(workspaceId: string, revisionId: string) {
+        if (revisionId === created.reference.revisionId) predecessorReads += 1;
+        return store.readBundle(workspaceId, revisionId);
+      },
+    };
+    expect(() =>
+      applyCompleteScopeAnalysis(root, refreshed.reference, sections, {
+        createStore: () => trackingStore,
+        applyCodeSections: (snapshot) => snapshot,
+      }),
+    ).toThrow(/one review item per section/i);
+    expect(predecessorReads).toBe(0);
+    expect(
+      store.isAnalysisFinalized(refreshed.reference.workspaceId, refreshed.reference.revisionId),
+    ).toBe(false);
+    expect(
+      store.readBundle(refreshed.reference.workspaceId, refreshed.reference.revisionId).snapshot
+        .items,
+    ).toEqual([]);
+
+    applyCompleteScopeAnalysis(root, refreshed.reference, sections, {
+      createStore: () => trackingStore,
+    });
+    expect(predecessorReads).toBe(1);
     const current = store.readBundle(
       refreshed.reference.workspaceId,
       refreshed.reference.revisionId,

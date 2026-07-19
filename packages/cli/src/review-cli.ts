@@ -12,7 +12,6 @@ import { bold, dim, green, red, yellow } from 'kleur/colors';
 import { parseDuration } from './feedback-wait.js';
 import {
   PreviewNotReadyError,
-  type ReviewAnalysis,
   applyReviewAnalysis,
   createOrResumeReview,
   formatReviewStatusJson,
@@ -46,6 +45,7 @@ export class ReviewUsageError extends Error {}
 
 export interface ReviewCliDependencies {
   openReview?: typeof openReview;
+  applyReviewAnalysis?: typeof applyReviewAnalysis;
 }
 
 export function createReviewSourceFromFlags(flags: ReviewCreateFlags): ReviewCaptureSourceRequest {
@@ -121,13 +121,6 @@ function readUsageAnalysis(path: string): ReviewAnalysisInput {
     const detail = error instanceof Error ? error.message : 'invalid analysis body';
     throw new ReviewUsageError(detail);
   }
-}
-
-function toLegacyReviewAnalysis(analysis: ReviewAnalysisInput): ReviewAnalysis {
-  if (analysis.kind === 'scope') {
-    throw new ReviewUsageError('scoped local-key analysis requires translation before application');
-  }
-  return { groups: analysis.groups, items: analysis.items };
 }
 
 function readUsageAnswer(path: string): string {
@@ -345,6 +338,7 @@ export async function runReviewWaitCommand(
 
 export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependencies = {}): void {
   const open = dependencies.openReview ?? openReview;
+  const applyAnalysis = dependencies.applyReviewAnalysis ?? applyReviewAnalysis;
   cli
     .command('review <action> [...references]', 'Manage local guided code reviews')
     .option('--root <dir>', 'Project root (default: cwd)')
@@ -379,10 +373,10 @@ export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependen
           return;
         }
         if (command.action === 'analysis-set') {
-          applyReviewAnalysis({
+          applyAnalysis({
             root,
             reference: requireValidatedValue(command.reference),
-            analysis: toLegacyReviewAnalysis(requireValidatedValue(command.analysis)),
+            analysis: requireValidatedValue(command.analysis),
           });
           process.stdout.write(
             `${green('✓')} analysis recorded for ${bold(references[0] ?? '')}\n`,

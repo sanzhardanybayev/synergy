@@ -1,7 +1,12 @@
 import { mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ReviewCoreError, createReviewStore, hashText, repositoryName } from '@synergy/review-core';
+import {
+  ReviewCoreError,
+  applyCodeSections as applyCoreCodeSections,
+  createReviewStore,
+  repositoryName,
+} from '@synergy/review-core';
 import { describe, expect, it } from 'vitest';
 import {
   type CreateReviewRequest,
@@ -71,6 +76,7 @@ describe('review lifecycle actions', () => {
         root,
         reference: created.reference,
         analysis: {
+          kind: 'diff',
           groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
           items: [
             {
@@ -244,6 +250,7 @@ describe('review lifecycle actions', () => {
       ).snapshot.items[0]?.id;
       if (!reviewItemId) throw new Error('fixture capture must create one review item');
       const analysis = {
+        kind: 'diff' as const,
         groups: [{ id: 'core', label: 'Core change', reviewItemIds: [reviewItemId] }],
         items: [
           {
@@ -291,6 +298,7 @@ describe('review lifecycle actions', () => {
           root,
           reference: created.reference,
           analysis: {
+            kind: 'diff',
             groups: [{ id: 'core', label: 'Core change', reviewItemIds: [reviewItemId] }],
             items: [
               {
@@ -305,6 +313,72 @@ describe('review lifecycle actions', () => {
       ).toThrow(/captured/i);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('counts analysis description limits in Unicode code points', () => {
+    const roots = [
+      join(tmpdir(), `synergy-review-unicode-accepted-${Date.now()}`),
+      join(tmpdir(), `synergy-review-unicode-rejected-${Date.now()}`),
+    ];
+    for (const root of roots) mkdirSync(root, { recursive: true });
+    try {
+      const accepted = createOrResumeReview(createRequest(roots[0]!));
+      const acceptedItem = createReviewStore(roots[0]!).readBundle(
+        accepted.reference.workspaceId,
+        accepted.reference.revisionId,
+      ).snapshot.items[0]!;
+      expect(() =>
+        applyReviewAnalysis({
+          root: roots[0]!,
+          reference: accepted.reference,
+          analysis: {
+            kind: 'diff',
+            groups: [{ id: 'core', label: 'Core', reviewItemIds: [acceptedItem.id] }],
+            items: [
+              {
+                reviewItemId: acceptedItem.id,
+                description: '😀'.repeat(600),
+                confidence: 'high',
+                evidencePaths: [acceptedItem.path],
+              },
+            ],
+          },
+        }),
+      ).not.toThrow();
+
+      const rejected = createOrResumeReview(createRequest(roots[1]!));
+      const rejectedStore = createReviewStore(roots[1]!);
+      const rejectedItem = rejectedStore.readBundle(
+        rejected.reference.workspaceId,
+        rejected.reference.revisionId,
+      ).snapshot.items[0]!;
+      expect(() =>
+        applyReviewAnalysis({
+          root: roots[1]!,
+          reference: rejected.reference,
+          analysis: {
+            kind: 'diff',
+            groups: [{ id: 'core', label: 'Core', reviewItemIds: [rejectedItem.id] }],
+            items: [
+              {
+                reviewItemId: rejectedItem.id,
+                description: '😀'.repeat(601),
+                confidence: 'high',
+                evidencePaths: [rejectedItem.path],
+              },
+            ],
+          },
+        }),
+      ).toThrow(/1-600 characters/i);
+      expect(
+        rejectedStore.isAnalysisFinalized(
+          rejected.reference.workspaceId,
+          rejected.reference.revisionId,
+        ),
+      ).toBe(false);
+    } finally {
+      for (const root of roots) rmSync(root, { recursive: true, force: true });
     }
   });
 
@@ -535,41 +609,137 @@ describe('review lifecycle actions', () => {
         applyReviewAnalysis({
           root,
           reference: created.reference,
-          analysis: { groups: [], items: [] },
+          analysis: { kind: 'diff', groups: [], items: [] },
         }),
-      ).toThrow(/requires proposed code sections/i);
+      ).toThrow(/scope analysis payload/i);
       expect(
         createReviewStore(root).isAnalysisFinalized(
           created.reference.workspaceId,
           created.reference.revisionId,
         ),
       ).toBe(false);
-      const section = { path: 'src/example.ts', label: 'First export', start: 1, end: 1 };
-      const itemId = `code-section-${hashText(
-        'src/example.ts\nFirst export\n\nexport const second = 2;\n',
-      ).slice(0, 16)}`;
+      const section = {
+        key: 'local-key-not-persisted',
+        path: 'src/example.ts',
+        label: 'Module exports',
+        start: 1,
+        end: 3,
+        description: 'Defines the scoped exports consumed by the module.',
+        confidence: 'high' as const,
+        evidencePaths: ['src/example.ts'],
+      };
 
-      applyReviewAnalysis({
-        root,
-        reference: created.reference,
-        analysis: {
-          sections: [section],
-          groups: [{ id: 'exports', label: 'Exports', reviewItemIds: [itemId] }],
-          items: [
-            {
-              reviewItemId: itemId,
-              description: 'Defines the first scoped export for the module.',
-              confidence: 'high',
-              evidencePaths: ['src/example.ts'],
+      let applySectionsCalls = 0;
+      const applySections = (
+        ...args: Parameters<typeof applyCoreCodeSections>
+      ): ReturnType<typeof applyCoreCodeSections> => {
+        applySectionsCalls += 1;
+        expect(args[1]).toEqual([
+          {
+            path: section.path,
+            label: section.label,
+            start: section.start,
+            end: section.end,
+          },
+        ]);
+        return applyCoreCodeSections(...args);
+      };
+
+      expect(() =>
+        applyReviewAnalysis(
+          {
+            root,
+            reference: created.reference,
+            analysis: {
+              kind: 'scope',
+              sections: [{ ...section, end: 2 }],
+              groups: [{ id: 'exports', label: 'Exports', sectionKeys: [section.key] }],
             },
-          ],
+          },
+          { applyCodeSections: applySections },
+        ),
+      ).toThrow(/trailing gap/i);
+      expect(applySectionsCalls).toBe(0);
+
+      expect(() =>
+        applyReviewAnalysis(
+          {
+            root,
+            reference: created.reference,
+            analysis: {
+              kind: 'scope',
+              sections: [section],
+              groups: [{ id: 'exports', label: 'Exports', sectionKeys: ['unknown-local-key'] }],
+            },
+          },
+          { applyCodeSections: applySections },
+        ),
+      ).toThrow(/unknown scope section key/i);
+      expect(applySectionsCalls).toBe(1);
+
+      expect(() =>
+        applyReviewAnalysis(
+          {
+            root,
+            reference: created.reference,
+            analysis: {
+              kind: 'scope',
+              sections: [section],
+              groups: [
+                { id: 'exports', label: 'Exports', sectionKeys: [section.key] },
+                { id: 'duplicate', label: 'Duplicate', sectionKeys: [section.key] },
+              ],
+            },
+          },
+          { applyCodeSections: applySections },
+        ),
+      ).toThrow(/multiple groups/i);
+      expect(applySectionsCalls).toBe(2);
+      expect(
+        createReviewStore(root).isAnalysisFinalized(
+          created.reference.workspaceId,
+          created.reference.revisionId,
+        ),
+      ).toBe(false);
+
+      applyReviewAnalysis(
+        {
+          root,
+          reference: created.reference,
+          analysis: {
+            kind: 'scope',
+            sections: [section],
+            groups: [{ id: 'exports', label: 'Exports', sectionKeys: [section.key] }],
+          },
         },
-      });
+        { applyCodeSections: applySections },
+      );
+      expect(applySectionsCalls).toBe(3);
       const finalized = createReviewStore(root).readBundle(
         created.reference.workspaceId,
         created.reference.revisionId,
       );
       expect(finalized.snapshot.items).toHaveLength(1);
+      expect(finalized.insights).toEqual({
+        schemaVersion: 1,
+        revisionId: created.reference.revisionId,
+        groups: [
+          {
+            id: 'exports',
+            label: 'Exports',
+            reviewItemIds: [finalized.snapshot.items[0]!.id],
+          },
+        ],
+        items: [
+          {
+            reviewItemId: finalized.snapshot.items[0]!.id,
+            description: section.description,
+            confidence: section.confidence,
+            evidencePaths: section.evidencePaths,
+          },
+        ],
+      });
+      expect(JSON.stringify(finalized)).not.toContain(section.key);
       expect(
         JSON.parse(
           formatReviewStatusJson({
@@ -587,7 +757,7 @@ describe('review lifecycle actions', () => {
         applyReviewAnalysis({
           root,
           reference: created.reference,
-          analysis: { sections: [section], groups: [], items: [] },
+          analysis: { kind: 'scope', sections: [section], groups: [] },
         }),
       ).toThrow(/already/i);
     } finally {

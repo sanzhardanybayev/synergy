@@ -24,6 +24,7 @@ import {
   type ReviewAnalysisGuidance,
   deriveReviewAnalysisGuidance,
 } from './review-analysis-guidance.js';
+import type { ReviewAnalysisInput, ScopeAnalysisSectionInput } from './review-analysis.js';
 import {
   type CaptureReviewSourceRequest,
   type CapturedReviewSource,
@@ -31,6 +32,7 @@ import {
   repositoryName,
   resolveRepositoryRoot,
 } from './review-capture.js';
+import { assertCompleteScopeCoverage } from './review-coverage.js';
 
 export interface CreateReviewRequest extends CaptureReviewSourceRequest {}
 
@@ -44,6 +46,11 @@ export interface CreateReviewResult {
 
 export interface ReviewActionDependencies {
   createStore?: typeof createReviewStore;
+}
+
+export interface ApplyReviewAnalysisDependencies {
+  createStore?: typeof createReviewStore;
+  applyCodeSections?: typeof applyCodeSections;
 }
 
 export interface OpenReviewDependencies {
@@ -76,16 +83,15 @@ export interface RefreshReviewRequest {
   readFile?: CaptureReviewSourceRequest['readFile'];
 }
 
-export interface ReviewAnalysis {
+interface CanonicalReviewAnalysis {
   groups: ReviewGroup[];
   items: ReviewItemInsight[];
-  sections?: ProposedCodeSection[];
 }
 
 export interface ApplyReviewAnalysisRequest {
   root: string;
   reference: ReviewRef;
-  analysis: ReviewAnalysis;
+  analysis: ReviewAnalysisInput;
 }
 
 export interface ReviewStatusRequest {
@@ -291,7 +297,7 @@ function assertSafeEvidencePath(path: string): void {
   }
 }
 
-function assertValidAnalysis(snapshot: ReviewSnapshot, analysis: ReviewAnalysis): void {
+function assertValidAnalysis(snapshot: ReviewSnapshot, analysis: CanonicalReviewAnalysis): void {
   const itemIds = new Set(snapshot.items.map((item) => item.id));
   const groupIds = new Set<string>();
   const groupedItemIds = new Set<string>();
@@ -327,7 +333,7 @@ function assertValidAnalysis(snapshot: ReviewSnapshot, analysis: ReviewAnalysis)
     }
     if (
       insight.description.trim().length === 0 ||
-      insight.description.length > MAX_DESCRIPTION_LENGTH
+      Array.from(insight.description).length > MAX_DESCRIPTION_LENGTH
     ) {
       throw new Error(`review item description must be 1-${MAX_DESCRIPTION_LENGTH} characters`);
     }
@@ -353,45 +359,103 @@ function assertValidAnalysis(snapshot: ReviewSnapshot, analysis: ReviewAnalysis)
   }
 }
 
-export function applyReviewAnalysis(request: ApplyReviewAnalysisRequest): ReviewRef {
-  const store = createReviewStore(request.root);
+function proposedCodeSection(section: ScopeAnalysisSectionInput): ProposedCodeSection {
+  return {
+    path: section.path,
+    label: section.label,
+    ...(section.parentLabel === undefined ? {} : { parentLabel: section.parentLabel }),
+    start: section.start,
+    end: section.end,
+  };
+}
+
+function translateScopeAnalysis(
+  snapshot: Extract<ReviewSnapshot, { kind: 'scope' }>,
+  analysis: Extract<ReviewAnalysisInput, { kind: 'scope' }>,
+  applySections: typeof applyCodeSections,
+): { snapshot: Extract<ReviewSnapshot, { kind: 'scope' }>; analysis: CanonicalReviewAnalysis } {
+  assertCompleteScopeCoverage(snapshot, analysis.sections);
+  const translatedSnapshot = applySections(snapshot, analysis.sections.map(proposedCodeSection));
+  if (translatedSnapshot.items.length !== analysis.sections.length) {
+    throw new Error('scope section translation did not return one review item per section');
+  }
+
+  const itemIdBySectionKey = new Map(
+    analysis.sections.map((section, index) => [section.key, translatedSnapshot.items[index]!.id]),
+  );
+  const groups = analysis.groups.map(
+    (group): ReviewGroup => ({
+      id: group.id,
+      label: group.label,
+      reviewItemIds: group.sectionKeys.map((sectionKey) => {
+        const reviewItemId = itemIdBySectionKey.get(sectionKey);
+        if (!reviewItemId) throw new Error(`unknown scope section key: ${sectionKey}`);
+        return reviewItemId;
+      }),
+    }),
+  );
+  const items = analysis.sections.map(
+    (section, index): ReviewItemInsight => ({
+      reviewItemId: translatedSnapshot.items[index]!.id,
+      description: section.description,
+      confidence: section.confidence,
+      evidencePaths: section.evidencePaths,
+    }),
+  );
+  return { snapshot: translatedSnapshot, analysis: { groups, items } };
+}
+
+export function applyReviewAnalysis(
+  request: ApplyReviewAnalysisRequest,
+  dependencies: ApplyReviewAnalysisDependencies = {},
+): ReviewRef {
+  const store = (dependencies.createStore ?? createReviewStore)(request.root);
   const bundle = store.readBundle(request.reference.workspaceId, request.reference.revisionId);
   if (store.isAnalysisFinalized(request.reference.workspaceId, request.reference.revisionId)) {
     throw new Error('review analysis already exists and is immutable');
   }
-  const insights: ReviewInsights = {
-    schemaVersion: 1,
-    revisionId: request.reference.revisionId,
-    groups: request.analysis.groups,
-    items: request.analysis.items,
-  };
   if (bundle.snapshot.kind === 'scope') {
-    if (!request.analysis.sections)
-      throw new Error('scoped review analysis requires proposed code sections');
-    if (request.analysis.sections.length === 0) {
-      throw new Error('scoped review analysis requires at least one code section');
+    if (request.analysis.kind !== 'scope') {
+      throw new Error('scoped review requires a scope analysis payload');
     }
-    const snapshot = applyCodeSections(bundle.snapshot, request.analysis.sections);
-    assertValidAnalysis(snapshot, request.analysis);
+    const translated = translateScopeAnalysis(
+      bundle.snapshot,
+      request.analysis,
+      dependencies.applyCodeSections ?? applyCodeSections,
+    );
+    assertValidAnalysis(translated.snapshot, translated.analysis);
+    const insights: ReviewInsights = {
+      schemaVersion: 1,
+      revisionId: request.reference.revisionId,
+      groups: translated.analysis.groups,
+      items: translated.analysis.items,
+    };
     const now = new Date().toISOString();
     const progress = bundle.snapshot.predecessorRevisionId
       ? reconcileReview(
           store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
-          snapshot,
+          translated.snapshot,
           now,
         )
-      : initialProgress(snapshot, now);
+      : initialProgress(translated.snapshot, now);
     store.finalizeScopeAnalysis(
       request.reference.workspaceId,
       request.reference.revisionId,
-      snapshot,
+      translated.snapshot,
       insights,
       progress,
     );
   } else {
-    if (request.analysis.sections)
-      throw new Error('diff review analysis cannot define code sections');
+    if (request.analysis.kind !== 'diff') {
+      throw new Error('diff review requires a diff analysis payload');
+    }
     assertValidAnalysis(bundle.snapshot, request.analysis);
+    const insights: ReviewInsights = {
+      schemaVersion: 1,
+      revisionId: request.reference.revisionId,
+      groups: request.analysis.groups,
+      items: request.analysis.items,
+    };
     store.writeInitialInsights(
       request.reference.workspaceId,
       request.reference.revisionId,

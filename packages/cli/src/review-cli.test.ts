@@ -155,6 +155,49 @@ describe('review CLI source flags', () => {
     }
   });
 
+  it('passes parsed scope local-key analysis to the review action', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-scope-analysis-'));
+    temporaryRoots.push(root);
+    execFileSync('git', ['init', '--quiet', root]);
+    const bodyFile = join(root, 'analysis.json');
+    const analysis = {
+      groups: [{ id: 'module', label: 'Module', sectionKeys: ['local-section'] }],
+      sections: [
+        {
+          key: 'local-section',
+          path: 'src/example.ts',
+          label: 'Example',
+          start: 1,
+          end: 1,
+          description: 'Explains the example module in repository context.',
+          confidence: 'high',
+          evidencePaths: ['src/example.ts'],
+        },
+      ],
+    };
+    writeFileSync(bodyFile, JSON.stringify(analysis), 'utf8');
+    let applied: unknown;
+
+    const result = await runReviewCli(
+      ['analysis-set', 'workspace@revision', '--body-file', bodyFile, '--root', root],
+      {
+        applyReviewAnalysis: (request) => {
+          applied = request;
+          return request.reference;
+        },
+      },
+    );
+
+    expect(result.exitCode).toBeUndefined();
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('analysis recorded');
+    expect(applied).toMatchObject({
+      root: realpathSync(root),
+      reference: { workspaceId: 'workspace', revisionId: 'revision' },
+      analysis: { kind: 'scope', ...analysis },
+    });
+  });
+
   it('executes list through CAC from a nested directory using the canonical Git root', async () => {
     const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-'));
     temporaryRoots.push(root);
