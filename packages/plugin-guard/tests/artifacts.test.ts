@@ -76,7 +76,9 @@ describe('runtime artifact contract', () => {
     const fixture = makeArtifactFixture();
     fixture.remove('packages/cli/dist/cli.js');
 
-    expect(inspectRuntimeArtifacts(fixture.root).missing).toEqual(['packages/cli/dist/cli.js']);
+    const inspection = inspectRuntimeArtifacts(fixture.root);
+    expect(inspection.missing).toEqual(['packages/cli/dist/cli.js']);
+    expect(inspection.drifted).toEqual(['packages/cli/dist/cli.js']);
   });
 
   it('reports untracked generated chunks', () => {
@@ -86,6 +88,16 @@ describe('runtime artifact contract', () => {
     expect(inspectRuntimeArtifacts(fixture.root).untracked).toEqual([
       'packages/cli/dist/chunks/runtime.js',
     ]);
+  });
+
+  it('reports ignored untracked runtime outputs', () => {
+    const fixture = makeArtifactFixture();
+    const path = 'packages/cli/dist/ignored-runtime.js';
+    fixture.write(path);
+    fixture.write('.gitignore', `${path}\n`);
+    fixture.track('.gitignore');
+
+    expect(inspectRuntimeArtifacts(fixture.root).untracked).toEqual([path]);
   });
 
   it('requires the non-static source capture worker', () => {
@@ -104,6 +116,16 @@ describe('runtime artifact contract', () => {
     expect(inspectRuntimeArtifacts(fixture.root).drifted).toEqual([
       'packages/spec-kit/dist/index.js',
     ]);
+  });
+
+  it('reports deletion drift for tracked non-required outputs', () => {
+    const fixture = makeArtifactFixture();
+    const path = 'packages/review-core/dist/obsolete-chunk.js';
+    fixture.write(path);
+    fixture.track(path);
+    fixture.remove(path);
+
+    expect(inspectRuntimeArtifacts(fixture.root).drifted).toEqual([path]);
   });
 
   it('forbids tracked node_modules paths', () => {

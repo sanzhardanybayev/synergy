@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 export const RUNTIME_OUTPUT_ROOTS = [
@@ -39,8 +39,27 @@ function statusPath(line: string): string {
   return line.slice(3);
 }
 
+function runtimeFiles(root: string): string[] {
+  const files: string[] = [];
+
+  function visit(relativeDirectory: string): void {
+    const absoluteDirectory = resolve(root, relativeDirectory);
+    if (!existsSync(absoluteDirectory)) return;
+
+    for (const entry of readdirSync(absoluteDirectory, { withFileTypes: true })) {
+      const relativePath = `${relativeDirectory}/${entry.name}`;
+      if (entry.isDirectory()) visit(relativePath);
+      else files.push(relativePath);
+    }
+  }
+
+  for (const outputRoot of RUNTIME_OUTPUT_ROOTS) visit(outputRoot);
+  return files;
+}
+
 export function inspectRuntimeArtifacts(root: string): ArtifactInspection {
   const trackedPaths = git(root, ['ls-files']).split('\n').filter(Boolean);
+  const trackedPathSet = new Set(trackedPaths);
   const statusLines = git(root, [
     'status',
     '--porcelain=v1',
@@ -55,7 +74,7 @@ export function inspectRuntimeArtifacts(root: string): ArtifactInspection {
     missing: sorted(
       REQUIRED_RUNTIME_ARTIFACTS.filter((artifact) => !existsSync(resolve(root, artifact))),
     ),
-    untracked: sorted(statusLines.filter((line) => line.startsWith('?? ')).map(statusPath)),
+    untracked: sorted(runtimeFiles(root).filter((path) => !trackedPathSet.has(path))),
     drifted: sorted(
       statusLines
         .filter((line) => !line.startsWith('?? ') && !line.startsWith('!! '))
