@@ -1,19 +1,20 @@
 # Synergy
 
-A Claude Code plugin for authoring MDX specifications with a live web preview. Agents generate cross-referenced MDX specs in a `.synergy/sessions/<name>/` folder using a reusable spec-kit component library, then preview them in a browser.
+A cross-host planning and guided code-review toolkit with a live web preview. Agents author cross-referenced MDX specs in `.synergy/sessions/<name>/` or guide human review of immutable Git-backed revisions in `.synergy/reviews/<workspace>/`.
 
-See `SYNERGY_PLAN.md` for the full implementation plan and `AGENTS.md` (once written) for spec-authoring rules.
+See `SYNERGY_PLAN.md` for the original implementation plan and `AGENTS.md` for cross-host authoring and review rules.
 
 ## Layout
 
 - `packages/spec-kit` — MDX component library + JSON schemas + styles.
 - `packages/validator` — MDX parse, schema check, cross-ref resolver. CLI: `synergy validate`.
 - `packages/preview` — Vite + React app, watches `.synergy/sessions/`, hot reloads on MDX edits.
-- `packages/cli` — `synergy` binary: `init`, `preview`, `validate`. Spec authoring lives in skills.
-- `plugins/claude-code` — Claude Code plugin manifest, skills, commands.
+- `packages/cli` — deterministic project, preview, validation, execution-state, and review-artifact commands. Agent reasoning lives in skills.
+- `skills` — shared agent workflows used by Claude Code and Codex.
+- `commands` — thin Claude Code command shims that dispatch to shared skills.
 - `examples/` — canonical dogfood sessions.
 
-Codex distribution is **not in v1**. Do not add Codex skill files yet.
+Keep shared workflow logic in root skills. Claude commands must remain thin dispatch shims.
 
 ## Conventions
 
@@ -140,11 +141,36 @@ synergy continue <session> [--next <id>] [--note <text>]    write hand-off point
 synergy handoff <session> [--next <id>] [--body <text> | --body-file <path>]   write the KT handoff baton (.state/handoff.md) + resume pointer
 synergy status <session>                                     print execution-state rollup
 synergy feedback wait <session> [--for <dur>]                block until review comments arrive (or Done reviewing / timeout)
+synergy review create (--pr <n|url> | --staged | --unstaged | --scope <path>) [--json]
+synergy review refresh <workspaceId>
+synergy review analysis-set <workspace@revision> --body-file <path>
+synergy review list [--json]
+synergy review open <workspace@revision>
+synergy review status <workspace@revision> [--json]
+synergy review wait <workspace@revision> [--for <dur>]
+synergy review answer <questionId> --review <workspace@revision> --body-file <path>
 ```
 
 Spec authoring is not a CLI command — invoke the `synergy:create-spec` skill (or `/synergy-spec` slash command, which dispatches to the skill).
 
-Claude Code slash commands: `/synergy-spec` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback` (skill), `/synergy-execute` (skill), `/synergy-continue` (skill), `/synergy-handoff` (skill).
+## Guided code review (v4)
+
+Review is separate from specification sessions. Invoke `synergy:review` directly in Claude
+Code or Codex; `/synergy-review` is only a Claude Code shim. Supported sources are a GitHub
+PR, staged changes, unstaged changes, and a bounded current-code scope.
+
+- Immutable artifacts live under `.synergy/reviews/<workspace>/revisions/<revision>/` and
+  render at `/r/<workspace>/<revision>`. `.synergy/active-review.json` tracks browser activity.
+  Both paths are gitignored local state.
+- Identical captures resume the same revision. `review refresh <workspace>` reconciles a
+  changed source into a new revision, carrying only deterministically unchanged items.
+- Agents inspect repository context to group items and write one/two-sentence descriptions;
+  the CLI owns capture, fingerprints, schema validation, persistence, and readiness.
+- Browser questions are durable. The agent runs `review wait` in the foreground, answers the
+  exact revision through `review answer`, then waits again. It never changes application code
+  merely because a question was asked.
+
+Claude Code slash commands: `/synergy-spec` (skill), `/synergy-review` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback` (skill), `/synergy-execute` (skill), `/synergy-continue` (skill), `/synergy-handoff` (skill).
 
 ## Release & freshness
 

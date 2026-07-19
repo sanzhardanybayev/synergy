@@ -5,11 +5,13 @@ import { ArchitecturePage } from './pages/ArchitecturePage.js';
 import { ImplementationPage } from './pages/ImplementationPage.js';
 import { OverviewPage } from './pages/OverviewPage.js';
 import { PhasePage } from './pages/PhasePage.js';
+import { ReviewRoute } from './review/ReviewRoute.js';
 
 export function App() {
   const latest = sessions[0];
   return (
     <Routes>
+      <Route path="/r/:workspaceId/:revisionId" element={<ReviewRoute />} />
       <Route
         path="/"
         element={latest ? <Navigate to={`/s/${latest.name}/overview`} replace /> : <EmptyState />}

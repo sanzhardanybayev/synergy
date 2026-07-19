@@ -5,7 +5,7 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen?logo=node.js)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.json)
 
-**Spec-driven planning for Claude Code.** Turn vague requests into MDX specifications with status badges, phase plans, agent allocations, charts, and cross-references — rendered live in your browser as you author them, then implemented phase-by-phase with live status and a resumable hand-off trail.
+**Planning and guided code review for coding agents.** Turn vague requests into live MDX specifications, then review pull requests or current code in focused, durable chunks with repository-aware explanations and a direct browser-to-agent question loop.
 
 Markdown specs go stale in a terminal. Synergy gives agents a tight component vocabulary, a validator that enforces it, and a Vite preview that hot-reloads on every save.
 
@@ -28,6 +28,30 @@ The preview isn't read-only — you can fix and annotate specs without a round-t
 - **Live review loop.** Run `/synergy-feedback --wait` (or `synergy feedback wait <session>`) and the agent blocks until your comments arrive, addresses them, and keeps listening — resolutions stream back into the comments panel live. The panel shows **Agent listening** / **No agent**, and the **Done reviewing** button ends the round.
 
 Edits, comments, and review state all persist to disk (MDX files, `.synergy/feedback/`, and a gitignored `review-state.json`) — git is the version history, so there's no database.
+
+## Review code in focused chunks
+
+`/synergy-review` is separate from specification sessions. It captures an exact GitHub PR,
+staged diff, unstaged diff, or bounded current-code scope and opens
+`/r/<workspace>/<revision>` in the same Vite preview. The left rail groups related files and
+items, the center shows selectable diff/source lines plus a concise **what this does**
+explanation, and the question rail sends durable questions to the listening agent.
+
+- **Immutable revisions.** Re-running an identical source resumes it; changed source creates
+  a new revision in the same workspace. Refresh carries forward only items whose content and
+  structural context still match, and marks ambiguous items stale.
+- **Repository-aware explanations.** The shared `synergy:review` skill inspects the containing
+  module, callers, types, tests, and configuration before describing each hunk or code section.
+  Low confidence is explicit rather than guessed.
+- **Direct questions.** Select exact lines and queue a question. The skill keeps
+  `synergy review wait` in the foreground, answers against the exact revision, persists the
+  response, and listens again.
+- **Readiness you can trust.** Completion remains blocked by unreviewed or stale items,
+  unanswered questions, or changed source.
+
+Local artifacts live under `.synergy/reviews/<workspace>/revisions/<revision>/`; the active
+browser pointer is `.synergy/active-review.json`. Both are gitignored by `synergy init`.
+Review artifacts are JSON rather than MDX and do not use specification phases or journals.
 
 ## Plan the agent roster in the browser
 
@@ -79,12 +103,16 @@ git clone https://github.com/sanzhardanybayev/synergy
 ```
 /synergy-init                              # once per project
 /synergy-spec "Add rate limiting"          # creates a session + opens browser
+/synergy-review --pr 317                   # creates/resumes a chunked PR review
 # ...edit MDX with Claude Code, preview hot-reloads...
 /synergy-validate                          # before commit
 /synergy-execute                           # implement it, phase-by-phase (state-tracked)
 ```
 
-That's the loop. The first command scaffolds `.synergy/sessions/` in your project. The second invokes the `synergy:create-spec` skill — which reasons about scope, picks `.synergy/sessions/YYYY-MM-DD-add-rate-limiting/`, scaffolds the overview + optional architecture/implementation/phase folders, and opens your browser. The third checks schemas and cross-references before you ship. The fourth implements the plan one phase at a time, recording status and findings as it goes — and `/synergy-continue` picks it back up in a fresh session.
+Planning and review are complementary entry points. `/synergy-spec` invokes the
+`synergy:create-spec` skill, while `/synergy-review` invokes the cross-host review skill and
+opens an immutable revision. `/synergy-validate` and `/synergy-execute` then validate and
+implement specification sessions; `/synergy-continue` resumes their execution state.
 
 ## Reference
 
@@ -99,6 +127,7 @@ That's the loop. The first command scaffolds `.synergy/sessions/` in your projec
 | `/synergy-execute [session] [directives]` | Implement a session phase-by-phase, updating execution state at each boundary. |
 | `/synergy-continue [session] [directives]` | Continue an in-progress session from its execution-state hand-off. |
 | `/synergy-handoff [session]` | Capture a mid-work KT baton (`.state/handoff.md`) before you quit, so a future agent resumes inside the current phase. |
+| `/synergy-review <source>` | Create or resume a PR, staged, unstaged, or scoped guided review; open its exact revision and listen for browser questions. |
 | `/synergy-preview-start` | Boot the preview server on port 4321. Idempotent. |
 | `/synergy-preview-stop` | Kill the preview server, remove PID file. |
 | `/synergy-preview-status` | Report running / stopped, pid, URL. |
@@ -119,6 +148,13 @@ For terminal users — available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist
 | `synergy handoff <session>` | `--root`, `--next <id>`, `--body <text>`, `--body-file <path>` | Write the KT handoff baton (`.state/handoff.md`) + resume pointer |
 | `synergy status <session>` | `--root` | Print the execution-state rollup (phases done / total) |
 | `synergy feedback wait <session>` | `--root`, `--for <dur>` (e.g. `10m`; default: indefinite) | Block until review comments arrive, the user clicks **Done reviewing**, or the bounded wait expires |
+| `synergy review create` | exactly one of `--pr`, `--staged`, `--unstaged`, `--scope`; optional `--json` | Capture or resume an immutable review revision |
+| `synergy review refresh <workspace>` | `--root` | Capture current source and reconcile safe prior coverage |
+| `synergy review list` | `--root`, `--json` | List local review workspaces |
+| `synergy review open <workspace@revision>` | `--root` | Return the exact review portal route |
+| `synergy review status <workspace@revision>` | `--root`, `--json` | Report freshness and readiness blockers |
+| `synergy review wait <workspace@revision>` | `--root`, `--for <dur>` | Wait in the foreground for durable browser questions |
+| `synergy review answer <question-id>` | `--root`, `--review <workspace@revision>`, `--body-file <path>` | Persist an exact-revision answer |
 
 ### Daemon HTTP API (performance path)
 

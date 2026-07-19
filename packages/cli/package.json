@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@synergy/preview": "workspace:*",
+    "@synergy/review-core": "workspace:*",
     "@synergy/spec-kit": "workspace:*",
     "@synergy/state": "workspace:*",
     "@synergy/validator": "workspace:*",

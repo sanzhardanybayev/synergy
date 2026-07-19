@@ -3,7 +3,15 @@ import { join } from 'node:path';
 import { green } from 'kleur/colors';
 import { resolveProjectPaths } from './paths.js';
 
-const GITIGNORE_ENTRIES = ['preview.pid', 'preview.log', 'active-session', 'review-state.json', ''];
+const GITIGNORE_ENTRIES = [
+  'preview.pid',
+  'preview.log',
+  'active-session',
+  'review-state.json',
+  'reviews/',
+  'active-review.json',
+  '',
+];
 
 export function initProject(root: string = process.cwd()): { synergyDir: string } {
   const paths = resolveProjectPaths(root);

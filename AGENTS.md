@@ -1,10 +1,10 @@
-# AGENTS.md — Synergy spec authoring
+# AGENTS.md — Synergy planning and review
 
-Rules and conventions for any agent (Claude Code, Codex, or otherwise) that authors or edits Synergy MDX spec sessions. Cross-host file — kept in sync with `CLAUDE.md`.
+Rules and conventions for any agent (Claude Code, Codex, or otherwise) that authors or edits Synergy artifacts. Cross-host file — kept in sync with `CLAUDE.md`.
 
 ## What Synergy is
 
-A spec-authoring system. Agents generate cross-referenced MDX documents in `.synergy/sessions/<session-name>/` and render them in a Vite + React preview at `http://localhost:4321`. A separate `orchestrator.md` per session tells the implementing agent how to execute the work (sequencing, parallelism, agent strategy).
+A planning and guided-review system. Agents generate cross-referenced MDX documents in `.synergy/sessions/<session-name>/` or prepare immutable code-review artifacts in `.synergy/reviews/<workspace>/`, rendered by the same Vite + React preview at `http://localhost:4321`. Specification sessions keep a separate `orchestrator.md` that tells the implementing agent how to execute the work.
 
 ## Hard rules
 
@@ -147,7 +147,28 @@ for human reviewers.
 
 ## CLI surface
 
-The CLI handles process and execution-state operations only — see CLAUDE.md "Commands" for the authoritative list of `synergy` subcommands and Claude Code slash commands. Spec creation and editing live in skills — there is no `synergy spec` command.
+The CLI handles deterministic process, execution-state, and review-artifact operations — see
+CLAUDE.md "Commands" for the authoritative subcommands. Spec authoring and repository-aware
+review analysis live in shared skills; there is no `synergy spec` command.
+
+## Guided code reviews
+
+Review is independent from MDX specification sessions. Invoke the cross-host `synergy:review`
+skill (or Claude Code's thin `/synergy-review` command) for a GitHub PR, staged changes,
+unstaged changes, or a bounded current-code scope. The skill delegates capture, validation,
+reconciliation, persistence, freshness, and readiness to `synergy review ...`; agents own only
+repository-aware grouping, scoped section selection, concise descriptions, and answers.
+
+Review artifacts live in gitignored `.synergy/reviews/<workspace>/revisions/<revision>/` and
+render at `/r/<workspace>/<revision>`. `.synergy/active-review.json` is the per-machine browser
+pointer. Never hand-edit those JSON artifacts. An exact `workspace@revision` never advances;
+refreshing a workspace creates or resumes its current immutable revision and carries coverage
+forward only through deterministic reconciliation.
+
+For browser questions, run `synergy review wait <workspace@revision> --for 15m` in the
+foreground, answer through `synergy review answer`, and wait again. Never detach the wait,
+invent context across revisions, analyze ignored untracked files, or mutate application code
+unless the user separately asks for implementation.
 
 ## Preview design system
 

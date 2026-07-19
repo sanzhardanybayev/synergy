@@ -18,3 +18,33 @@ export {
   type ResumeArgs,
   type ProgressArgs,
 } from './execstate.js';
+export {
+  applyReviewAnalysis,
+  createOrResumeReview,
+  formatReviewStatusJson,
+  getReviewStatus,
+  listReviews,
+  openReview,
+  printReviewStatus,
+  refreshReview,
+  type ApplyReviewAnalysisRequest,
+  type CreateReviewRequest,
+  type CreateReviewResult,
+  type RefreshReviewRequest,
+  type ReviewActionDependencies,
+  type ReviewAnalysis,
+  type ReviewStatusRequest,
+  type ReviewStatusResult,
+} from './review-actions.js';
+export {
+  capturePr,
+  captureReviewSource,
+  captureScope,
+  captureStaged,
+  captureUnstaged,
+  type CapturedReviewSource,
+  type CaptureReviewSourceRequest,
+  type CommandResult,
+  type CommandRunner,
+} from './review-capture.js';
+export { createReviewSourceFromFlags, registerReviewCommands } from './review-cli.js';

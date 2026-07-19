@@ -26,6 +26,7 @@ import { readJsonBody, sendJson } from './src/server/http.js';
 import { handleProgressStream } from './src/server/progress-stream.js';
 import { handleProgress } from './src/server/progress.js';
 import { handleReviewDone } from './src/server/review-done.js';
+import { handleReviewRouter } from './src/server/review-router.js';
 import { handleReview } from './src/server/review.js';
 import { handleScaffold } from './src/server/scaffold.js';
 import { handleSource } from './src/server/source.js';
@@ -58,6 +59,11 @@ export function synergyEditPlugin(options: PluginOptions): Plugin {
         const method = req.method ?? '';
 
         try {
+          if (pathname === '/api/reviews' || pathname.startsWith('/api/reviews/')) {
+            await handleReviewRouter(req, res, projectRoot);
+            return;
+          }
+
           // PUT /api/edit
           if (method === 'PUT' && pathname === '/api/edit') {
             await handleEdit(req, res, sessionsDir);

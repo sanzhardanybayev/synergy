@@ -1,0 +1,4 @@
+interface:
+  display_name: "Synergy Review"
+  short_description: "Review Git changes or code in durable chunks"
+  default_prompt: "Use $review to start or resume an exact-revision guided code review and answer browser questions."

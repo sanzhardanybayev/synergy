@@ -20,6 +20,7 @@
     "@mdx-js/mdx": "^3.1.1",
     "@mdx-js/react": "^3.1.0",
     "@mdx-js/rollup": "3.1.0",
+    "@synergy/review-core": "workspace:*",
     "@synergy/spec-kit": "workspace:*",
     "@synergy/state": "workspace:*",
     "@synergy/validator": "workspace:*",

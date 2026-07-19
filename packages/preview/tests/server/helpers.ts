@@ -26,6 +26,7 @@ export function makeTempDir(files: Record<string, string> = {}): {
     tmpdir(),
     `synergy-server-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   );
+  mkdirSync(dir, { recursive: true });
   for (const [rel, content] of Object.entries(files)) {
     const abs = join(dir, rel);
     mkdirSync(dirname(abs), { recursive: true });
@@ -50,21 +51,34 @@ export function makeTempDir(files: Record<string, string> = {}): {
 export interface MockRequest extends EventEmitter {
   method: string;
   url: string;
+  headers: Record<string, string | undefined>;
   _body: string;
+  resume(): void;
 }
 
 export function makeMockReq(options: {
   method?: string;
   url?: string;
   body?: unknown;
+  rawBody?: string;
+  emitError?: boolean;
+  headers?: Record<string, string | undefined>;
 }): MockRequest {
   const emitter = new EventEmitter() as MockRequest;
   emitter.method = options.method ?? 'GET';
   emitter.url = options.url ?? '/';
-  emitter._body = options.body !== undefined ? JSON.stringify(options.body) : '';
+  emitter.headers =
+    options.headers ?? (options.body === undefined ? {} : { 'content-type': 'application/json' });
+  emitter._body =
+    options.rawBody ?? (options.body !== undefined ? JSON.stringify(options.body) : '');
+  emitter.resume = () => undefined;
 
   // Emit data/end asynchronously so handlers can attach listeners first.
   setImmediate(() => {
+    if (options.emitError) {
+      emitter.emit('error', new Error('injected request stream failure'));
+      return;
+    }
     if (emitter._body.length > 0) {
       emitter.emit('data', Buffer.from(emitter._body, 'utf8'));
     }
@@ -97,7 +111,7 @@ export function makeMockRes(): {
     json: undefined,
   };
 
-  const res = {
+  const res = Object.assign(new EventEmitter(), {
     writeHead(status: number, headers: Record<string, string | number>) {
       captured.statusCode = status;
       captured.headers = headers ?? {};
@@ -110,7 +124,7 @@ export function makeMockRes(): {
         captured.json = undefined;
       }
     },
-  };
+  });
 
   return { res, result: () => captured };
 }
