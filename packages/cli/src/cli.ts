@@ -31,19 +31,32 @@ cli
 cli
   .command('preview <action>', 'Manage the preview server (start | stop | status)')
   .option('--root <dir>', 'Project root (default: cwd)')
-  .option('--port <port>', 'Override port', { default: 4321 })
-  .action((action: string, flags: { root?: string; port: number }) => {
-    if (action === 'start') {
-      previewStart({ root: flags.root, port: Number(flags.port) });
-    } else if (action === 'stop') {
-      previewStop(flags.root);
-    } else if (action === 'status') {
-      printStatus(previewStatus(flags.root, Number(flags.port)));
-    } else {
+  .option('--port <port>', 'Require a specific port (default: prefer 4321)')
+  .option('--json', 'Print the full preview status as JSON')
+  .action(async (action: string, flags: { root?: string; port?: number; json?: boolean }) => {
+    try {
+      if (action === 'start') {
+        await previewStart({
+          root: flags.root,
+          ...(flags.port === undefined ? {} : { port: Number(flags.port) }),
+        });
+      } else if (action === 'stop') {
+        await previewStop(flags.root);
+      } else if (action === 'status') {
+        const status = await previewStatus(flags.root);
+        if (flags.json) process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
+        else printStatus(status);
+      } else {
+        process.stderr.write(
+          `${red('Error:')} unknown action "${action}" — use start | stop | status\n`,
+        );
+        process.exit(2);
+      }
+    } catch (error) {
       process.stderr.write(
-        `${red('Error:')} unknown action "${action}" — use start | stop | status\n`,
+        `${red('Error:')} ${error instanceof Error ? error.message : String(error)}\n`,
       );
-      process.exit(2);
+      process.exit(1);
     }
   });
 

@@ -6,6 +6,7 @@ export {
   printStatus,
   type PreviewStartOptions,
   type PreviewStatus,
+  type PreviewTimings,
 } from './preview.js';
 export { resolveProjectPaths, PREVIEW_PORT, type ProjectPaths } from './paths.js';
 export {
