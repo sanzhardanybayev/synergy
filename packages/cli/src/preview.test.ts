@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -803,12 +804,84 @@ describe('preview lifecycle', () => {
     expect(spawnCount).toBe(1);
   });
 
+  it('retains a live child quarantine when atomic ownership transfer and termination both fail', async () => {
+    const paths = resolveProjectPaths(rootA);
+    let attempt = 0;
+    let spawnCount = 0;
+    const lifecycle = createPreviewLifecycle({
+      createAttemptId: () => `atomic-transfer-attempt-${++attempt}`,
+      createInstanceId: () => 'atomic-transfer-instance',
+      createControlToken: () => CONTROL_TOKEN,
+      lockStaleMs: 1,
+      pollIntervalMs: 1,
+      processKill: (pid) => {
+        if (pid === process.pid) {
+          throw Object.assign(new Error('parent exited'), { code: 'ESRCH' });
+        }
+        if (pid === 30_013) return true;
+        throw new Error(`unexpected PID ${pid}`);
+      },
+      publishOwnerRecord: () => {
+        throw Object.assign(new Error('publish interrupted'), { code: 'EIO' });
+      },
+      spawnChild: () => {
+        spawnCount += 1;
+        return new StuckChild(30_013);
+      },
+      startTimeoutMs: 50,
+      terminationGraceMs: 2,
+      writeOutput: () => undefined,
+    });
+
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow('publish interrupted');
+    expect(JSON.parse(readFileSync(paths.previewLockFile, 'utf8'))).toMatchObject({
+      pid: process.pid,
+    });
+    const childFence = readdirSync(paths.synergyDir).find((entry) =>
+      entry.startsWith('preview.start.lock.quarantine.'),
+    );
+    expect(childFence).toBeDefined();
+    if (childFence === undefined) throw new Error('child fence was not published');
+    expect(JSON.parse(readFileSync(join(paths.synergyDir, childFence), 'utf8'))).toMatchObject({
+      pid: 30_013,
+    });
+
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/start lock/i);
+    expect(spawnCount).toBe(1);
+  });
+
+  it('removes parent and child ownership records after failed transfer when termination is confirmed', async () => {
+    const paths = resolveProjectPaths(rootA);
+    const lifecycle = createPreviewLifecycle({
+      createAttemptId: () => 'confirmed-cleanup-attempt',
+      createInstanceId: () => 'confirmed-cleanup-instance',
+      createControlToken: () => CONTROL_TOKEN,
+      publishOwnerRecord: () => {
+        throw Object.assign(new Error('publish interrupted'), { code: 'EIO' });
+      },
+      spawnChild: () => new FakeChild(30_014),
+      startTimeoutMs: 50,
+      terminationGraceMs: 10,
+      writeOutput: () => undefined,
+    });
+
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow('publish interrupted');
+
+    expect(existsSync(paths.previewLockFile)).toBe(false);
+    expect(
+      readdirSync(paths.synergyDir).some((entry) =>
+        entry.startsWith('preview.start.lock.quarantine.'),
+      ),
+    ).toBe(false);
+  });
+
   it('measures total startup time through child detachment and lock release', async () => {
     let now = 0;
+    let hasDetached = false;
     const lifecycle = createPreviewLifecycle({
       now: () => now,
       createQuarantineId: () => {
-        now += 7;
+        if (hasDetached) now += 7;
         return 'timing-release';
       },
       createInstanceId: () => 'timing-instance',
@@ -819,6 +892,7 @@ describe('preview lifecycle', () => {
         child.disconnect = () => {
           child.disconnected = true;
           now += 5;
+          hasDetached = true;
         };
         queueMicrotask(() =>
           child.emit('message', {

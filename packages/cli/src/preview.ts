@@ -10,6 +10,7 @@ import {
   readFileSync,
   readSync,
   realpathSync,
+  renameSync,
   unlinkSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -128,6 +129,7 @@ const DEFAULT_DEPENDENCIES: PreviewLifecycleDependencies = {
   now: () => performance.now(),
   pollIntervalMs: POLL_INTERVAL_MS,
   processKill: (pid, signal) => process.kill(pid, signal),
+  publishOwnerRecord: (source, destination) => renameSync(source, destination),
   removeRuntime: removeOwnedPreviewRuntime,
   setTimer: (callback, milliseconds) => setTimeout(callback, milliseconds),
   sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
@@ -282,6 +284,7 @@ function lockDependencies(
     createQuarantineId: dependencies.createQuarantineId,
     now: dependencies.now,
     processKill: dependencies.processKill,
+    publishOwnerRecord: dependencies.publishOwnerRecord,
     wallNow: dependencies.wallNow,
     sleep: dependencies.sleep,
   };

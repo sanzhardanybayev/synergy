@@ -3,17 +3,15 @@ import {
   constants,
   closeSync,
   copyFileSync,
-  fstatSync,
   fsyncSync,
-  ftruncateSync,
   openSync,
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
-  writeSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
@@ -36,6 +34,7 @@ export interface PreviewStartLockDependencies {
   createQuarantineId(): string;
   now(): number;
   processKill(pid: number, signal: 0): boolean;
+  publishOwnerRecord(source: string, destination: string): void;
   wallNow(): number;
   sleep(milliseconds: number): Promise<void>;
 }
@@ -52,6 +51,7 @@ const DEFAULT_DEPENDENCIES: PreviewStartLockDependencies = {
   createQuarantineId: randomUUID,
   now: () => performance.now(),
   processKill: (pid, signal) => process.kill(pid, signal),
+  publishOwnerRecord: (source, destination) => renameSync(source, destination),
   wallNow: Date.now,
   sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
 };
@@ -216,42 +216,67 @@ function releaseOwnedLock(
   dependencies: PreviewStartLockDependencies,
 ): boolean {
   const capturedPath = captureCurrentLock(path, attemptId, dependencies);
-  if (capturedPath === null) return false;
-  const capturedRecord = readLockRecord(capturedPath);
-  if (capturedRecord?.attemptId === attemptId) {
-    try {
+  let didReleaseCanonical = false;
+  if (capturedPath !== null) {
+    const capturedRecord = readLockRecord(capturedPath);
+    if (capturedRecord?.attemptId === attemptId) {
       unlinkSync(capturedPath);
-      return true;
-    } catch {
-      return false;
+      didReleaseCanonical = true;
+    } else {
+      restoreWithoutOverwrite(capturedPath, path, dependencies);
     }
   }
 
-  restoreWithoutOverwrite(capturedPath, path, dependencies);
-  return false;
+  let didReleaseFence = false;
+  for (const quarantine of listQuarantines(path)) {
+    if (readLockRecord(quarantine)?.attemptId !== attemptId) continue;
+    unlinkSync(quarantine);
+    didReleaseFence = true;
+  }
+  return didReleaseCanonical || didReleaseFence;
 }
 
-function updateOwnedLockPid(path: string, attemptId: string, pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-  let descriptor: number;
+function writeRecordFile(path: string, record: PreviewStartLockRecord): void {
+  const descriptor = openSync(path, 'wx', 0o600);
+  let isComplete = false;
   try {
-    descriptor = openSync(path, 'r+');
-  } catch (error) {
-    if (hasErrorCode(error, 'ENOENT')) return false;
-    throw error;
-  }
-  try {
-    const record = readLockRecord(descriptor);
-    if (record?.attemptId !== attemptId) return false;
-    const updated: PreviewStartLockRecord = { ...record, pid };
-    ftruncateSync(descriptor, 0);
-    writeSync(descriptor, `${JSON.stringify(updated)}\n`, 0, 'utf8');
+    writeFileSync(descriptor, `${JSON.stringify(record)}\n`);
     fsyncSync(descriptor);
-    const descriptorState = fstatSync(descriptor);
-    const pathState = statSync(path);
-    return descriptorState.dev === pathState.dev && descriptorState.ino === pathState.ino;
+    isComplete = true;
   } finally {
-    closeSync(descriptor);
+    try {
+      closeSync(descriptor);
+    } finally {
+      if (!isComplete) rmSync(path, { force: true });
+    }
+  }
+}
+
+function updateOwnedLockPid(
+  path: string,
+  attemptId: string,
+  pid: number,
+  dependencies: PreviewStartLockDependencies,
+): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  const parentRecord = readLockRecord(path);
+  if (parentRecord?.attemptId !== attemptId) return false;
+  const childRecord: PreviewStartLockRecord = { ...parentRecord, pid };
+  const childFence = quarantinePath(path, attemptId, dependencies);
+  writeRecordFile(childFence, childRecord);
+  const ownerTemp = `${path}.owner.tmp.${attemptId}.${dependencies.createQuarantineId()}`;
+  let hasOwnerTemp = false;
+  try {
+    writeRecordFile(ownerTemp, childRecord);
+    hasOwnerTemp = true;
+    if (readLockRecord(path)?.attemptId !== attemptId) return false;
+    dependencies.publishOwnerRecord(ownerTemp, path);
+    hasOwnerTemp = false;
+    if (!sameLockOwner(readLockRecord(path), childRecord)) return false;
+    unlinkSync(childFence);
+    return true;
+  } finally {
+    if (hasOwnerTemp) rmSync(ownerTemp, { force: true });
   }
 }
 
@@ -290,7 +315,8 @@ export async function acquirePreviewStartLock(
       return {
         lockMs: dependencies.now() - lockStartedAt,
         release: () => releaseOwnedLock(options.path, options.attemptId, dependencies),
-        updateOwnerPid: (pid) => updateOwnedLockPid(options.path, options.attemptId, pid),
+        updateOwnerPid: (pid) =>
+          updateOwnedLockPid(options.path, options.attemptId, pid, dependencies),
       };
     } catch (error) {
       if (!hasErrorCode(error, 'EEXIST')) throw error;

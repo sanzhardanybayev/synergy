@@ -7,6 +7,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -245,6 +246,54 @@ describe('preview start lock', () => {
       attemptId: 'attempt-a',
       pid: 91_004,
     });
+  });
+
+  it('keeps canonical parent ownership intact and a child fence when atomic transfer fails', async () => {
+    let ownerTempRecord: LockRecord | null = null;
+    let ownerTempMode: number | null = null;
+    const lock = await acquirePreviewStartLock(
+      {
+        path: lockPath,
+        attemptId: 'attempt-transfer',
+        deadline: performance.now() + 1_000,
+        staleMs: 10_000,
+        pollIntervalMs: 1,
+      },
+      {
+        publishOwnerRecord: (source) => {
+          ownerTempRecord = JSON.parse(readFileSync(source, 'utf8')) as LockRecord;
+          ownerTempMode = statSync(source).mode & 0o777;
+          throw Object.assign(new Error('publish interrupted'), { code: 'EIO' });
+        },
+      },
+    );
+
+    expect(() => lock.updateOwnerPid(91_006)).toThrow('publish interrupted');
+    expect(JSON.parse(readFileSync(lockPath, 'utf8'))).toMatchObject({
+      attemptId: 'attempt-transfer',
+      pid: process.pid,
+    });
+    const childFence = readdirSync(tempDir).find((entry) =>
+      entry.startsWith('preview.start.lock.quarantine.'),
+    );
+    expect(childFence).toBeDefined();
+    if (childFence === undefined) throw new Error('child fence was not published');
+    const childFencePath = join(tempDir, childFence);
+    expect(JSON.parse(readFileSync(childFencePath, 'utf8'))).toMatchObject({
+      attemptId: 'attempt-transfer',
+      pid: 91_006,
+    });
+    expect(statSync(childFencePath).mode & 0o777).toBe(0o600);
+    expect(ownerTempRecord).toMatchObject({
+      attemptId: 'attempt-transfer',
+      pid: 91_006,
+    });
+    expect(ownerTempMode).toBe(0o600);
+    expect(readdirSync(tempDir).some((entry) => entry.includes('.owner.tmp.'))).toBe(false);
+
+    expect(lock.release()).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(hasLockQuarantine(lockPath)).toBe(false);
   });
 
   it('does not let a contender acquire while a live lock is captured in quarantine', async () => {

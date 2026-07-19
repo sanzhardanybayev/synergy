@@ -113,6 +113,10 @@ describe('preview runtime', () => {
     expect(readPreviewRuntime(runtimePath)).toBeNull();
   });
 
+  it('returns null when neither the runtime directory nor a quarantine exists', () => {
+    expect(readPreviewRuntime(join(tempDir, 'missing', 'preview.runtime.json'))).toBeNull();
+  });
+
   it.each([
     ['protocolVersion', 2],
     ['state', 'starting'],
@@ -225,7 +229,9 @@ describe('preview runtime', () => {
         }),
       ).toThrow(`restore ${code}`);
       expect(existsSync(runtimePath)).toBe(false);
-      expect(readdirSync(tempDir).some((entry) => entry.endsWith('.quarantine'))).toBe(true);
+      expect(
+        readdirSync(tempDir).some((entry) => entry.startsWith('preview.runtime.json.quarantine.')),
+      ).toBe(true);
     },
   );
 });
