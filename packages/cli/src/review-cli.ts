@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import {
   assertSafeReviewSegment,
   claimQuestion,
@@ -46,6 +47,7 @@ export class ReviewUsageError extends Error {}
 export interface ReviewCliDependencies {
   openReview?: typeof openReview;
   applyReviewAnalysis?: typeof applyReviewAnalysis;
+  monotonicNow?: () => number;
 }
 
 export function createReviewSourceFromFlags(flags: ReviewCreateFlags): ReviewCaptureSourceRequest {
@@ -152,6 +154,7 @@ interface ValidatedReviewCommand {
   workspaceId?: string;
   reference?: ReturnType<typeof parseReviewRef>;
   analysis?: ReviewAnalysisInput;
+  analysisParsingMs?: number;
   questionId?: string;
   answerBody?: string;
   timeoutMs?: number;
@@ -219,6 +222,7 @@ function assertActionOptions(action: ReviewAction, flags: ReviewCommandFlags): v
     action !== 'open' &&
     action !== 'status' &&
     action !== 'list' &&
+    action !== 'analysis-set' &&
     flags.json === true
   ) {
     throw new ReviewUsageError(`review ${action} does not accept --json`);
@@ -239,6 +243,7 @@ function validateReviewCommand(
   actionValue: string,
   references: string[],
   flags: ReviewCommandFlags,
+  monotonicNow: () => number = () => performance.now(),
 ): ValidatedReviewCommand {
   assertKnownAction(actionValue);
   assertKnownOptions(flags);
@@ -253,11 +258,20 @@ function validateReviewCommand(
     case 'analysis-set':
       assertReferenceCount(actionValue, references, 1);
       if (!flags.bodyFile) throw new ReviewUsageError('review analysis-set requires --body-file');
-      return {
-        action: actionValue,
-        reference: parseUsageReviewRef(references[0] ?? ''),
-        analysis: readUsageAnalysis(flags.bodyFile),
-      };
+      {
+        const parsingStartedAt = monotonicNow();
+        const analysis = readUsageAnalysis(flags.bodyFile);
+        const analysisParsingMs = monotonicNow() - parsingStartedAt;
+        if (!Number.isFinite(analysisParsingMs) || analysisParsingMs < 0) {
+          throw new ReviewUsageError('analysis parsing duration must be nonnegative');
+        }
+        return {
+          action: actionValue,
+          reference: parseUsageReviewRef(references[0] ?? ''),
+          analysis,
+          analysisParsingMs,
+        };
+      }
     case 'list':
       assertReferenceCount(actionValue, references, 0);
       return { action: actionValue };
@@ -339,6 +353,7 @@ export async function runReviewWaitCommand(
 export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependencies = {}): void {
   const open = dependencies.openReview ?? openReview;
   const applyAnalysis = dependencies.applyReviewAnalysis ?? applyReviewAnalysis;
+  const monotonicNow = dependencies.monotonicNow ?? (() => performance.now());
   cli
     .command('review <action> [...references]', 'Manage local guided code reviews')
     .option('--root <dir>', 'Project root (default: cwd)')
@@ -356,7 +371,8 @@ export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependen
     .allowUnknownOptions()
     .action(async (action: string, references: string[], flags: ReviewCommandFlags) => {
       try {
-        const command = validateReviewCommand(action, references, flags);
+        const commandStartedAt = monotonicNow();
+        const command = validateReviewCommand(action, references, flags, monotonicNow);
         const root = resolveRepositoryRoot(flags.root ?? process.cwd());
         if (command.action === 'create') {
           printCreateResult(
@@ -373,13 +389,23 @@ export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependen
           return;
         }
         if (command.action === 'analysis-set') {
-          applyAnalysis({
-            root,
-            reference: requireValidatedValue(command.reference),
-            analysis: requireValidatedValue(command.analysis),
-          });
+          const result = await applyAnalysis(
+            {
+              root,
+              reference: requireValidatedValue(command.reference),
+              analysis: requireValidatedValue(command.analysis),
+              parsingInMs: command.analysisParsingMs,
+              commandStartedAt,
+            },
+            { monotonicNow },
+          );
+          if (flags.json) {
+            process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+            return;
+          }
+          const destination = result.previewReady ? result.url : result.route;
           process.stdout.write(
-            `${green('✓')} analysis recorded for ${bold(references[0] ?? '')}\n`,
+            `${green('✓')} analysis recorded for ${bold(result.reference)}\n${dim('Analysis interval:')} ${result.analysisFinalizedInMs}ms\n${dim('Tool timing:')} ${result.timings.totalMs}ms\n${dim(result.previewReady ? 'Open:' : 'Route:')} ${destination}\n`,
           );
           return;
         }

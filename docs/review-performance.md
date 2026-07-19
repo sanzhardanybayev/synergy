@@ -4,6 +4,10 @@ Synergy gates a representative warm scope review at a median of at most 210 seco
 single run above 240 seconds. The benchmark separates capture, the recorded agent-analysis
 interval, publication, and preview readiness so regressions remain attributable.
 
+The `analysis-set --json` result includes monotonic `timings` for parsing, derivation,
+validation, atomic publication, preview resolution, and total command time. These timings expose
+tool overhead without conflating it with the durable snapshot-to-finalization interval.
+
 ## Measurement modes
 
 - **Fixture replay** runs the normal CLI capture, `analysis-set --json`, and preview-readiness

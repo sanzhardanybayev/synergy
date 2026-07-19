@@ -177,13 +177,36 @@ describe('review CLI source flags', () => {
     };
     writeFileSync(bodyFile, JSON.stringify(analysis), 'utf8');
     let applied: unknown;
+    const humanTicks = [100, 101, 104];
 
     const result = await runReviewCli(
       ['analysis-set', 'workspace@revision', '--body-file', bodyFile, '--root', root],
       {
-        applyReviewAnalysis: (request) => {
+        monotonicNow: () => {
+          const tick = humanTicks.shift();
+          if (tick === undefined) throw new Error('unexpected human CLI timing read');
+          return tick;
+        },
+        applyReviewAnalysis: async (request) => {
           applied = request;
-          return request.reference;
+          return {
+            reference: `${request.reference.workspaceId}@${request.reference.revisionId}`,
+            analysisFinalized: true,
+            reviewItemCount: 1,
+            groupCount: 1,
+            withinRecommendedRange: true,
+            analysisFinalizedInMs: 1,
+            route: '/r/workspace/revision',
+            previewReady: false,
+            timings: {
+              parsingMs: 1,
+              derivationMs: 0,
+              validationMs: 1,
+              publicationMs: 1,
+              previewResolutionMs: 1,
+              totalMs: 4,
+            },
+          };
         },
       },
     );
@@ -195,6 +218,62 @@ describe('review CLI source flags', () => {
       root: realpathSync(root),
       reference: { workspaceId: 'workspace', revisionId: 'revision' },
       analysis: { kind: 'scope', ...analysis },
+      parsingInMs: 3,
+      commandStartedAt: 100,
+    });
+    expect(humanTicks).toEqual([]);
+
+    const jsonTicks = [200, 202, 207];
+    const jsonResult = await runReviewCli(
+      ['analysis-set', 'workspace@revision', '--body-file', bodyFile, '--root', root, '--json'],
+      {
+        monotonicNow: () => {
+          const tick = jsonTicks.shift();
+          if (tick === undefined) throw new Error('unexpected JSON CLI timing read');
+          return tick;
+        },
+        applyReviewAnalysis: async () => ({
+          reference: 'workspace@revision',
+          analysisFinalized: true,
+          reviewItemCount: 1,
+          groupCount: 1,
+          withinRecommendedRange: true,
+          analysisFinalizedInMs: 1,
+          route: '/r/workspace/revision',
+          previewReady: true,
+          url: 'http://127.0.0.1:4321/r/workspace/revision',
+          timings: {
+            parsingMs: 1,
+            derivationMs: 1,
+            validationMs: 1,
+            publicationMs: 1,
+            previewResolutionMs: 1,
+            totalMs: 5,
+          },
+        }),
+      },
+    );
+    expect(jsonResult.stderr).toBe('');
+    expect(jsonResult.exitCode).toBeUndefined();
+    expect(jsonTicks).toEqual([]);
+    expect(JSON.parse(jsonResult.stdout)).toEqual({
+      reference: 'workspace@revision',
+      analysisFinalized: true,
+      reviewItemCount: 1,
+      groupCount: 1,
+      withinRecommendedRange: true,
+      analysisFinalizedInMs: 1,
+      route: '/r/workspace/revision',
+      previewReady: true,
+      url: 'http://127.0.0.1:4321/r/workspace/revision',
+      timings: {
+        parsingMs: 1,
+        derivationMs: 1,
+        validationMs: 1,
+        publicationMs: 1,
+        previewResolutionMs: 1,
+        totalMs: 5,
+      },
     });
   });
 

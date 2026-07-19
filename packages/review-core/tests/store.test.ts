@@ -513,6 +513,66 @@ describe('review storage', () => {
     ).toThrow(/already/i);
   });
 
+  it('preserves an explicit finalization milestone through progress writes and reads legacy bundles', () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-finalized-at-'));
+    const fixture = makeReviewFixture();
+    const pendingInsights = { ...fixture.insights, groups: [], items: [] };
+    const finalizedAt = '2026-07-19T10:03:30.000Z';
+    const store = createReviewStore(root, { now: () => Date.parse(finalizedAt) });
+    store.createRevision(fixture.workspace, fixture.snapshot, pendingInsights, fixture.progress);
+
+    expect(
+      store.getAnalysisFinalizedAt(fixture.workspace.id, fixture.snapshot.revisionId),
+    ).toBeUndefined();
+    store.writeInitialInsights(
+      fixture.workspace.id,
+      fixture.snapshot.revisionId,
+      fixture.insights,
+      finalizedAt,
+    );
+
+    expect(
+      createReviewStore(root).getAnalysisFinalizedAt(
+        fixture.workspace.id,
+        fixture.snapshot.revisionId,
+      ),
+    ).toBe(finalizedAt);
+
+    store.updateProgress(fixture.workspace.id, fixture.snapshot.revisionId, {
+      activeFile: fixture.snapshot.items[0]?.path,
+    });
+    expect(
+      createReviewStore(root).getAnalysisFinalizedAt(
+        fixture.workspace.id,
+        fixture.snapshot.revisionId,
+      ),
+    ).toBe(finalizedAt);
+
+    const reviewItemId = fixture.snapshot.items[0]?.id;
+    if (!reviewItemId) throw new Error('fixture must contain a review item');
+    store.patchItemProgress(fixture.workspace.id, fixture.snapshot.revisionId, reviewItemId, {
+      status: 'reviewed',
+    });
+    expect(
+      createReviewStore(root).getAnalysisFinalizedAt(
+        fixture.workspace.id,
+        fixture.snapshot.revisionId,
+      ),
+    ).toBe(finalizedAt);
+
+    const bundlePath = join(reviewRevisionDirectory(root), 'bundle.json');
+    const legacyBundle = JSON.parse(readFileSync(bundlePath, 'utf8'));
+    legacyBundle.finalizedAt = undefined;
+    writeFileSync(bundlePath, JSON.stringify(legacyBundle), 'utf8');
+    const legacyStore = createReviewStore(root);
+    expect(
+      legacyStore.getAnalysisFinalizedAt(fixture.workspace.id, fixture.snapshot.revisionId),
+    ).toBeUndefined();
+    expect(
+      legacyStore.readBundle(fixture.workspace.id, fixture.snapshot.revisionId).insights,
+    ).toEqual(fixture.insights);
+  });
+
   it('ignores crash-residue and identity-mismatched directories during fingerprint scans', () => {
     const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
     const store = createReviewStore(root);

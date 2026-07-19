@@ -199,7 +199,9 @@ then publishes the complete analysis atomically. Fix the temporary payload when 
 never bypass the command or patch the artifacts.
 
 Consume the JSON result. `analysisFinalizedInMs` reports the persisted capture-to-finalization
-interval. Analysis finalization does not depend on preview availability: `previewReady: false`
+interval. `timings` reports monotonic tool time for parsing, derivation, validation, publication,
+preview resolution, and the total command; use these phases when diagnosing tool overhead.
+Analysis finalization does not depend on preview availability: `previewReady: false`
 is still a successful analysis and the `route` remains valid. When `previewReady` is true, use
 the returned full `url` and do not restart a healthy preview.
 

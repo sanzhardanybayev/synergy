@@ -54,7 +54,7 @@ function createRequest(root: string): CreateReviewRequest {
 }
 
 describe('review lifecycle actions', () => {
-  it('uses canonical shared freshness for text and JSON readiness, failing capture closed', () => {
+  it('uses canonical shared freshness for text and JSON readiness, failing capture closed', async () => {
     const root = join(tmpdir(), `synergy-review-status-${Date.now()}`);
     const nested = join(root, 'src');
     mkdirSync(nested, { recursive: true });
@@ -72,7 +72,7 @@ describe('review lifecycle actions', () => {
       const store = createReviewStore(root);
       const item = store.readBundle(created.reference.workspaceId, created.reference.revisionId)
         .snapshot.items[0]!;
-      applyReviewAnalysis({
+      await applyReviewAnalysis({
         root,
         reference: created.reference,
         analysis: {
@@ -239,7 +239,7 @@ describe('review lifecycle actions', () => {
     }
   });
 
-  it('accepts one validated analysis payload and rejects duplicates', () => {
+  it('accepts one validated analysis payload and rejects duplicates', async () => {
     const root = join(tmpdir(), `synergy-review-analysis-${Date.now()}`);
     mkdirSync(root, { recursive: true });
     try {
@@ -261,19 +261,21 @@ describe('review lifecycle actions', () => {
           },
         ],
       };
-      const result = applyReviewAnalysis({
+      const result = await applyReviewAnalysis({
         root,
         reference: created.reference,
         analysis,
       });
-      expect(result.revisionId).toBe(created.reference.revisionId);
-      expect(() =>
+      expect(result.reference).toBe(
+        `${created.reference.workspaceId}@${created.reference.revisionId}`,
+      );
+      await expect(
         applyReviewAnalysis({
           root,
           reference: created.reference,
           analysis,
         }),
-      ).toThrow(/already/i);
+      ).rejects.toThrow(/already/i);
       expect(
         printReviewStatus({ root, reference: created.reference, runner: createRunner() }),
       ).toContain('needs review');
@@ -282,7 +284,156 @@ describe('review lifecycle actions', () => {
     }
   });
 
-  it('requires evidence from a captured file', () => {
+  it('reports durable analysis timing and keeps finalization successful when preview is unavailable', async () => {
+    const root = join(tmpdir(), `synergy-review-analysis-result-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const reviewItem = snapshot.items[0];
+      if (!reviewItem) throw new Error('fixture capture must create one review item');
+      const finalizedAt = new Date(Date.parse(snapshot.createdAt) + 210_000);
+      const monotonicTicks = [0, 1, 3, 4, 7, 8, 13, 15];
+      const monotonicNow = (): number => {
+        const tick = monotonicTicks.shift();
+        if (tick === undefined) throw new Error('unexpected monotonic clock read');
+        return tick;
+      };
+
+      const result = await applyReviewAnalysis(
+        {
+          root,
+          reference: created.reference,
+          analysis: {
+            kind: 'diff',
+            groups: [{ id: 'core', label: 'Core', reviewItemIds: [reviewItem.id] }],
+            items: [
+              {
+                reviewItemId: reviewItem.id,
+                description: 'Updates the staged fixture in repository context.',
+                confidence: 'high',
+                evidencePaths: [reviewItem.path],
+              },
+            ],
+          },
+          parsingInMs: 7,
+        },
+        {
+          now: () => finalizedAt,
+          monotonicNow,
+          previewStatus: async () => {
+            throw new Error('preview runtime is unavailable');
+          },
+        },
+      );
+
+      expect(result).toEqual({
+        reference: `${created.reference.workspaceId}@${created.reference.revisionId}`,
+        analysisFinalized: true,
+        reviewItemCount: 1,
+        groupCount: 1,
+        withinRecommendedRange: true,
+        analysisFinalizedInMs: 210_000,
+        route: `/r/${created.reference.workspaceId}/${created.reference.revisionId}`,
+        previewReady: false,
+        timings: {
+          parsingMs: 7,
+          derivationMs: 0,
+          validationMs: 2,
+          publicationMs: 3,
+          previewResolutionMs: 5,
+          totalMs: 22,
+        },
+      });
+      expect(monotonicTicks).toEqual([]);
+      expect(
+        createReviewStore(root).getAnalysisFinalizedAt(
+          created.reference.workspaceId,
+          created.reference.revisionId,
+        ),
+      ).toBe(finalizedAt.toISOString());
+      expect(
+        createReviewStore(root).isAnalysisFinalized(
+          created.reference.workspaceId,
+          created.reference.revisionId,
+        ),
+      ).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns the immutable review URL when preview is healthy after finalization', async () => {
+    const root = join(tmpdir(), `synergy-review-analysis-preview-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const snapshot = createReviewStore(root).readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const reviewItem = snapshot.items[0];
+      if (!reviewItem) throw new Error('fixture capture must create one review item');
+
+      const result = await applyReviewAnalysis(
+        {
+          root,
+          reference: created.reference,
+          analysis: {
+            kind: 'diff',
+            groups: [{ id: 'core', label: 'Core', reviewItemIds: [reviewItem.id] }],
+            items: [
+              {
+                reviewItemId: reviewItem.id,
+                description: 'Updates the staged fixture in repository context.',
+                confidence: 'high',
+                evidencePaths: [reviewItem.path],
+              },
+            ],
+          },
+        },
+        {
+          now: () => new Date(0),
+          previewStatus: async () => {
+            expect(
+              createReviewStore(root).isAnalysisFinalized(
+                created.reference.workspaceId,
+                created.reference.revisionId,
+              ),
+            ).toBe(true);
+            return {
+              running: true,
+              pid: 123,
+              port: 43_222,
+              origin: 'http://127.0.0.1:43222',
+              projectId: 'project-id',
+              instanceId: 'instance-id',
+            };
+          },
+        },
+      );
+
+      expect(result).toMatchObject({
+        analysisFinalizedInMs: 0,
+        previewReady: true,
+        url: `http://127.0.0.1:43222/r/${created.reference.workspaceId}/${created.reference.revisionId}`,
+      });
+      expect(
+        createReviewStore(root).getAnalysisFinalizedAt(
+          created.reference.workspaceId,
+          created.reference.revisionId,
+        ),
+      ).toBe(snapshot.createdAt);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('requires evidence from a captured file', async () => {
     const root = join(tmpdir(), `synergy-review-evidence-${Date.now()}`);
     mkdirSync(root, { recursive: true });
     try {
@@ -292,31 +443,47 @@ describe('review lifecycle actions', () => {
         created.reference.revisionId,
       ).snapshot.items[0]?.id;
       if (!reviewItemId) throw new Error('fixture capture must create one review item');
+      let nowCalls = 0;
 
-      expect(() =>
-        applyReviewAnalysis({
-          root,
-          reference: created.reference,
-          analysis: {
-            kind: 'diff',
-            groups: [{ id: 'core', label: 'Core change', reviewItemIds: [reviewItemId] }],
-            items: [
-              {
-                reviewItemId,
-                description: 'Updates the example value used by the staged module.',
-                confidence: 'high',
-                evidencePaths: ['src/not-captured.ts'],
-              },
-            ],
+      await expect(
+        applyReviewAnalysis(
+          {
+            root,
+            reference: created.reference,
+            analysis: {
+              kind: 'diff',
+              groups: [{ id: 'core', label: 'Core change', reviewItemIds: [reviewItemId] }],
+              items: [
+                {
+                  reviewItemId,
+                  description: 'Updates the example value used by the staged module.',
+                  confidence: 'high',
+                  evidencePaths: ['src/not-captured.ts'],
+                },
+              ],
+            },
           },
-        }),
-      ).toThrow(/captured/i);
+          {
+            now: () => {
+              nowCalls += 1;
+              return new Date();
+            },
+          },
+        ),
+      ).rejects.toThrow(/captured/i);
+      expect(nowCalls).toBe(0);
+      expect(
+        createReviewStore(root).getAnalysisFinalizedAt(
+          created.reference.workspaceId,
+          created.reference.revisionId,
+        ),
+      ).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it('counts analysis description limits in Unicode code points', () => {
+  it('counts analysis description limits in Unicode code points', async () => {
     const roots = [
       join(tmpdir(), `synergy-review-unicode-accepted-${Date.now()}`),
       join(tmpdir(), `synergy-review-unicode-rejected-${Date.now()}`),
@@ -328,7 +495,7 @@ describe('review lifecycle actions', () => {
         accepted.reference.workspaceId,
         accepted.reference.revisionId,
       ).snapshot.items[0]!;
-      expect(() =>
+      await expect(
         applyReviewAnalysis({
           root: roots[0]!,
           reference: accepted.reference,
@@ -345,7 +512,7 @@ describe('review lifecycle actions', () => {
             ],
           },
         }),
-      ).not.toThrow();
+      ).resolves.toMatchObject({ analysisFinalized: true });
 
       const rejected = createOrResumeReview(createRequest(roots[1]!));
       const rejectedStore = createReviewStore(roots[1]!);
@@ -353,7 +520,7 @@ describe('review lifecycle actions', () => {
         rejected.reference.workspaceId,
         rejected.reference.revisionId,
       ).snapshot.items[0]!;
-      expect(() =>
+      await expect(
         applyReviewAnalysis({
           root: roots[1]!,
           reference: rejected.reference,
@@ -370,7 +537,7 @@ describe('review lifecycle actions', () => {
             ],
           },
         }),
-      ).toThrow(/1-600 characters/i);
+      ).rejects.toThrow(/1-600 characters/i);
       expect(
         rejectedStore.isAnalysisFinalized(
           rejected.reference.workspaceId,
@@ -545,7 +712,7 @@ describe('review lifecycle actions', () => {
     }
   });
 
-  it('finalizes scoped snapshots from proposed code sections exactly once', () => {
+  it('finalizes scoped snapshots from proposed code sections exactly once', async () => {
     const root = join(tmpdir(), `synergy-review-scope-${Date.now()}`);
     mkdirSync(root, { recursive: true });
     const runner: CommandRunner = {
@@ -605,13 +772,13 @@ describe('review lifecycle actions', () => {
         },
         readiness: { ready: false, preparing: true, pending: 0 },
       });
-      expect(() =>
+      await expect(
         applyReviewAnalysis({
           root,
           reference: created.reference,
           analysis: { kind: 'diff', groups: [], items: [] },
         }),
-      ).toThrow(/scope analysis payload/i);
+      ).rejects.toThrow(/scope analysis payload/i);
       expect(
         createReviewStore(root).isAnalysisFinalized(
           created.reference.workspaceId,
@@ -645,7 +812,7 @@ describe('review lifecycle actions', () => {
         return applyCoreCodeSections(...args);
       };
 
-      expect(() =>
+      await expect(
         applyReviewAnalysis(
           {
             root,
@@ -658,10 +825,10 @@ describe('review lifecycle actions', () => {
           },
           { applyCodeSections: applySections },
         ),
-      ).toThrow(/trailing gap/i);
+      ).rejects.toThrow(/trailing gap/i);
       expect(applySectionsCalls).toBe(0);
 
-      expect(() =>
+      await expect(
         applyReviewAnalysis(
           {
             root,
@@ -674,10 +841,10 @@ describe('review lifecycle actions', () => {
           },
           { applyCodeSections: applySections },
         ),
-      ).toThrow(/unknown scope section key/i);
+      ).rejects.toThrow(/unknown scope section key/i);
       expect(applySectionsCalls).toBe(1);
 
-      expect(() =>
+      await expect(
         applyReviewAnalysis(
           {
             root,
@@ -693,7 +860,7 @@ describe('review lifecycle actions', () => {
           },
           { applyCodeSections: applySections },
         ),
-      ).toThrow(/multiple groups/i);
+      ).rejects.toThrow(/multiple groups/i);
       expect(applySectionsCalls).toBe(2);
       expect(
         createReviewStore(root).isAnalysisFinalized(
@@ -701,8 +868,15 @@ describe('review lifecycle actions', () => {
           created.reference.revisionId,
         ),
       ).toBe(false);
+      expect(
+        createReviewStore(root).getAnalysisFinalizedAt(
+          created.reference.workspaceId,
+          created.reference.revisionId,
+        ),
+      ).toBeUndefined();
 
-      applyReviewAnalysis(
+      const scopeFinalizedAt = new Date(Date.parse(before.snapshot.createdAt) + 5_000);
+      const result = await applyReviewAnalysis(
         {
           root,
           reference: created.reference,
@@ -712,14 +886,27 @@ describe('review lifecycle actions', () => {
             groups: [{ id: 'exports', label: 'Exports', sectionKeys: [section.key] }],
           },
         },
-        { applyCodeSections: applySections },
+        { applyCodeSections: applySections, now: () => scopeFinalizedAt },
       );
+      expect(result).toMatchObject({
+        analysisFinalized: true,
+        reviewItemCount: 1,
+        groupCount: 1,
+        withinRecommendedRange: true,
+        analysisFinalizedInMs: 5_000,
+      });
       expect(applySectionsCalls).toBe(3);
       const finalized = createReviewStore(root).readBundle(
         created.reference.workspaceId,
         created.reference.revisionId,
       );
       expect(finalized.snapshot.items).toHaveLength(1);
+      expect(
+        createReviewStore(root).getAnalysisFinalizedAt(
+          created.reference.workspaceId,
+          created.reference.revisionId,
+        ),
+      ).toBe(scopeFinalizedAt.toISOString());
       expect(finalized.insights).toEqual({
         schemaVersion: 1,
         revisionId: created.reference.revisionId,
@@ -753,13 +940,13 @@ describe('review lifecycle actions', () => {
         analysisRequired: false,
         readiness: { ready: false, preparing: false, pending: 1 },
       });
-      expect(() =>
+      await expect(
         applyReviewAnalysis({
           root,
           reference: created.reference,
           analysis: { kind: 'scope', sections: [section], groups: [] },
         }),
-      ).toThrow(/already/i);
+      ).rejects.toThrow(/already/i);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

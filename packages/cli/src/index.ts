@@ -31,6 +31,8 @@ export {
   refreshReview,
   type ApplyReviewAnalysisDependencies,
   type ApplyReviewAnalysisRequest,
+  type ReviewAnalysisSetResult,
+  type ReviewAnalysisTimings,
   type CreateReviewRequest,
   type CreateReviewResult,
   type RefreshReviewRequest,

@@ -267,7 +267,15 @@ Successful `analysis-set --json` output includes:
   "withinRecommendedRange": true,
   "analysisFinalizedInMs": 198000,
   "route": "/r/workspace/revision",
-  "previewReady": false
+  "previewReady": false,
+  "timings": {
+    "parsingMs": 4,
+    "derivationMs": 12,
+    "validationMs": 8,
+    "publicationMs": 6,
+    "previewResolutionMs": 10,
+    "totalMs": 40
+  }
 }
 ```
 
