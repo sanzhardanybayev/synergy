@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +6,9 @@ import { describe, expect, it } from 'vitest';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const skill = readFileSync(resolve(root, 'skills/review/SKILL.md'), 'utf8');
 const command = readFileSync(resolve(root, 'commands/synergy-review.md'), 'utf8');
+const analysisSchemaPath = resolve(root, 'packages/cli/src/review-analysis.schema.json');
+const benchmarkPath = resolve(root, 'scripts/benchmark-review-analysis.mjs');
+const performanceDocumentPath = resolve(root, 'docs/review-performance.md');
 
 describe('synergy review skill contract', () => {
   it('has discoverable frontmatter and a synchronized freshness check', () => {
@@ -55,6 +58,84 @@ describe('synergy review skill contract', () => {
     expect(skill).toContain('one or two sentences');
     expect(skill).toContain('low confidence');
     expect(skill).toContain('exact immutable revision');
+  });
+
+  it('uses local scope keys and leaves canonical identity derivation to the CLI', () => {
+    expect(skill).toContain('"sections": [');
+    expect(skill).toContain('"key": "');
+    expect(skill).toContain('"sectionKeys"');
+    expect(skill).toContain('review-analysis.schema.json');
+    expect(skill).not.toContain('@synergy/review-core');
+    expect(skill).not.toContain('applyCodeSections');
+    expect(skill).not.toMatch(/helper JavaScript/iu);
+    expect(skill).not.toMatch(/calculate (?:opaque )?(?:durable )?(?:review )?item IDs/iu);
+  });
+
+  it('requires exact captured-line coverage and follows scoped granularity guidance', () => {
+    expect(skill).toContain('analysisGuidance');
+    expect(skill).toContain('minimumSections');
+    expect(skill).toContain('targetSections');
+    expect(skill).toContain('maximumSections');
+    expect(skill).toContain('scopeTooBroad');
+    expect(skill).toMatch(/every captured text line exactly once/iu);
+    expect(skill).toMatch(/blank and trailing lines/iu);
+    expect(skill).toMatch(/binary files require no sections/iu);
+  });
+
+  it('uses JSON analysis output as the preview-independent handoff', () => {
+    expect(skill).toContain(
+      'review analysis-set <workspace@revision> --body-file <temporary-analysis-json> --json',
+    );
+    expect(skill).toContain('analysisFinalizedInMs');
+    expect(skill).toContain('previewReady');
+    expect(skill).toContain('url');
+    expect(skill).toMatch(/analysis finalization.*does not depend on preview/isu);
+  });
+
+  it('publishes a strict diff-or-scope analysis schema', () => {
+    expect(existsSync(analysisSchemaPath)).toBe(true);
+    if (!existsSync(analysisSchemaPath)) return;
+
+    const schema = JSON.parse(readFileSync(analysisSchemaPath, 'utf8')) as {
+      oneOf?: Array<Record<string, unknown>>;
+    };
+    expect(schema.oneOf).toHaveLength(2);
+    expect(JSON.stringify(schema)).toContain('sectionKeys');
+    expect(JSON.stringify(schema)).toContain('reviewItemIds');
+
+    const assertStrictObjects = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        for (const entry of value) assertStrictObjects(entry);
+        return;
+      }
+      if (typeof value !== 'object' || value === null) return;
+      const record = value as Record<string, unknown>;
+      if (record.type === 'object') expect(record.additionalProperties).toBe(false);
+      for (const nested of Object.values(record)) assertStrictObjects(nested);
+    };
+    assertStrictObjects(schema);
+  });
+
+  it('ships an honest five-run performance gate and dogfood record template', () => {
+    expect(existsSync(benchmarkPath)).toBe(true);
+    expect(existsSync(performanceDocumentPath)).toBe(true);
+    if (!existsSync(benchmarkPath) || !existsSync(performanceDocumentPath)) return;
+
+    const benchmark = readFileSync(benchmarkPath, 'utf8');
+    const performanceDocument = readFileSync(performanceDocumentPath, 'utf8');
+    expect(benchmark).toMatch(/RUN_COUNT\s*=\s*5/u);
+    expect(benchmark).toMatch(/MEDIAN_LIMIT_MS\s*=\s*210_000/u);
+    expect(benchmark).toMatch(/MAXIMUM_LIMIT_MS\s*=\s*240_000/u);
+    for (const phase of ['capture', 'agentAnalysis', 'publication', 'previewReadiness', 'total']) {
+      expect(benchmark).toContain(phase);
+      expect(performanceDocument).toContain(phase);
+    }
+    expect(performanceDocument).toMatch(/do not fabricate/iu);
+    expect(performanceDocument).toContain('Environment');
+    expect(performanceDocument).toContain('Revision');
+    expect(performanceDocument).toContain('Unit count');
+    expect(performanceDocument).toContain('Median');
+    expect(performanceDocument).toContain('Maximum');
   });
 
   it('keeps the durable question wait in the foreground and repeats it after answers', () => {

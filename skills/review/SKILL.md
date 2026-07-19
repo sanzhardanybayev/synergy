@@ -83,11 +83,16 @@ resulting reference, then status. Read `analysisRequired` from create/status out
 false, preserve the finalized analysis and skip step 3; never resubmit analysis to an immutable
 revision.
 
+For scope reviews, also read `analysisGuidance` from create or status output. Report its
+`textFiles`, `textLines`, `minimumSections`, `targetSections`, and `maximumSections` before
+analysis. These values are semantic guidance, not a quota: prefer useful boundaries and briefly
+state why the final count falls outside the range when it does. If `scopeTooBroad` is true, ask
+the user to narrow the scope before analysis instead of manufacturing oversized sections.
+
 Stop without creating an empty review when Git, GitHub authentication, a PR, or the selected
 changes are unavailable. Report the CLI's corrective action. For scope, show the resolved
-eligible file and line counts. If the scope is unexpectedly broad, obtain explicit user
-confirmation before analysis. Git decides eligibility; never add ignored untracked files
-or invent a parallel ignore mechanism.
+eligible file and line counts. Git decides eligibility; never add ignored untracked files or
+invent a parallel ignore mechanism.
 
 Read the immutable snapshot only after capture succeeds:
 `<project-root>/.synergy/reviews/<workspace-id>/revisions/<revision-id>/snapshot.json`. Treat
@@ -96,11 +101,11 @@ it as read-only. Never hand-write, repair, or directly mutate any file under
 
 ## 3. Analyze the exact revision
 
-Use the snapshot as the source of item IDs, captured rows, paths, source metadata, and exact
-revision identity. Before reading live repository context, run the rooted status invocation
-from step 2. If it reports changed source or capture failure, preserve the snapshot, surface
-the condition, and offer the rooted refresh invocation; never silently mix a newer source
-into the analysis.
+Use the snapshot as the source of captured rows, paths, source metadata, exact revision identity,
+and existing diff item IDs. Before reading live repository context, run the rooted status
+invocation from step 2. If it reports changed source or capture failure, preserve the snapshot,
+surface the condition, and offer the rooted refresh invocation; never silently mix a newer
+source into the analysis.
 
 Inspect context according to source kind:
 
@@ -126,28 +131,81 @@ Create readable groups and one insight per item:
 - Record only captured eligible paths as evidence.
 - Mark `low confidence` when evidence cannot establish purpose. Never invent behavior.
 
-For scoped reviews, propose bounded, non-overlapping sections around meaningful functions,
-hooks, components, classes, or configuration blocks. Cover every intended line with the
-smallest useful sections; use a whole file only when no smaller boundary helps review. Derive
-their review item IDs by applying review-core's exported `applyCodeSections` to the immutable
-snapshot in memory. Do not reimplement its fingerprint algorithm and do not persist the
-returned snapshot; `analysis-set` is the only publication path.
+For scoped reviews, propose bounded sections around meaningful functions, hooks, components,
+classes, or configuration blocks. Cover every captured text line exactly once: there must be no
+leading, middle, or trailing gaps and no overlaps. Assign blank and trailing lines to an adjacent
+semantic section. Binary files require no sections and must not receive one. Use a whole file only
+when no smaller boundary makes the code easier to understand. For repetitive declarations and
+tests, prefer a coherent behavior over one section per declaration or test case.
 
-Generate a temporary payload that conforms to
-`<synergy-root>/skills/review/templates/analysis-schema.json`. Do not place it in the review
-artifact tree. Submit it only through:
+Give every proposed scope section a short local `key`, then reference those keys from exactly one
+group. Keys only need to be unique within this payload; the CLI derives stable review identities.
+Write the scoped payload in this shape:
 
-```text
-node "<synergy-root>/packages/cli/dist/cli.js" review analysis-set <workspace@revision> --body-file <temporary-analysis-json> --root "<project-root>"
+```json
+{
+  "groups": [
+    {
+      "id": "subscription-lifecycle",
+      "label": "Subscription lifecycle",
+      "sectionKeys": ["event-capture", "projection-dispatch"]
+    }
+  ],
+  "sections": [
+    {
+      "key": "event-capture",
+      "path": "src/subscription/subscription.service.ts",
+      "label": "Webhook capture",
+      "parentLabel": "SubscriptionService",
+      "start": 1,
+      "end": 47,
+      "description": "Durably records a subscription webhook before applying its projection so a projection failure cannot lose the event.",
+      "confidence": "high",
+      "evidencePaths": [
+        "src/subscription/subscription.service.ts",
+        "src/subscription/subscription.repository.ts"
+      ]
+    },
+    {
+      "key": "projection-dispatch",
+      "path": "src/subscription/subscription.service.ts",
+      "label": "Projection dispatch",
+      "parentLabel": "SubscriptionService",
+      "start": 48,
+      "end": 96,
+      "description": "Routes recorded subscription events to their projection handlers while keeping unsupported events available for replay.",
+      "confidence": "high",
+      "evidencePaths": ["src/subscription/subscription.service.ts"]
+    }
+  ]
+}
 ```
 
-The CLI validates IDs, ranges, coverage, evidence paths, relationships, and immutability.
-Fix the temporary payload when validation fails; never bypass the command or patch the
-artifacts.
+Descriptions must be one or two sentences explaining the section's application role using the
+repository context gathered above. Do not merely paraphrase the selected syntax. Diff reviews
+keep the existing `groups` plus `items` payload and use the captured diff item IDs as-is.
+
+Generate one temporary payload that conforms to
+`<synergy-root>/packages/cli/src/review-analysis.schema.json`. Do not generate an executable
+helper and do not place the payload in the review artifact tree. Submit it only through:
+
+```text
+node "<synergy-root>/packages/cli/dist/cli.js" review analysis-set <workspace@revision> --body-file <temporary-analysis-json> --json --root "<project-root>"
+```
+
+The CLI validates keys, ranges, exact coverage, evidence paths, relationships, and immutability,
+then publishes the complete analysis atomically. Fix the temporary payload when validation
+fails; never bypass the command or patch the artifacts.
+
+Consume the JSON result. `analysisFinalizedInMs` reports the persisted capture-to-finalization
+interval. Analysis finalization does not depend on preview availability: `previewReady: false`
+is still a successful analysis and the `route` remains valid. When `previewReady` is true, use
+the returned full `url` and do not restart a healthy preview.
 
 ## 4. Open the review
 
-Start the preview idempotently, then ask the CLI for the immutable URL:
+When the analysis result did not already return `previewReady: true` and a full `url`, start the
+preview idempotently, then ask the CLI for the immutable URL:
 
 ```text
 node "<synergy-root>/packages/cli/dist/cli.js" preview start --root "<project-root>"
