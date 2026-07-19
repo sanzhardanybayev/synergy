@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { lstatSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const LEFTHOOK_ENTRYPOINT = fileURLToPath(
@@ -11,17 +12,22 @@ function throwSpawnError(result, command) {
   if (result.status === null) throw new Error(`${command} terminated without an exit code`);
 }
 
+function ownsGitMetadata(cwd) {
+  try {
+    const metadata = lstatSync(join(cwd, '.git'));
+    return metadata.isDirectory() || metadata.isFile();
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 export function runLefthookInstall({
   cwd = process.cwd(),
   runProcess = spawnSync,
   writeOutput = (message) => process.stdout.write(message),
 } = {}) {
-  const gitProbe = runProcess('git', ['rev-parse', '--git-dir'], {
-    cwd,
-    stdio: 'ignore',
-  });
-  throwSpawnError(gitProbe, 'git rev-parse --git-dir');
-  if (gitProbe.status !== 0) {
+  if (!ownsGitMetadata(cwd)) {
     writeOutput('Skipping lefthook install: not a Git checkout.\n');
     return 0;
   }

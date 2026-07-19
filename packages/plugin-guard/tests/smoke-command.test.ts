@@ -4,8 +4,8 @@ import { runDefaultSmokeCommand } from '../src/smoke-plugin-archive.js';
 describe('default archive smoke command diagnostics', () => {
   it('reports bounded stdout and stderr when a command fails', () => {
     const script = [
-      "process.stdout.write(`stdout-marker:${'x'.repeat(20_000)}`);",
-      "process.stderr.write(`stderr-marker:${'y'.repeat(20_000)}`);",
+      "process.stdout.write(`stdout-marker:${'x'.repeat(20_000)}:stdout-tail`);",
+      "process.stderr.write(`stderr-marker:${'y'.repeat(20_000)}:stderr-tail`);",
       'process.exit(23);',
     ].join('');
 
@@ -25,6 +25,8 @@ describe('default archive smoke command diagnostics', () => {
     expect(failure?.message).toContain('stdout-marker:');
     expect(failure?.message).toContain('stderr-marker:');
     expect(failure?.message).toContain('[truncated]');
+    expect(failure?.message).toMatch(/stdout:\nstdout-marker:[\s\S]*:stdout-tail\nstderr:/u);
+    expect(failure?.message).toMatch(/stderr:\nstderr-marker:[\s\S]*:stderr-tail$/u);
     expect(failure?.message.length).toBeLessThan(12_000);
   });
 });

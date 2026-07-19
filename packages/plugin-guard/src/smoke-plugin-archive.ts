@@ -78,7 +78,11 @@ function boundedDiagnostic(value: unknown): string | null {
         : null;
   if (output === null || output.length === 0) return null;
   if (output.length <= COMMAND_DIAGNOSTIC_LIMIT) return output.trimEnd();
-  return `${output.slice(0, COMMAND_DIAGNOSTIC_LIMIT).trimEnd()}\n[truncated]`;
+  const marker = '\n[truncated]\n';
+  const retainedLength = COMMAND_DIAGNOSTIC_LIMIT - marker.length;
+  const headLength = Math.ceil(retainedLength / 2);
+  const tailLength = Math.floor(retainedLength / 2);
+  return `${output.slice(0, headLength).trimEnd()}${marker}${output.slice(-tailLength).trimStart()}`;
 }
 
 function commandFailureStatus(error: unknown): string {
