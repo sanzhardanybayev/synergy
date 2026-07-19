@@ -658,12 +658,7 @@ function capturePr(options) {
 function captureStaged(options) {
   const runner = options.runner ?? systemCommandRunner;
   const patch = filterPreviewRuntimePatch(
-    runChecked(runner, options.root, "git", [
-      "diff",
-      "--cached",
-      "--no-ext-diff",
-      "--binary"
-    ])
+    runChecked(runner, options.root, "git", ["diff", "--cached", "--no-ext-diff", "--binary"])
   );
   const source = { kind: "staged", headSha: "" };
   const eligiblePaths = assertCapturedPatch(patch, "staged");
@@ -813,4 +808,4 @@ export {
   resolveRepositoryRoot,
   repositoryName
 };
-//# sourceMappingURL=chunk-UWMSMQ2G.js.map
+//# sourceMappingURL=chunk-QCNH5XEH.js.map
