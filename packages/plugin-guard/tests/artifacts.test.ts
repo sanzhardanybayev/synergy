@@ -68,6 +68,10 @@ function makeArtifactFixture(): ArtifactFixture {
 }
 
 describe('runtime artifact contract', () => {
+  it('requires the compiled preview child launcher', () => {
+    expect(REQUIRED_RUNTIME_ARTIFACTS).toContain('packages/cli/dist/preview-child.js');
+  });
+
   it('accepts a complete tracked artifact fixture', () => {
     const fixture = makeArtifactFixture();
 

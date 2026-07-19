@@ -13,6 +13,7 @@ export const RUNTIME_OUTPUT_ROOTS = [
 export const REQUIRED_RUNTIME_ARTIFACTS = [
   'packages/cli/dist/cli.js',
   'packages/cli/dist/index.js',
+  'packages/cli/dist/preview-child.js',
   'packages/review-core/dist/index.js',
   'packages/review-core/dist/source-capture-worker.js',
   'packages/spec-kit/dist/index.js',
