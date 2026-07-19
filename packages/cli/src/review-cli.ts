@@ -12,6 +12,7 @@ import type { CAC } from 'cac';
 import { bold, dim, green, red, yellow } from 'kleur/colors';
 import { parseDuration } from './feedback-wait.js';
 import {
+  PreviewNotReadyError,
   type ReviewAnalysis,
   applyReviewAnalysis,
   createOrResumeReview,
@@ -42,6 +43,10 @@ interface ReviewCommandFlags extends ReviewCreateFlags {
 }
 
 export class ReviewUsageError extends Error {}
+
+export interface ReviewCliDependencies {
+  openReview?: typeof openReview;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -160,7 +165,14 @@ function printCreateResult(
   );
 }
 
-function printError(error: unknown, exitCode: number): void {
+function printError(error: unknown, exitCode: number, json: boolean | undefined): void {
+  if (json && error instanceof PreviewNotReadyError) {
+    process.stdout.write(
+      `${JSON.stringify({ error: error.code, message: error.message, root: error.root })}\n`,
+    );
+    process.exitCode = exitCode;
+    return;
+  }
   const message = error instanceof Error ? error.message : 'unexpected review command failure';
   process.stderr.write(`${red('Error:')} ${message}\n`);
   process.exitCode = exitCode;
@@ -275,7 +287,13 @@ function assertActionOptions(action: ReviewAction, flags: ReviewCommandFlags): v
   if (action !== 'answer' && flags.review !== undefined) {
     throw new ReviewUsageError(`review ${action} does not accept --review`);
   }
-  if (action !== 'create' && action !== 'status' && action !== 'list' && flags.json === true) {
+  if (
+    action !== 'create' &&
+    action !== 'open' &&
+    action !== 'status' &&
+    action !== 'list' &&
+    flags.json === true
+  ) {
     throw new ReviewUsageError(`review ${action} does not accept --json`);
   }
 }
@@ -391,7 +409,8 @@ export async function runReviewWaitCommand(
   }
 }
 
-export function registerReviewCommands(cli: CAC): void {
+export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependencies = {}): void {
+  const open = dependencies.openReview ?? openReview;
   cli
     .command('review <action> [...references]', 'Manage local guided code reviews')
     .option('--root <dir>', 'Project root (default: cwd)')
@@ -455,7 +474,7 @@ export function registerReviewCommands(cli: CAC): void {
         }
         if (command.action === 'open') {
           const reference = requireValidatedValue(command.reference);
-          const url = openReview(root, reference);
+          const url = await open(root, reference);
           process.stdout.write(
             flags.json ? `${JSON.stringify({ reference: references[0], url })}\n` : `${url}\n`,
           );
@@ -521,7 +540,7 @@ export function registerReviewCommands(cli: CAC): void {
           return;
         }
       } catch (error) {
-        printError(error, error instanceof ReviewUsageError ? 2 : 1);
+        printError(error, error instanceof ReviewUsageError ? 2 : 1, flags.json);
       }
     });
 }

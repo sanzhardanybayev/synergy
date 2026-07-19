@@ -19,6 +19,7 @@ import {
   isReviewCoreError,
   reconcileReview,
 } from '@synergy/review-core';
+import { previewStatus } from './preview.js';
 import {
   type CaptureReviewSourceRequest,
   type CapturedReviewSource,
@@ -38,6 +39,18 @@ export interface CreateReviewResult {
 
 export interface ReviewActionDependencies {
   createStore?: typeof createReviewStore;
+}
+
+export interface OpenReviewDependencies {
+  previewStatus?: typeof previewStatus;
+}
+
+export class PreviewNotReadyError extends Error {
+  readonly code = 'preview_not_ready';
+
+  constructor(readonly root: string) {
+    super(`Preview is not ready. Run: synergy preview start --root ${JSON.stringify(root)}`);
+  }
 }
 
 export interface RefreshReviewRequest {
@@ -372,9 +385,15 @@ export function listReviews(root: string): ReviewWorkspace[] {
   return createReviewStore(root).listWorkspaces();
 }
 
-export function openReview(root: string, reference: ReviewRef): string {
+export async function openReview(
+  root: string,
+  reference: ReviewRef,
+  dependencies: OpenReviewDependencies = {},
+): Promise<string> {
   createReviewStore(root).readBundle(reference.workspaceId, reference.revisionId);
-  return reviewUrl(reference);
+  const status = await (dependencies.previewStatus ?? previewStatus)(root);
+  if (!status.running || status.origin === null) throw new PreviewNotReadyError(root);
+  return new URL(reviewUrl(reference), status.origin).toString();
 }
 
 export function getReviewStatus(request: ReviewStatusRequest): ReviewStatusResult {

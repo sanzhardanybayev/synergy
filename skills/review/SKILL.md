@@ -147,16 +147,17 @@ artifacts.
 
 ## 4. Open the review
 
-Start the preview idempotently, then ask the CLI for the immutable route:
+Start the preview idempotently, then ask the CLI for the immutable URL:
 
 ```text
 node "<synergy-root>/packages/cli/dist/cli.js" preview start --root "<project-root>"
 node "<synergy-root>/packages/cli/dist/cli.js" review open <workspace@revision> --root "<project-root>"
 ```
 
-Report the full `http://localhost:4321/r/<workspace>/<revision>` URL. If the preview cannot
-start, preserve the review and explain that CLI/file persistence still works; do not claim
-the browser is available.
+Report the exact full URL returned by `review open`; its origin comes from the verified
+runtime and may use an alternate port. If preview startup fails or `review open` returns
+`preview_not_ready`, preserve the review and relay its rooted corrective command; do not
+claim the browser is available.
 
 ## 5. Answer browser questions
 

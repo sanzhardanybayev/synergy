@@ -11,5 +11,6 @@ Examples: `/synergy-review --pr 317`, `/synergy-review --staged`,
 `/synergy-review --unstaged`, `/synergy-review --scope features/subscriptions`, or
 `/synergy-review --resume <workspace@revision>`.
 
-The shared skill owns capture, repository-aware analysis, preview startup, and the durable
-browser-question loop. Follow it exactly; do not reproduce that workflow in this command.
+The shared skill owns capture, repository-aware analysis, explicit preview startup,
+runtime-authoritative review URLs, and the durable browser-question loop. Follow it exactly;
+do not reproduce that workflow in this command.

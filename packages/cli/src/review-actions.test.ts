@@ -5,9 +5,11 @@ import { ReviewCoreError, createReviewStore, hashText, repositoryName } from '@s
 import { describe, expect, it } from 'vitest';
 import {
   type CreateReviewRequest,
+  PreviewNotReadyError,
   applyReviewAnalysis,
   createOrResumeReview,
   formatReviewStatusJson,
+  openReview,
   printReviewStatus,
 } from './review-actions.js';
 import type { CommandResult, CommandRunner } from './review-capture.js';
@@ -290,14 +292,87 @@ describe('review lifecycle actions', () => {
     }
   });
 
-  it('uses the review portal route for opening an immutable revision', () => {
+  it('opens an immutable revision at the verified preview runtime origin', async () => {
     const root = join(tmpdir(), `synergy-review-url-${Date.now()}`);
     mkdirSync(root, { recursive: true });
     try {
       const created = createOrResumeReview(createRequest(root));
-      expect(
-        printReviewStatus({ root, reference: created.reference, runner: createRunner() }),
-      ).toContain(`/r/${created.reference.workspaceId}/${created.reference.revisionId}`);
+      let statusCalls = 0;
+
+      const url = await openReview(root, created.reference, {
+        previewStatus: async (requestedRoot) => {
+          statusCalls += 1;
+          expect(requestedRoot).toBe(root);
+          return {
+            running: true,
+            pid: 123,
+            port: 43_222,
+            origin: 'http://127.0.0.1:43222',
+            projectId: 'project-id',
+            instanceId: 'instance-id',
+          };
+        },
+      });
+
+      expect(url).toBe(
+        `http://127.0.0.1:43222/r/${created.reference.workspaceId}/${created.reference.revisionId}`,
+      );
+      expect(statusCalls).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns a typed corrective error without starting preview when no runtime is healthy', async () => {
+    const root = join(tmpdir(), `Synergy Review No Runtime ${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      let statusCalls = 0;
+
+      await expect(
+        openReview(root, created.reference, {
+          previewStatus: async () => {
+            statusCalls += 1;
+            return {
+              running: false,
+              pid: null,
+              port: null,
+              origin: null,
+              projectId: 'project-id',
+              instanceId: null,
+            };
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: 'preview_not_ready',
+        root,
+        message: `Preview is not ready. Run: synergy preview start --root ${JSON.stringify(root)}`,
+      });
+      expect(statusCalls).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('validates the requested review bundle before checking preview status', async () => {
+    const root = join(tmpdir(), `synergy-review-missing-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    let statusChecked = false;
+    try {
+      await expect(
+        openReview(
+          root,
+          { workspaceId: 'missing-workspace', revisionId: 'missing-revision' },
+          {
+            previewStatus: async () => {
+              statusChecked = true;
+              throw new PreviewNotReadyError(root);
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'review_not_found' });
+      expect(statusChecked).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

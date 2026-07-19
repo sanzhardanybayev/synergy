@@ -13,9 +13,9 @@ Markdown specs go stale in a terminal. Synergy gives agents a tight component vo
 
 ![Animated demo of the Synergy preview: toggling between light and dark theme, opening the orchestrator slide-out drawer, editing a list item inline with Apply/Discard, and changing an agent's effort in the AgentTree with Save/Discard](docs/demo.gif)
 
-![Synergy preview: the full refactor-auth implementation plan at localhost:4321 - left sidebar with phases nested under Implementation, inline-edit toolbar (Apply all / Discard all / Diff toggle), copy-path buttons, theme toggle, Phase cards with live status badges (Done, In progress), the editable AgentTree with model/effort dropdowns, the agent allocation table, and the timeline](docs/screenshot.png)
+![Synergy preview: the full refactor-auth implementation plan - left sidebar with phases nested under Implementation, inline-edit toolbar (Apply all / Discard all / Diff toggle), copy-path buttons, theme toggle, Phase cards with live status badges (Done, In progress), the editable AgentTree with model/effort dropdowns, the agent allocation table, and the timeline](docs/screenshot.png)
 
-The preview at `http://localhost:4321` gives each MDX file its own route (`/s/<name>/overview`, `/architecture`, `/implementation`, `/phases/<slug>`), a hierarchical left sidebar (sessions dropdown, spec rows, phases nested under Implementation), and per-page copy-path buttons for the session dir, the current page, and the orchestrator. The orchestrator opens as a right-side slide-out drawer (ESC or backdrop to close) rendering `orchestrator.md`, and every page hot-reloads as Claude Code edits the MDX.
+The preview origin reported by `synergy preview status --json` gives each MDX file its own route (`/s/<name>/overview`, `/architecture`, `/implementation`, `/phases/<slug>`), a hierarchical left sidebar (sessions dropdown, spec rows, phases nested under Implementation), and per-page copy-path buttons for the session dir, the current page, and the orchestrator. The orchestrator opens as a right-side slide-out drawer (ESC or backdrop to close) rendering `orchestrator.md`, and every page hot-reloads as Claude Code edits the MDX.
 
 ## Edit & review in the browser
 
@@ -128,7 +128,7 @@ implement specification sessions; `/synergy-continue` resumes their execution st
 | `/synergy-continue [session] [directives]` | Continue an in-progress session from its execution-state hand-off. |
 | `/synergy-handoff [session]` | Capture a mid-work KT baton (`.state/handoff.md`) before you quit, so a future agent resumes inside the current phase. |
 | `/synergy-review <source>` | Create or resume a PR, staged, unstaged, or scoped guided review; open its exact revision and listen for browser questions. |
-| `/synergy-preview-start` | Boot the preview server on port 4321. Idempotent. |
+| `/synergy-preview-start` | Boot the preview server, preferring port 4321 and selecting a reachable alternate when needed. Idempotent. |
 | `/synergy-preview-stop` | Kill the preview server, remove PID file. |
 | `/synergy-preview-status` | Report running / stopped, pid, URL. |
 | `/synergy-setup` | One-time bootstrap (install + build). |
@@ -140,7 +140,7 @@ For terminal users — available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist
 | Command | Flags | Purpose |
 |---|---|---|
 | `synergy init` | `--root <dir>` | Scaffold `.synergy/` |
-| `synergy preview <action>` | `--root`, `--port` (default 4321) | `start \| stop \| status` |
+| `synergy preview <action>` | `--root`, `--port` (preferred default 4321), `--json` | `start \| stop \| status`; JSON status reports the verified runtime origin |
 | `synergy validate [session]` | `--root` | Validate sessions in `.synergy/sessions/` |
 | `synergy phase set <session> <id> <status>` | `--root`, `--note` | Record a phase status + optional boundary note |
 | `synergy log <session> <text>` | `--root`, `--phase <id>`, `--global` | Append a finding to a phase or the global journal |
@@ -151,17 +151,18 @@ For terminal users — available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist
 | `synergy review create` | exactly one of `--pr`, `--staged`, `--unstaged`, `--scope`; optional `--json` | Capture or resume an immutable review revision |
 | `synergy review refresh <workspace>` | `--root` | Capture current source and reconcile safe prior coverage |
 | `synergy review list` | `--root`, `--json` | List local review workspaces |
-| `synergy review open <workspace@revision>` | `--root` | Return the exact review portal route |
+| `synergy review open <workspace@revision>` | `--root`, `--json` | Return the full review URL from the verified preview runtime |
 | `synergy review status <workspace@revision>` | `--root`, `--json` | Report freshness and readiness blockers |
 | `synergy review wait <workspace@revision>` | `--root`, `--for <dur>` | Wait in the foreground for durable browser questions |
 | `synergy review answer <question-id>` | `--root`, `--review <workspace@revision>`, `--body-file <path>` | Persist an exact-revision answer |
 
 ### Daemon HTTP API (performance path)
 
-When the preview server is running on port 4321, skills and agents use these HTTP endpoints
-instead of spawning a fresh `node cli.js` process (~55 ms each). They hit the warm, cached
-server (~5 ms) and write the same git-committed `.state/` files as the CLI. The CLI remains
-the offline fallback when the preview is not running.
+When the preview server is running, skills and agents use these HTTP endpoints at the origin
+reported by `synergy preview status --json` instead of spawning a fresh `node cli.js` process
+(~55 ms each). They hit the warm, cached server (~5 ms) and write the same git-committed
+`.state/` files as the CLI. The CLI remains the offline fallback when the preview is not
+running.
 
 | Method + path | Replaces | Body / query |
 |---|---|---|
@@ -209,7 +210,7 @@ Four rules. Full text in [AGENTS.md](AGENTS.md).
 
 **"vite binary not found" or "command not found"** — the plugin's workspace isn't built. Run `/synergy-setup`. If pnpm itself is missing, `corepack enable` or `npm i -g pnpm`.
 
-**"port 4321 in use"** — another process owns the port. Run `/synergy-preview-stop` first; if a different program holds it, identify with `lsof -i :4321` and quit it before retrying.
+**Need a predictable preview port?** — startup prefers 4321 and otherwise selects a reachable alternate. Pass `--port <port>` only when a specific port is required, then consume the verified origin from `synergy preview status --json` or the full URL from `synergy review open`.
 
 **Validation fails on `<CrossRef>`** — the target slug or heading anchor doesn't exist in the session. Either fix the `to=` value or add the heading. Anchors are GitHub-style: lowercase, spaces → `-`, special chars stripped.
 

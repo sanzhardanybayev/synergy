@@ -24,7 +24,7 @@ Keep shared workflow logic in root skills. Claude commands must remain thin disp
 - One package per concern — do not let preview leak into spec-kit, or vice versa.
 - Each MDX session lives in `.synergy/sessions/YYYY-MM-DD-<slug-from-title>/`. Slug max 40 chars, lowercase, hyphenated. Collisions get a `-<6-char-hash>` suffix.
 - Phases live as first-class folders: `phases/<NN>-<slug>/spec.mdx` (required) + `orchestrator.md` (optional). `NN` is a zero-padded ordering integer; the slug is the stable identifier. Renumbering folders does not break cross-refs.
-- Preview server runs on **port 4321** (fixed). PID file at `.synergy/preview.pid`. Start is idempotent.
+- Preview startup prefers **port 4321** and selects a reachable alternate when needed. Runtime state records the verified origin; start is idempotent.
 - Cross-references use `<CrossRef to="03-data-model#user-table">` for sibling specs and `<CrossRef to="phases/<slug>" />` for phase folders (slug, not numeric prefix). Validator fails the build on dangling refs and warns on legacy phase forms like `02-implementation#phase-N`.
 - Spec authoring is owned by skills (`synergy:create-spec` for new sessions, `synergy:spec-authoring` for edits). There is no `synergy spec` CLI command — the CLI only handles process operations (`init`, `preview`, `validate`).
 
@@ -51,7 +51,7 @@ Keep shared workflow logic in root skills. Claude commands must remain thin disp
 
 ## Inline editing and feedback (v2)
 
-The preview at `http://localhost:4321` supports direct editing without a Claude round-trip:
+The preview origin reported by `synergy preview status --json` supports direct editing without a Claude round-trip:
 
 - **Apply / Discard editing.** Prose blocks (paragraphs, list items, headings) are
   contentEditable. Edits live in an in-browser buffer until explicitly applied via **Apply**
@@ -111,9 +111,9 @@ Skills + slash commands:
 
 ## Daemon HTTP API (performance path)
 
-When the preview server is running (port 4321), agents and skills SHOULD use these
-endpoints instead of spawning `node cli.js` (~55 ms/call) — they reuse the warm process
-and a mtime-keyed parse cache:
+When the preview server is running, agents and skills SHOULD use these endpoints at the
+verified origin from `synergy preview status --json` instead of spawning `node cli.js`
+(~55 ms/call) — they reuse the warm process and a mtime-keyed parse cache:
 
 | Method + path | Replaces | Body / query |
 |---|---|---|
@@ -133,7 +133,7 @@ When the preview is down, fall back to the `node cli.js …` command.
 
 ```
 synergy init                          scaffold .synergy/ in the cwd
-synergy preview <start|stop|status>   long-running preview server (port 4321, PID-tracked)
+synergy preview <start|stop|status>   long-running preview server (prefers port 4321)
 synergy validate [session]            parser + cross-ref check
 synergy phase set <session> <id> <status> [--note <text>]   record phase transition
 synergy log <session> <text> (--phase <id> | --global)      append finding to journal
@@ -145,7 +145,7 @@ synergy review create (--pr <n|url> | --staged | --unstaged | --scope <path>) [-
 synergy review refresh <workspaceId>
 synergy review analysis-set <workspace@revision> --body-file <path>
 synergy review list [--json]
-synergy review open <workspace@revision>
+synergy review open <workspace@revision> [--json]   return the verified runtime's full URL
 synergy review status <workspace@revision> [--json]
 synergy review wait <workspace@revision> [--for <dur>]
 synergy review answer <questionId> --review <workspace@revision> --body-file <path>
@@ -189,7 +189,7 @@ Claude Code slash commands: `/synergy-spec` (skill), `/synergy-review` (skill), 
 ## What not to do
 
 - Don't add a Next.js or Astro dependency to `packages/preview`. Vite + React + MDX only.
-- Don't pin the preview port to anything other than 4321 without updating this file and the plan.
+- Don't treat the preferred port `4321` as authoritative; use the verified runtime origin.
 - Don't write raw `[link](other-file.mdx)` markdown links between specs — use `<CrossRef>` so the validator can catch breakage.
 - Don't reference phases by their numeric prefix in CrossRefs (`phases/01-core` is wrong). Use the slug only: `<CrossRef to="phases/core" />`. The numeric prefix is for sort order, not identity.
 - Don't reintroduce `synergy spec` as a CLI command. The skill is the contract.
