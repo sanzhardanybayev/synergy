@@ -31,6 +31,7 @@ import {
   type PreviewStatus,
   createPreviewLifecycle,
 } from './preview.js';
+import { SYNERGY_VERSION } from './version.js';
 
 const CONTROL_TOKEN = 'a'.repeat(64);
 const OTHER_CONTROL_TOKEN = 'b'.repeat(64);
@@ -208,7 +209,7 @@ describe('preview lifecycle', () => {
     });
     expect(readPreviewRuntime(resolveProjectPaths(rootA).previewRuntimeFile)?.port).toBe(43_222);
     expect(readPreviewRuntime(resolveProjectPaths(rootA).previewRuntimeFile)?.toolVersion).toBe(
-      '0.12.1',
+      SYNERGY_VERSION,
     );
     await expect(lifecycle.status(rootA)).resolves.toMatchObject({
       timings: status.timings,

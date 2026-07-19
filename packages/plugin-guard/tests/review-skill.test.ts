@@ -9,6 +9,7 @@ const command = readFileSync(resolve(root, 'commands/synergy-review.md'), 'utf8'
 const analysisSchemaPath = resolve(root, 'packages/cli/src/review-analysis.schema.json');
 const benchmarkPath = resolve(root, 'scripts/benchmark-review-analysis.mjs');
 const performanceDocumentPath = resolve(root, 'docs/review-performance.md');
+const performanceRunsPath = resolve(root, 'docs/review-performance-runs.json');
 
 describe('synergy review skill contract', () => {
   it('has discoverable frontmatter and a synchronized freshness check', () => {
@@ -119,10 +120,16 @@ describe('synergy review skill contract', () => {
     assertStrictObjects(schema);
   });
 
-  it('ships an honest five-run performance gate and dogfood record template', () => {
+  it('ships an honest five-run performance gate and dogfood evidence record', () => {
     expect(existsSync(benchmarkPath)).toBe(true);
     expect(existsSync(performanceDocumentPath)).toBe(true);
-    if (!existsSync(benchmarkPath) || !existsSync(performanceDocumentPath)) return;
+    expect(existsSync(performanceRunsPath)).toBe(true);
+    if (
+      !existsSync(benchmarkPath) ||
+      !existsSync(performanceDocumentPath) ||
+      !existsSync(performanceRunsPath)
+    )
+      return;
 
     const benchmark = readFileSync(benchmarkPath, 'utf8');
     const performanceDocument = readFileSync(performanceDocumentPath, 'utf8');
@@ -143,6 +150,19 @@ describe('synergy review skill contract', () => {
     expect(performanceDocument).toContain('Unit count');
     expect(performanceDocument).toContain('Median');
     expect(performanceDocument).toContain('Maximum');
+
+    const evidence = JSON.parse(readFileSync(performanceRunsPath, 'utf8')) as {
+      runs?: unknown[];
+      summary?: { maximumUpperBoundMs?: number; medianUpperBoundMs?: number; passed?: boolean };
+      thresholdsMs?: { maximum?: number; median?: number };
+    };
+    expect(evidence.runs).toHaveLength(5);
+    expect(evidence.thresholdsMs).toEqual({ median: 210_000, maximum: 240_000 });
+    expect(evidence.summary).toEqual({
+      medianUpperBoundMs: 160_392,
+      maximumUpperBoundMs: 189_213,
+      passed: true,
+    });
   });
 
   it('keeps the durable question wait in the foreground and repeats it after answers', () => {

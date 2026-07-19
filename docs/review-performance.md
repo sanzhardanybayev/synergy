@@ -61,20 +61,37 @@ exceeds 210,000 ms or the maximum exceeds 240,000 ms.
 
 ## Five-run dogfood record
 
-Complete this section only with observed runs. Until then it is intentionally a blank evidence
-template, not a performance claim.
+Observed on 2026-07-19 with five independent live agent analyses. Each run captured a separate
+copy of the same representative review subsystem and produced its own payload from the immutable
+snapshot; no payload was replayed or copied between runs.
 
-- Environment: _pending_
-- Revision: _pending_
-- Scope: _pending; target approximately 15 TypeScript files / 3,000 lines_
-- Unit count: _pending for each run; explain any result outside guidance_
-- Median: _pending_
-- Maximum: _pending_
+- Environment: Apple Silicon macOS (Darwin 25.5.0), Node.js 24.17.0, pnpm 10.28.2
+- Revision: `dbd654e347b86155abbd7f4029608583877c7ad1` (`0.13.0` runtime)
+- Scope: 15 TypeScript files / 2,977 captured text lines per run
+- Guidance: 20–30 sections, target 25
+- Observed units: 25–30 sections in 7–8 groups; every run was within guidance
+- Median conservative time-to-review-ready: at most 160,392 ms
+- Maximum conservative time-to-review-ready: at most 189,213 ms
 
 | Run | capture | agentAnalysis | publication | previewReadiness | total | Unit count |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | pending | pending | pending | pending | pending | pending |
-| 2 | pending | pending | pending | pending | pending | pending |
-| 3 | pending | pending | pending | pending | pending | pending |
-| 4 | pending | pending | pending | pending | pending | pending |
-| 5 | pending | pending | pending | pending | pending | pending |
+| 1 | 91 ms | 128,966 ms | 95 ms | 177 ms | ≤135,781 ms | 29 |
+| 2 | ≤400 ms | 188,296 ms | ≤400 ms | 175 ms | ≤189,213 ms | 29 |
+| 3 | ≤400 ms | 163,590 ms | ≤300 ms | 141 ms | ≤164,359 ms | 30 |
+| 4 | 97 ms | 111,246 ms | 72 ms | 170 ms | ≤120,754 ms | 25 |
+| 5 | ≤300 ms | 159,692 ms | ≤300 ms | 173 ms | ≤160,392 ms | 29 |
+
+Runs 2, 3, and 5 recorded capture or publication in a wrapper that also read an adjacent
+timestamp or checked the payload. Their command phases and totals therefore use the wrapper's
+larger observed duration as a conservative upper bound. Runs 1 and 4 recorded command-only wall
+times. Each total uses the persisted snapshot-to-finalization interval plus the capture bound and
+preview lookup, rather than summing rounded sub-phases; this intentionally double-counts any
+capture tail after the snapshot timestamp and is therefore conservative. The agents ran in
+restricted sandboxes, so their post-finalization preview probe reported `previewReady: false`;
+the table's preview-readiness phase is the separately observed `review open --json` process
+duration against the already-running healthy preview, which returned the full immutable URL for
+every revision.
+
+The machine-readable observation record, including immutable references, timestamps,
+fingerprints, payload hashes, raw phase observations, and conservative totals, is committed in
+[`review-performance-runs.json`](review-performance-runs.json).
