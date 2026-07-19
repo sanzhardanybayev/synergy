@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
+  constants,
   closeSync,
+  copyFileSync,
   existsSync,
   fstatSync,
   mkdirSync,
@@ -115,6 +117,8 @@ const DEFAULT_DEPENDENCIES: PreviewLifecycleDependencies = {
   canonicalizeRoot: (root) => realpathSync(resolveProjectPaths(root).root),
   cleanupReserveMs: START_CLEANUP_RESERVE_MS,
   clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+  copyFileExclusive: (source, destination) =>
+    copyFileSync(source, destination, constants.COPYFILE_EXCL),
   createAttemptId: randomUUID,
   createControlToken: generateControlToken,
   createInstanceId: randomUUID,
@@ -274,8 +278,10 @@ function lockDependencies(
   dependencies: PreviewLifecycleDependencies,
 ): PreviewStartLockDependencies {
   return {
+    copyFileExclusive: dependencies.copyFileExclusive,
     createQuarantineId: dependencies.createQuarantineId,
     now: dependencies.now,
+    processKill: dependencies.processKill,
     wallNow: dependencies.wallNow,
     sleep: dependencies.sleep,
   };
@@ -364,6 +370,14 @@ function withLogTail(error: unknown, logFile: string): Error {
   return new Error(tail.length === 0 ? message : `${message}\nPreview log tail:\n${tail}`);
 }
 
+function withCleanupFailures(primary: Error, cleanupFailures: Error[]): Error {
+  if (cleanupFailures.length === 0) return primary;
+  const details = cleanupFailures.map((failure) => failure.message).join('; ');
+  return new Error(`${primary.message}\nPreview cleanup failed: ${details}`, {
+    cause: new AggregateError([primary, ...cleanupFailures]),
+  });
+}
+
 function buildRuntime(
   launch: PreviewChildLaunch,
   ready: ReadyPreviewChild,
@@ -409,6 +423,7 @@ async function startPreview(
   let child: PreviewChildHandle | null = null;
   let instanceId: string | null = null;
   let hasPublishedRuntime = false;
+  let shouldReleaseLock = true;
   try {
     lock = await acquirePreviewStartLock(
       {
@@ -469,14 +484,21 @@ async function startPreview(
     if (dependencies.now() > workDeadline) {
       throw new Error('Preview did not become ready within 10 seconds');
     }
+    const lockMs = lock.lockMs;
+    detachReadyPreviewChild(child);
+    shouldReleaseLock = false;
+    if (!lock.release()) throw new Error('Preview start lock release did not succeed');
+    lock = null;
+    if (dependencies.now() > totalDeadline) {
+      throw new Error('Preview did not become ready within 10 seconds');
+    }
     const timings: PreviewTimings = {
-      lockMs: lock.lockMs,
+      lockMs,
       launchMs,
       listenMs: ready.listenMs,
       healthMs,
       totalMs: dependencies.now() - invokedAt,
     };
-    detachReadyPreviewChild(child);
     dependencies.writeOutput(
       `${green('✓')} Preview started (pid ${runtime.pid}) at ${dim(runtime.origin)}\n`,
     );
@@ -485,19 +507,56 @@ async function startPreview(
     return runningStatus(runtime, timings);
   } catch (error) {
     const failure = withLogTail(error, paths.previewLogFile);
+    const cleanupFailures: Error[] = [];
     if (hasPublishedRuntime && instanceId !== null) {
-      dependencies.removeRuntime(paths.previewRuntimeFile, instanceId);
+      try {
+        if (!dependencies.removeRuntime(paths.previewRuntimeFile, instanceId)) {
+          cleanupFailures.push(new Error('runtime metadata removal did not succeed'));
+        }
+      } catch (cleanupError) {
+        cleanupFailures.push(
+          new Error(
+            `runtime metadata removal failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+          ),
+        );
+      }
     }
     if (child !== null) {
-      await terminateOwnedPreviewChild(
+      const didExit = await terminateOwnedPreviewChild(
         child,
         { deadline: totalDeadline, termGraceMs: dependencies.terminationGraceMs },
         processTimerDependencies(dependencies),
       );
+      if (!didExit) {
+        shouldReleaseLock = false;
+        try {
+          if (lock === null || !isPositiveInteger(child.pid) || !lock.updateOwnerPid(child.pid)) {
+            cleanupFailures.push(new Error('child PID lock fence could not be retained'));
+          }
+        } catch (fenceError) {
+          cleanupFailures.push(
+            new Error(
+              `child PID lock fence failed: ${fenceError instanceof Error ? fenceError.message : String(fenceError)}`,
+            ),
+          );
+        }
+      }
     }
-    throw failure;
+    if (lock !== null && shouldReleaseLock) {
+      shouldReleaseLock = false;
+      try {
+        if (!lock.release()) cleanupFailures.push(new Error('start lock release did not succeed'));
+      } catch (releaseError) {
+        cleanupFailures.push(
+          new Error(
+            `start lock release failed: ${releaseError instanceof Error ? releaseError.message : String(releaseError)}`,
+          ),
+        );
+      }
+    }
+    throw withCleanupFailures(failure, cleanupFailures);
   } finally {
-    lock?.release();
+    if (lock !== null && shouldReleaseLock) lock.release();
   }
 }
 

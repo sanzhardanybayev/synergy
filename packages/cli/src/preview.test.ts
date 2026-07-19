@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,6 +51,13 @@ class FakeChild extends EventEmitter implements PreviewChildHandle {
 
   unref(): void {
     this.unrefCalled = true;
+  }
+}
+
+class StuckChild extends FakeChild {
+  override kill(signal: NodeJS.Signals): boolean {
+    this.killedSignals.push(signal);
+    return true;
   }
 }
 
@@ -615,6 +622,134 @@ describe('preview lifecycle', () => {
     await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/10 seconds/i);
     expect(now).toBeLessThanOrEqual(10_000);
     expect(readPreviewRuntime(paths.previewRuntimeFile)).toBeNull();
+  });
+
+  it('reports cleanup failure when a committed runtime cannot be removed', async () => {
+    const paths = resolveProjectPaths(rootA);
+    let now = 0;
+    const lifecycle = createPreviewLifecycle({
+      now: () => now,
+      startTimeoutMs: 100,
+      cleanupReserveMs: 10,
+      createInstanceId: () => 'committed-instance',
+      createAttemptId: () => 'committed-attempt',
+      createControlToken: () => CONTROL_TOKEN,
+      spawnChild: (launch) => {
+        const child = new FakeChild(30_009);
+        queueMicrotask(() =>
+          child.emit('message', {
+            type: 'ready',
+            instanceId: launch.instanceId,
+            pid: child.pid,
+            port: 4321,
+            listenMs: 1,
+          }),
+        );
+        return child;
+      },
+      fetch: async () =>
+        jsonResponse({
+          protocolVersion: 1,
+          state: 'ready',
+          instanceId: 'committed-instance',
+          projectId: deriveProjectId(realpathSync(rootA)),
+          pid: 30_009,
+          port: 4321,
+        }),
+      writeRuntime: (path, runtime) => {
+        writePreviewRuntime(path, runtime);
+        now = 91;
+      },
+      removeRuntime: () => false,
+      writeOutput: () => undefined,
+    } as Partial<PreviewLifecycleDependencies> & {
+      cleanupReserveMs: number;
+      removeRuntime(path: string, instanceId: string): boolean;
+      writeRuntime(path: string, runtime: PreviewRuntimeState): void;
+    });
+
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/runtime metadata removal/i);
+    expect(readPreviewRuntime(paths.previewRuntimeFile)?.instanceId).toBe('committed-instance');
+  });
+
+  it('retains a child-PID lock fence when termination cannot be confirmed', async () => {
+    const paths = resolveProjectPaths(rootA);
+    let attempt = 0;
+    let spawnCount = 0;
+    const lifecycle = createPreviewLifecycle({
+      createAttemptId: () => `stuck-attempt-${++attempt}`,
+      createInstanceId: () => `stuck-instance-${attempt}`,
+      createControlToken: () => CONTROL_TOKEN,
+      lockStaleMs: 1,
+      pollIntervalMs: 1,
+      processKill: (pid, signal) => {
+        expect(pid).toBe(30_010);
+        expect(signal).toBe(0);
+        return true;
+      },
+      spawnChild: () => {
+        spawnCount += 1;
+        return new StuckChild(30_010);
+      },
+      startTimeoutMs: 50,
+      terminationGraceMs: 2,
+      writeOutput: () => undefined,
+    });
+
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/10 seconds/i);
+    expect(JSON.parse(readFileSync(paths.previewLockFile, 'utf8'))).toMatchObject({
+      attemptId: 'stuck-attempt-1',
+      pid: 30_010,
+    });
+
+    await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/start lock/i);
+    expect(spawnCount).toBe(1);
+    expect(existsSync(paths.previewLockFile)).toBe(true);
+  });
+
+  it('measures total startup time through child detachment and lock release', async () => {
+    let now = 0;
+    const lifecycle = createPreviewLifecycle({
+      now: () => now,
+      createQuarantineId: () => {
+        now += 7;
+        return 'timing-release';
+      },
+      createInstanceId: () => 'timing-instance',
+      createAttemptId: () => 'timing-attempt',
+      createControlToken: () => CONTROL_TOKEN,
+      spawnChild: (launch) => {
+        const child = new FakeChild(30_011);
+        child.disconnect = () => {
+          child.disconnected = true;
+          now += 5;
+        };
+        queueMicrotask(() =>
+          child.emit('message', {
+            type: 'ready',
+            instanceId: launch.instanceId,
+            pid: child.pid,
+            port: 4321,
+            listenMs: 1,
+          }),
+        );
+        return child;
+      },
+      fetch: async () =>
+        jsonResponse({
+          protocolVersion: 1,
+          state: 'ready',
+          instanceId: 'timing-instance',
+          projectId: deriveProjectId(realpathSync(rootA)),
+          pid: 30_011,
+          port: 4321,
+        }),
+      writeOutput: () => undefined,
+    });
+
+    const status = await lifecycle.start({ root: rootA });
+
+    expect(status.timings?.totalMs).toBe(12);
   });
 
   it('bounds stop from invocation instead of resetting its deadline after shutdown', async () => {

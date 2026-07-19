@@ -27,7 +27,7 @@ export async function tryDaemon(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    // PID file said "alive" but the socket refused — fall back in-process.
+    // The verified daemon disappeared before this request — fall back in-process.
     return null;
   }
   const text = await resp.text();

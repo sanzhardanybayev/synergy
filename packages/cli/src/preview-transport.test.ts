@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { requestPreviewHealth } from './preview-transport.js';
+import { requestPreviewHealth, requestPreviewShutdown } from './preview-transport.js';
 
 const HEALTH = {
   protocolVersion: 1,
@@ -62,20 +62,81 @@ describe('preview health transport', () => {
   });
 
   it('bounds a health response whose JSON body never settles', async () => {
-    const response = {
-      ok: true,
-      status: 200,
-      json: () => new Promise<unknown>(() => undefined),
-    } as Response;
+    const signals: AbortSignal[] = [];
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const response = new Response(
+      new ReadableStream({
+        cancel: () => cancel(),
+      }),
+    );
+    Object.defineProperty(response, 'json', {
+      value: () => new Promise<unknown>(() => undefined),
+    });
     const startedAt = performance.now();
 
     await expect(
       requestPreviewHealth('http://127.0.0.1:4321', 20, {
-        fetch: async () => response,
+        fetch: async (_input, init) => {
+          if (init?.signal) signals.push(init.signal);
+          return response;
+        },
       }),
     ).resolves.toEqual({ kind: 'timeout' });
 
     expect(performance.now() - startedAt).toBeLessThan(100);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('aborts and cancels non-2xx health and shutdown response bodies', async () => {
+    const signals: AbortSignal[] = [];
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const fetch = vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      if (init?.signal) signals.push(init.signal);
+      return new Response(
+        new ReadableStream({
+          cancel: () => cancel(),
+        }),
+        { status: 503 },
+      );
+    });
+
+    await expect(requestPreviewHealth('http://127.0.0.1:4321', 100, { fetch })).resolves.toEqual({
+      kind: 'http-error',
+      status: 503,
+    });
+    await expect(
+      requestPreviewShutdown('http://127.0.0.1:4321', 'instance-1', 'token', 100, { fetch }),
+    ).resolves.toEqual({ kind: 'http-error', status: 503 });
+
+    expect(signals).toHaveLength(2);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    expect(cancel).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts and cancels a body when the fetch consumes the complete deadline', async () => {
+    const signals: AbortSignal[] = [];
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const response = new Response(
+      new ReadableStream({
+        cancel: () => cancel(),
+      }),
+    );
+    let nowCalls = 0;
+
+    await expect(
+      requestPreviewHealth('http://127.0.0.1:4321', 100, {
+        now: () => (nowCalls++ === 0 ? 0 : 100),
+        fetch: async (_input, init) => {
+          if (init?.signal) signals.push(init.signal);
+          return response;
+        },
+      }),
+    ).resolves.toEqual({ kind: 'timeout' });
+
+    expect(signals[0]?.aborted).toBe(true);
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it('returns a fully validated healthy response', async () => {

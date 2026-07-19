@@ -1,13 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import {
+  constants,
   closeSync,
-  linkSync,
+  copyFileSync,
+  fstatSync,
+  fsyncSync,
+  ftruncateSync,
   openSync,
   readFileSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 
 interface PreviewStartLockRecord {
@@ -25,8 +30,10 @@ export interface PreviewStartLockOptions {
 }
 
 export interface PreviewStartLockDependencies {
+  copyFileExclusive(source: string, destination: string): void;
   createQuarantineId(): string;
   now(): number;
+  processKill(pid: number, signal: 0): boolean;
   wallNow(): number;
   sleep(milliseconds: number): Promise<void>;
 }
@@ -34,11 +41,15 @@ export interface PreviewStartLockDependencies {
 export interface AcquiredPreviewStartLock {
   lockMs: number;
   release(): boolean;
+  updateOwnerPid(pid: number): boolean;
 }
 
 const DEFAULT_DEPENDENCIES: PreviewStartLockDependencies = {
+  copyFileExclusive: (source, destination) =>
+    copyFileSync(source, destination, constants.COPYFILE_EXCL),
   createQuarantineId: randomUUID,
   now: () => performance.now(),
+  processKill: (pid, signal) => process.kill(pid, signal),
   wallNow: Date.now,
   sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
 };
@@ -51,7 +62,7 @@ function hasErrorCode(error: unknown, code: string): boolean {
   return isRecord(error) && error.code === code;
 }
 
-function readLockRecord(path: string): PreviewStartLockRecord | null {
+function readLockRecord(path: string | number): PreviewStartLockRecord | null {
   try {
     const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
     if (
@@ -78,18 +89,17 @@ function quarantinePath(
   return `${path}.${attemptId}.${dependencies.createQuarantineId()}.quarantine`;
 }
 
-function restoreWithoutOverwrite(capturedPath: string, lockPath: string): void {
+function restoreWithoutOverwrite(
+  capturedPath: string,
+  lockPath: string,
+  dependencies: PreviewStartLockDependencies,
+): void {
   try {
-    linkSync(capturedPath, lockPath);
+    dependencies.copyFileExclusive(capturedPath, lockPath);
   } catch (error) {
     if (!hasErrorCode(error, 'EEXIST')) throw error;
-  } finally {
-    try {
-      unlinkSync(capturedPath);
-    } catch {
-      // A concurrent recovery may already have removed the captured link.
-    }
   }
+  unlinkSync(capturedPath);
 }
 
 function captureCurrentLock(
@@ -116,29 +126,32 @@ function recoverCapturedLock(
   const capturedPath = captureCurrentLock(path, attemptId, dependencies);
   if (capturedPath === null) return true;
 
+  const capturedRecord = readLockRecord(capturedPath);
+  let capturedAgeMs: number;
   try {
-    const capturedRecord = readLockRecord(capturedPath);
-    const capturedAgeMs = dependencies.wallNow() - statSync(capturedPath).mtimeMs;
-    if (capturedAgeMs >= staleMs) {
-      unlinkSync(capturedPath);
-      return true;
-    }
-
-    if (capturedRecord?.attemptId === attemptId) {
-      unlinkSync(capturedPath);
-      return true;
-    }
-
-    restoreWithoutOverwrite(capturedPath, path);
-    return false;
-  } catch {
-    try {
-      restoreWithoutOverwrite(capturedPath, path);
-    } catch {
-      // A successor may already be authoritative at the lock path.
-    }
+    capturedAgeMs = dependencies.wallNow() - statSync(capturedPath).mtimeMs;
+  } catch (error) {
+    restoreWithoutOverwrite(capturedPath, path, dependencies);
+    throw error;
+  }
+  if (capturedAgeMs < staleMs) {
+    restoreWithoutOverwrite(capturedPath, path, dependencies);
     return false;
   }
+  if (capturedRecord === null) {
+    unlinkSync(capturedPath);
+    return true;
+  }
+  try {
+    dependencies.processKill(capturedRecord.pid, 0);
+  } catch (error) {
+    if (hasErrorCode(error, 'ESRCH')) {
+      unlinkSync(capturedPath);
+      return true;
+    }
+  }
+  restoreWithoutOverwrite(capturedPath, path, dependencies);
+  return false;
 }
 
 function mayBeStale(
@@ -170,12 +183,32 @@ function releaseOwnedLock(
     }
   }
 
-  try {
-    restoreWithoutOverwrite(capturedPath, path);
-  } catch {
-    // A successor may already be authoritative at the lock path.
-  }
+  restoreWithoutOverwrite(capturedPath, path, dependencies);
   return false;
+}
+
+function updateOwnedLockPid(path: string, attemptId: string, pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, 'r+');
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) return false;
+    throw error;
+  }
+  try {
+    const record = readLockRecord(descriptor);
+    if (record?.attemptId !== attemptId) return false;
+    const updated: PreviewStartLockRecord = { ...record, pid };
+    ftruncateSync(descriptor, 0);
+    writeSync(descriptor, `${JSON.stringify(updated)}\n`, 0, 'utf8');
+    fsyncSync(descriptor);
+    const descriptorState = fstatSync(descriptor);
+    const pathState = statSync(path);
+    return descriptorState.dev === pathState.dev && descriptorState.ino === pathState.ino;
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 export async function acquirePreviewStartLock(
@@ -200,6 +233,7 @@ export async function acquirePreviewStartLock(
       return {
         lockMs: dependencies.now() - lockStartedAt,
         release: () => releaseOwnedLock(options.path, options.attemptId, dependencies),
+        updateOwnerPid: (pid) => updateOwnedLockPid(options.path, options.attemptId, pid),
       };
     } catch (error) {
       if (!hasErrorCode(error, 'EEXIST')) throw error;

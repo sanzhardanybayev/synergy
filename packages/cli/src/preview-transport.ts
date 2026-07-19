@@ -24,6 +24,7 @@ export interface PreviewTransportDependencies {
 interface ResponseOutcome {
   kind: 'response';
   response: Response;
+  controller: AbortController;
 }
 
 type RequestOutcome =
@@ -111,7 +112,7 @@ function requestWithTimeout(
     }, timeoutMs);
     void dependencies
       .fetch(input, { ...init, signal: controller.signal })
-      .then((response) => settle({ kind: 'response', response }))
+      .then((response) => settle({ kind: 'response', response, controller }))
       .catch((error: unknown) => {
         if (errorCode(error) === 'ECONNREFUSED') settle({ kind: 'absent' });
         else settle({ kind: 'transport-error', error });
@@ -121,10 +122,14 @@ function requestWithTimeout(
 
 function readJsonWithTimeout(
   response: Response,
+  controller: AbortController,
   timeoutMs: number,
   dependencies: PreviewTransportDependencies,
 ): Promise<{ kind: 'json'; value: unknown } | { kind: 'timeout' } | { kind: 'malformed' }> {
-  if (timeoutMs <= 0) return Promise.resolve({ kind: 'timeout' });
+  if (timeoutMs <= 0) {
+    abortAndCancelResponse(response, controller);
+    return Promise.resolve({ kind: 'timeout' });
+  }
   return new Promise((resolve) => {
     let settled = false;
     let timer: unknown = null;
@@ -136,12 +141,25 @@ function readJsonWithTimeout(
       if (timer !== null) dependencies.clearTimer(timer);
       resolve(outcome);
     };
-    timer = dependencies.setTimer(() => settle({ kind: 'timeout' }), timeoutMs);
+    timer = dependencies.setTimer(() => {
+      abortAndCancelResponse(response, controller);
+      settle({ kind: 'timeout' });
+    }, timeoutMs);
     void response
       .json()
       .then((value: unknown) => settle({ kind: 'json', value }))
       .catch(() => settle({ kind: 'malformed' }));
   });
+}
+
+function abortAndCancelResponse(response: Response, controller: AbortController): void {
+  controller.abort();
+  try {
+    const cancellation = response.body?.cancel();
+    if (cancellation !== undefined) void cancellation.catch(() => undefined);
+  } catch {
+    // Aborting the request remains the authoritative cancellation for a locked body.
+  }
 }
 
 export async function requestPreviewHealth(
@@ -158,9 +176,13 @@ export async function requestPreviewHealth(
     dependencies,
   );
   if (outcome.kind !== 'response') return outcome;
-  if (!outcome.response.ok) return { kind: 'http-error', status: outcome.response.status };
+  if (!outcome.response.ok) {
+    abortAndCancelResponse(outcome.response, outcome.controller);
+    return { kind: 'http-error', status: outcome.response.status };
+  }
   const body = await readJsonWithTimeout(
     outcome.response,
+    outcome.controller,
     timeoutMs - (dependencies.now() - startedAt),
     dependencies,
   );
@@ -191,6 +213,7 @@ export async function requestPreviewShutdown(
     dependencies,
   );
   if (outcome.kind === 'response') {
+    abortAndCancelResponse(outcome.response, outcome.controller);
     return outcome.response.ok
       ? { kind: 'accepted' }
       : { kind: 'http-error', status: outcome.response.status };

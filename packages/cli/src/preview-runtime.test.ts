@@ -211,4 +211,21 @@ describe('preview runtime', () => {
     rmSync(readyPath);
     expect(readdirSync(tempDir).sort()).toEqual(['preview.runtime.json']);
   });
+
+  it.each(['EPERM', 'ENOTSUP', 'EIO'])(
+    'preserves the captured runtime quarantine and propagates a %s restore failure',
+    (code) => {
+      writePreviewRuntime(runtimePath, createRuntimeState({ instanceId: 'instance-b' }));
+
+      expect(() =>
+        removeOwnedPreviewRuntime(runtimePath, INSTANCE_ID, {
+          copyFileExclusive: () => {
+            throw Object.assign(new Error(`restore ${code}`), { code });
+          },
+        }),
+      ).toThrow(`restore ${code}`);
+      expect(existsSync(runtimePath)).toBe(false);
+      expect(readdirSync(tempDir).some((entry) => entry.endsWith('.quarantine'))).toBe(true);
+    },
+  );
 });

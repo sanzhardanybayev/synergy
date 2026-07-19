@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
-  chmodSync,
+  constants,
   closeSync,
-  linkSync,
+  copyFileSync,
   openSync,
   readFileSync,
   renameSync,
@@ -41,6 +41,15 @@ const LOOPBACK_HOST = '127.0.0.1';
 const MAX_PORT = 65_535;
 const CONTROL_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
+export interface PreviewRuntimeFileDependencies {
+  copyFileExclusive(source: string, destination: string): void;
+}
+
+const DEFAULT_FILE_DEPENDENCIES: PreviewRuntimeFileDependencies = {
+  copyFileExclusive: (source, destination) =>
+    copyFileSync(source, destination, constants.COPYFILE_EXCL),
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -76,14 +85,17 @@ function quarantinePath(path: string): string {
   return join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.quarantine`);
 }
 
-function restoreCapturedFile(capturedPath: string, destinationPath: string): void {
+function restoreCapturedFile(
+  capturedPath: string,
+  destinationPath: string,
+  dependencies: PreviewRuntimeFileDependencies,
+): void {
   try {
-    linkSync(capturedPath, destinationPath);
+    dependencies.copyFileExclusive(capturedPath, destinationPath);
   } catch (error) {
     if (!hasErrorCode(error, 'EEXIST')) throw error;
-  } finally {
-    unlinkSync(capturedPath);
   }
+  unlinkSync(capturedPath);
 }
 
 function parsePreviewRuntime(value: unknown): PreviewRuntimeState | null {
@@ -202,7 +214,6 @@ export function writePreviewRuntime(path: string, state: PreviewRuntimeState): v
     closeSync(fileDescriptor);
     renameSync(tempPath, path);
     shouldRemoveTempFile = false;
-    chmodSync(path, 0o600);
   } finally {
     if (shouldRemoveTempFile) {
       try {
@@ -219,31 +230,26 @@ export function writePreviewRuntime(path: string, state: PreviewRuntimeState): v
   }
 }
 
-export function removeOwnedPreviewRuntime(path: string, instanceId: string): boolean {
+export function removeOwnedPreviewRuntime(
+  path: string,
+  instanceId: string,
+  dependencyOverrides: Partial<PreviewRuntimeFileDependencies> = {},
+): boolean {
+  const dependencies = { ...DEFAULT_FILE_DEPENDENCIES, ...dependencyOverrides };
   const capturedPath = quarantinePath(path);
   try {
     renameSync(path, capturedPath);
   } catch (error) {
     if (hasErrorCode(error, 'ENOENT')) return false;
-    return false;
+    throw error;
   }
 
-  try {
-    const runtime = readPreviewRuntime(capturedPath);
-    if (runtime !== null && runtime.instanceId === instanceId) {
-      unlinkSync(capturedPath);
-      return true;
-    }
-
-    restoreCapturedFile(capturedPath, path);
-    return false;
-  } catch {
-    try {
-      if (readPreviewRuntime(capturedPath) !== null) restoreCapturedFile(capturedPath, path);
-      else unlinkSync(capturedPath);
-    } catch {
-      // A successor or concurrent cleanup may already own the destination and quarantine.
-    }
-    return false;
+  const runtime = readPreviewRuntime(capturedPath);
+  if (runtime !== null && runtime.instanceId === instanceId) {
+    unlinkSync(capturedPath);
+    return true;
   }
+
+  restoreCapturedFile(capturedPath, path, dependencies);
+  return false;
 }
