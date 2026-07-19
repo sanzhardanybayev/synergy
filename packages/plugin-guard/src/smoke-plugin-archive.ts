@@ -67,16 +67,51 @@ interface PreviewHealth {
 
 const CLI_PATH = 'packages/cli/dist/cli.js';
 const RUNTIME_FILE = '.synergy/preview.runtime.json';
+const COMMAND_DIAGNOSTIC_LIMIT = 4_096;
 
-function defaultCommandRunner(invocation: SmokeCommand): SmokeCommandResult {
-  return {
-    stdout: execFileSync(invocation.command, invocation.args, {
-      cwd: invocation.cwd,
-      encoding: 'utf8',
-      env: { ...process.env, CI: '1' },
-      maxBuffer: 10 * 1024 * 1024,
-    }),
-  };
+function boundedDiagnostic(value: unknown): string | null {
+  const output =
+    typeof value === 'string'
+      ? value
+      : value instanceof Uint8Array
+        ? Buffer.from(value).toString('utf8')
+        : null;
+  if (output === null || output.length === 0) return null;
+  if (output.length <= COMMAND_DIAGNOSTIC_LIMIT) return output.trimEnd();
+  return `${output.slice(0, COMMAND_DIAGNOSTIC_LIMIT).trimEnd()}\n[truncated]`;
+}
+
+function commandFailureStatus(error: unknown): string {
+  if (!isRecord(error)) return 'unknown';
+  return typeof error.status === 'number' ? String(error.status) : 'unknown';
+}
+
+export function runDefaultSmokeCommand(invocation: SmokeCommand): SmokeCommandResult {
+  try {
+    return {
+      stdout: execFileSync(invocation.command, invocation.args, {
+        cwd: invocation.cwd,
+        encoding: 'utf8',
+        env: { ...process.env, CI: '1' },
+        maxBuffer: 10 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    };
+  } catch (error) {
+    const command = boundedDiagnostic(
+      [invocation.command, ...invocation.args].map((value) => JSON.stringify(value)).join(' '),
+    );
+    const stdout = isRecord(error) ? boundedDiagnostic(error.stdout) : null;
+    const stderr = isRecord(error) ? boundedDiagnostic(error.stderr) : null;
+    const reason = boundedDiagnostic(error instanceof Error ? error.message : String(error));
+    const diagnostics = [
+      `Archive smoke command failed (exit ${commandFailureStatus(error)}): ${command ?? invocation.command}`,
+      stdout === null ? null : `stdout:\n${stdout}`,
+      stderr === null ? null : `stderr:\n${stderr}`,
+      stdout === null && stderr === null && reason !== null ? `reason:\n${reason}` : null,
+    ].filter((value): value is string => value !== null);
+    throw new Error(diagnostics.join('\n'), { cause: error });
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -424,7 +459,7 @@ export async function runPluginArchiveSmoke(
   const ownsTemporaryRoot = options.temporaryRoot === undefined;
   const temporaryRoot =
     options.temporaryRoot ?? mkdtempSync(join(tmpdir(), 'synergy-plugin-archive-'));
-  const runCommand = options.runCommand ?? defaultCommandRunner;
+  const runCommand = options.runCommand ?? runDefaultSmokeCommand;
   const fetch = options.fetch ?? globalThis.fetch;
   const archiveTar = join(temporaryRoot, 'plugin.tar');
   const archiveRoot = join(temporaryRoot, 'archive');
