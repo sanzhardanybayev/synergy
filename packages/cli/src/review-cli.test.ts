@@ -100,6 +100,61 @@ describe('review CLI source flags', () => {
     }
   });
 
+  it('reports strict analysis validation failures with exact JSON paths', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-analysis-'));
+    temporaryRoots.push(root);
+    const validItem = {
+      reviewItemId: 'item-1',
+      description: 'Explains the captured change.',
+      confidence: 'high',
+      evidencePaths: ['src/example.ts'],
+    };
+    const validGroup = {
+      id: 'example',
+      label: 'Example',
+      reviewItemIds: ['item-1'],
+    };
+    const cases: Array<{ body: string; expectedPath: string; name: string }> = [
+      { name: 'invalid JSON', body: '{invalid', expectedPath: '$' },
+      {
+        name: 'unknown nested key',
+        body: JSON.stringify({
+          groups: [validGroup],
+          items: [{ ...validItem, extra: true }],
+        }),
+        expectedPath: '$.items[0].extra',
+      },
+      {
+        name: 'mixed contracts',
+        body: JSON.stringify({
+          groups: [validGroup],
+          items: [validItem],
+          sections: [],
+        }),
+        expectedPath: '$.items',
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const bodyFile = join(root, `analysis-${index}.json`);
+      writeFileSync(bodyFile, testCase.body, 'utf8');
+
+      const result = await runReviewCli([
+        'analysis-set',
+        'workspace@revision',
+        '--body-file',
+        bodyFile,
+        '--root',
+        '/not-a-repository',
+      ]);
+
+      expect(result.exitCode, testCase.name).toBe(2);
+      expect(result.stdout, testCase.name).toBe('');
+      expect(result.stderr, testCase.name).toContain(testCase.expectedPath);
+      expect(result.stderr, testCase.name).not.toMatch(/Git capture|repository root/i);
+    }
+  });
+
   it('executes list through CAC from a nested directory using the canonical Git root', async () => {
     const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-'));
     temporaryRoots.push(root);

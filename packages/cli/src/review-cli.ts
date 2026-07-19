@@ -7,7 +7,6 @@ import {
   parseReviewRef,
   writeAnswer,
 } from '@synergy/review-core';
-import type { ProposedCodeSection, ReviewInsightConfidence } from '@synergy/review-core';
 import type { CAC } from 'cac';
 import { bold, dim, green, red, yellow } from 'kleur/colors';
 import { parseDuration } from './feedback-wait.js';
@@ -22,6 +21,7 @@ import {
   printReviewStatus,
   refreshReview,
 } from './review-actions.js';
+import { type ReviewAnalysisInput, parseReviewAnalysisInput } from './review-analysis.js';
 import { type ReviewCaptureSourceRequest, resolveRepositoryRoot } from './review-capture.js';
 import { type ReviewWaitResult, waitForReviewQuestions } from './review-wait.js';
 
@@ -46,87 +46,6 @@ export class ReviewUsageError extends Error {}
 
 export interface ReviewCliDependencies {
   openReview?: typeof openReview;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isReviewInsightConfidence(value: unknown): value is ReviewInsightConfidence {
-  return value === 'high' || value === 'medium' || value === 'low';
-}
-
-function isIntegerNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value);
-}
-
-function readAnalysis(body: string): ReviewAnalysis {
-  let value: unknown;
-  try {
-    value = JSON.parse(body);
-  } catch {
-    throw new Error('analysis body must contain valid JSON');
-  }
-  if (!isRecord(value) || !Array.isArray(value.groups) || !Array.isArray(value.items)) {
-    throw new Error('analysis body must include groups and items arrays');
-  }
-  const groups = value.groups.map((group) => {
-    if (
-      !isRecord(group) ||
-      typeof group.id !== 'string' ||
-      typeof group.label !== 'string' ||
-      !Array.isArray(group.reviewItemIds) ||
-      !group.reviewItemIds.every((item) => typeof item === 'string')
-    ) {
-      throw new Error('analysis groups must contain id, label, and reviewItemIds');
-    }
-    return { id: group.id, label: group.label, reviewItemIds: group.reviewItemIds };
-  });
-  const items = value.items.map((item) => {
-    if (
-      !isRecord(item) ||
-      typeof item.reviewItemId !== 'string' ||
-      typeof item.description !== 'string' ||
-      !isReviewInsightConfidence(item.confidence) ||
-      !Array.isArray(item.evidencePaths) ||
-      !item.evidencePaths.every((path) => typeof path === 'string')
-    ) {
-      throw new Error(
-        'analysis items must contain reviewItemId, description, confidence, and evidencePaths',
-      );
-    }
-    const confidence = item.confidence;
-    return {
-      reviewItemId: item.reviewItemId,
-      description: item.description,
-      confidence,
-      evidencePaths: item.evidencePaths,
-    };
-  });
-  let sections: ProposedCodeSection[] | undefined;
-  if (value.sections !== undefined) {
-    if (!Array.isArray(value.sections)) throw new Error('analysis sections must be an array');
-    sections = value.sections.map((section) => {
-      if (
-        !isRecord(section) ||
-        typeof section.path !== 'string' ||
-        typeof section.label !== 'string' ||
-        !isIntegerNumber(section.start) ||
-        !isIntegerNumber(section.end) ||
-        (section.parentLabel !== undefined && typeof section.parentLabel !== 'string')
-      ) {
-        throw new Error('analysis sections must contain path, label, start, and end');
-      }
-      return {
-        path: section.path,
-        label: section.label,
-        start: section.start,
-        end: section.end,
-        ...(section.parentLabel === undefined ? {} : { parentLabel: section.parentLabel }),
-      };
-    });
-  }
-  return { groups, items, ...(sections === undefined ? {} : { sections }) };
 }
 
 export function createReviewSourceFromFlags(flags: ReviewCreateFlags): ReviewCaptureSourceRequest {
@@ -187,13 +106,28 @@ function parseUsageReviewRef(value: string) {
   }
 }
 
-function readUsageAnalysis(path: string): ReviewAnalysis {
+function readUsageAnalysis(path: string): ReviewAnalysisInput {
   try {
-    return readAnalysis(readFileSync(path, 'utf8'));
+    const body = readFileSync(path, 'utf8');
+    let value: unknown;
+    try {
+      value = JSON.parse(body);
+    } catch {
+      throw new ReviewUsageError('$ must contain valid JSON');
+    }
+    return parseReviewAnalysisInput(value);
   } catch (error) {
+    if (error instanceof ReviewUsageError) throw error;
     const detail = error instanceof Error ? error.message : 'invalid analysis body';
     throw new ReviewUsageError(detail);
   }
+}
+
+function toLegacyReviewAnalysis(analysis: ReviewAnalysisInput): ReviewAnalysis {
+  if (analysis.kind === 'scope') {
+    throw new ReviewUsageError('scoped local-key analysis requires translation before application');
+  }
+  return { groups: analysis.groups, items: analysis.items };
 }
 
 function readUsageAnswer(path: string): string {
@@ -224,7 +158,7 @@ interface ValidatedReviewCommand {
   source?: ReviewCaptureSourceRequest;
   workspaceId?: string;
   reference?: ReturnType<typeof parseReviewRef>;
-  analysis?: ReviewAnalysis;
+  analysis?: ReviewAnalysisInput;
   questionId?: string;
   answerBody?: string;
   timeoutMs?: number;
@@ -448,7 +382,7 @@ export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependen
           applyReviewAnalysis({
             root,
             reference: requireValidatedValue(command.reference),
-            analysis: requireValidatedValue(command.analysis),
+            analysis: toLegacyReviewAnalysis(requireValidatedValue(command.analysis)),
           });
           process.stdout.write(
             `${green('✓')} analysis recorded for ${bold(references[0] ?? '')}\n`,
