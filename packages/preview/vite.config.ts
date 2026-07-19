@@ -6,6 +6,7 @@ import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { defineConfig } from 'vite';
 import { rehypeSourceRange } from './src/rehype-source-range.js';
+import type { RuntimeApiOptions } from './src/server/runtime-api.js';
 import { buildFsAllowList } from './vite-fs-allow.js';
 import { synergyEditPlugin } from './vite-plugin-edit.js';
 import { synergySessionsPlugin } from './vite-plugin-sessions.js';
@@ -17,13 +18,40 @@ const projectRoot = process.env.SYNERGY_PROJECT_ROOT ?? process.cwd();
 const sessionsDir =
   process.env.SYNERGY_SESSIONS_DIR ?? resolve(projectRoot, '.synergy', 'sessions');
 const port = Number(process.env.SYNERGY_PORT ?? 4321);
+const strictPort = process.env.SYNERGY_STRICT_PORT === 'true';
+
+function createRuntimeOptions(): RuntimeApiOptions | undefined {
+  const instanceId = process.env.SYNERGY_INSTANCE_ID;
+  const projectId = process.env.SYNERGY_PROJECT_ID;
+  const controlToken = process.env.SYNERGY_CONTROL_TOKEN;
+  if (instanceId === undefined || projectId === undefined || controlToken === undefined) {
+    return undefined;
+  }
+
+  return {
+    health: {
+      protocolVersion: 1,
+      state: 'ready',
+      instanceId,
+      projectId,
+      pid: process.pid,
+      port,
+    },
+    controlToken,
+    async shutdown() {
+      process.kill(process.pid, 'SIGTERM');
+    },
+  };
+}
+
+const runtime = createRuntimeOptions();
 
 export default defineConfig({
   root: __dirname,
   server: {
     port,
-    strictPort: true,
-    host: 'localhost',
+    strictPort,
+    host: '127.0.0.1',
     fs: {
       // Allow vite to serve files outside of cwd: the sessions dir plus the
       // self-hosted font assets (see vite-fs-allow.ts).
@@ -54,9 +82,6 @@ export default defineConfig({
     },
     react(),
     synergySessionsPlugin({ sessionsDir }),
-    synergyEditPlugin({ sessionsDir, projectRoot }),
+    synergyEditPlugin({ sessionsDir, projectRoot, runtime }),
   ],
-  define: {
-    __SYNERGY_PORT__: JSON.stringify(port),
-  },
 });
