@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -38,6 +38,10 @@ export interface PreviewHealth {
 
 const LOOPBACK_HOST = '127.0.0.1';
 const MAX_PORT = 65_535;
+const CONTROL_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
+const MUTATION_LOCK_RETRY_MS = 10;
+const MUTATION_LOCK_TIMEOUT_MS = 5_000;
+const MUTATION_LOCK_SLEEP = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -60,6 +64,40 @@ function isIsoTimestamp(value: unknown): value is string {
 
   const parsedTimestamp = new Date(value);
   return !Number.isNaN(parsedTimestamp.getTime()) && parsedTimestamp.toISOString() === value;
+}
+
+function isControlToken(value: unknown): value is string {
+  return typeof value === 'string' && CONTROL_TOKEN_PATTERN.test(value);
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return isRecord(error) && error.code === code;
+}
+
+function withMutationLock<T>(runtimePath: string, operation: () => T): T {
+  const lockPath = `${runtimePath}.mutation.lock`;
+  const deadline = Date.now() + MUTATION_LOCK_TIMEOUT_MS;
+  let lockDescriptor: number;
+
+  while (true) {
+    try {
+      lockDescriptor = openSync(lockPath, 'wx', 0o600);
+      break;
+    } catch (error) {
+      if (!hasErrorCode(error, 'EEXIST') || Date.now() >= deadline) throw error;
+      Atomics.wait(MUTATION_LOCK_SLEEP, 0, 0, MUTATION_LOCK_RETRY_MS);
+    }
+  }
+
+  try {
+    return operation();
+  } finally {
+    try {
+      closeSync(lockDescriptor);
+    } finally {
+      unlinkSync(lockPath);
+    }
+  }
 }
 
 function parsePreviewRuntime(value: unknown): PreviewRuntimeState | null {
@@ -117,7 +155,7 @@ function parsePreviewRuntime(value: unknown): PreviewRuntimeState | null {
     !isPort(preferredPort) ||
     typeof strictPort !== 'boolean' ||
     !isIsoTimestamp(startedAt) ||
-    !isNonEmptyString(controlToken) ||
+    !isControlToken(controlToken) ||
     !isNonEmptyString(toolVersion)
   ) {
     return null;
@@ -153,6 +191,10 @@ export function deriveLoopbackOrigin(port: number): string {
   return `http://${LOOPBACK_HOST}:${port}`;
 }
 
+export function generateControlToken(): string {
+  return randomBytes(32).toString('hex');
+}
+
 export function readPreviewRuntime(path: string): PreviewRuntimeState | null {
   try {
     return parsePreviewRuntime(JSON.parse(readFileSync(path, 'utf8')));
@@ -165,39 +207,43 @@ export function writePreviewRuntime(path: string, state: PreviewRuntimeState): v
   const validatedState = parsePreviewRuntime(state);
   if (validatedState === null) throw new TypeError('Invalid preview runtime state');
 
-  const tempPath = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
-  const fileDescriptor = openSync(tempPath, 'wx', 0o600);
-  let shouldRemoveTempFile = true;
+  withMutationLock(path, () => {
+    const tempPath = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
+    const fileDescriptor = openSync(tempPath, 'wx', 0o600);
+    let shouldRemoveTempFile = true;
 
-  try {
-    writeSync(fileDescriptor, `${JSON.stringify(validatedState)}\n`, undefined, 'utf8');
-    closeSync(fileDescriptor);
-    renameSync(tempPath, path);
-    shouldRemoveTempFile = false;
-    chmodSync(path, 0o600);
-  } finally {
-    if (shouldRemoveTempFile) {
-      try {
-        closeSync(fileDescriptor);
-      } catch {
-        // The descriptor is already closed when writing or renaming fails after closeSync.
-      }
-      try {
-        unlinkSync(tempPath);
-      } catch {
-        // The temporary file is absent when renameSync succeeds.
+    try {
+      writeSync(fileDescriptor, `${JSON.stringify(validatedState)}\n`, undefined, 'utf8');
+      closeSync(fileDescriptor);
+      renameSync(tempPath, path);
+      shouldRemoveTempFile = false;
+      chmodSync(path, 0o600);
+    } finally {
+      if (shouldRemoveTempFile) {
+        try {
+          closeSync(fileDescriptor);
+        } catch {
+          // The descriptor is already closed when writing or renaming fails after closeSync.
+        }
+        try {
+          unlinkSync(tempPath);
+        } catch {
+          // The temporary file is absent when renameSync succeeds.
+        }
       }
     }
-  }
+  });
 }
 
 export function removeOwnedPreviewRuntime(path: string, instanceId: string): boolean {
-  const runtime = readPreviewRuntime(path);
-  if (runtime === null || runtime.instanceId !== instanceId) return false;
-
   try {
-    unlinkSync(path);
-    return true;
+    return withMutationLock(path, () => {
+      const runtime = readPreviewRuntime(path);
+      if (runtime === null || runtime.instanceId !== instanceId) return false;
+
+      unlinkSync(path);
+      return true;
+    });
   } catch {
     return false;
   }
