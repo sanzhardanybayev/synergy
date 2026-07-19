@@ -43,7 +43,8 @@ CLI base: `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js"`.
   Prefer the daemon endpoint; fall back when the preview is not running:
   ```bash
   # Fast path (daemon running):
-  curl -sS "http://localhost:4321/api/progress?session=<session>"
+  # Assign PREVIEW_ORIGIN from `preview status --json`; do not assume a port.
+  curl -sS "${PREVIEW_ORIGIN}/api/progress?session=<session>"
   # The response contains progress.resume.nextPhase and progress.resume.note.
 
   # Fallback (preview not running):

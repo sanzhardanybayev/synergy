@@ -67,7 +67,8 @@ storage ~60%
 EOF
 
 # Fast path (daemon running):
-curl -sS -X POST http://localhost:4321/api/handoff \
+# Assign PREVIEW_ORIGIN from `preview status --json`; do not assume a port.
+curl -sS -X POST "${PREVIEW_ORIGIN}/api/handoff" \
   -H 'content-type: application/json' \
   -d "$(python3 -c 'import json,sys;print(json.dumps({"session":sys.argv[1],"next":sys.argv[2],"body":open(sys.argv[3]).read()}))' "<session>" "<nextPhaseId>" "$BODY_FILE")"
 

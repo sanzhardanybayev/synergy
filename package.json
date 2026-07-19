@@ -16,6 +16,7 @@
     "check:artifacts": "tsx packages/plugin-guard/src/check-artifacts.ts",
     "build:runtime": "pnpm --filter @synergy/cli --filter @synergy/review-core --filter @synergy/spec-kit --filter @synergy/state --filter @synergy/validator build",
     "check:artifact-drift": "pnpm build:runtime && pnpm check:artifacts",
+    "smoke:plugin-archive": "tsx packages/plugin-guard/src/smoke-plugin-archive.ts",
     "prepare": "lefthook install",
     "validate": "node packages/cli/dist/cli.js validate --root examples",
     "preview:start": "node packages/cli/dist/cli.js preview start --root examples",

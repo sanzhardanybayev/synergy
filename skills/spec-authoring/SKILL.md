@@ -117,7 +117,7 @@ Keep the prefix; change the slug.
 
 ## Iterating with the preview
 
-1. The preview server is at `http://localhost:4321/s/<session-name>/overview`. Start it with `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview start` if it isn't running.
+1. Start the preview with `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview start` if needed, then run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview status --json`. Use its non-null `origin` to build `/s/<session-name>/overview`; never assume a fixed port.
 2. On every save, MDX files hot-reload in the browser. Confirm the user can see your change before moving on.
 3. When you add, remove, or rename a phase folder, the virtual session index is rebuilt and the page does a full reload.
 

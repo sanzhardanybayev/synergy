@@ -66,7 +66,8 @@ CLI base: `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js"`.
 - As you discover anything surprising or reusable, record it (prefer the daemon; fall back to the CLI):
   ```bash
   # Fast path:
-  curl -sS -X POST http://localhost:4321/api/log \
+  # Assign PREVIEW_ORIGIN from `preview status --json`; do not assume a port.
+  curl -sS -X POST "${PREVIEW_ORIGIN}/api/log" \
     -H 'content-type: application/json' \
     -d '{"session":"<session>","text":"<finding>","phase":"<phaseId>"}'
   # For cross-cutting findings use "global":true instead of "phase":"..."
@@ -82,7 +83,7 @@ You may NOT start the next phase until all three are done:
 - Write the phase status (prefer the daemon; fall back to the CLI on `ECONNREFUSED`):
   ```bash
   # Fast path (daemon running):
-  curl -sS -X POST http://localhost:4321/api/phase \
+  curl -sS -X POST "${PREVIEW_ORIGIN}/api/phase" \
     -H 'content-type: application/json' \
     -d '{"session":"<session>","phaseId":"<phaseId>","status":"done","note":"<terse boundary note: what changed, deviations>"}'
 
@@ -94,7 +95,7 @@ You may NOT start the next phase until all three are done:
 - Write the resume pointer:
   ```bash
   # Fast path:
-  curl -sS -X POST http://localhost:4321/api/resume \
+  curl -sS -X POST "${PREVIEW_ORIGIN}/api/resume" \
     -H 'content-type: application/json' \
     -d '{"session":"<session>","next":"<nextPhaseId>","note":"<where the next agent should start>"}'
 

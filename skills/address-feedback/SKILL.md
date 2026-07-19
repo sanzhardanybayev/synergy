@@ -71,8 +71,11 @@ b. Record the rejection decision in-memory (reason required). It will be flushed
 After all edits are applied, flush every decision in **one** batch call (prefer the daemon;
 fall back to per-comment on-disk frontmatter edits when the server is down):
 
+First run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview status --json`. If it
+reports `running: true`, assign its non-null `origin` to `PREVIEW_ORIGIN` below.
+
 ```bash
-curl -sS -X POST http://localhost:4321/api/feedback/resolve-batch \
+curl -sS -X POST "${PREVIEW_ORIGIN}/api/feedback/resolve-batch" \
   -H 'content-type: application/json' \
   -d '{"items":[
         {"id":"<id1>","status":"resolved","resolution":"<what changed>"},
@@ -88,7 +91,7 @@ endpoint; fall back to the CLI when the preview is not running):
 
 ```bash
 # Fast path (daemon running):
-curl -sS "http://localhost:4321/api/validate?session=<session>"
+curl -sS "${PREVIEW_ORIGIN}/api/validate?session=<session>"
 
 # Fallback (preview not running):
 node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session>
