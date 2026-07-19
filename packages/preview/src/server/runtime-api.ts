@@ -18,6 +18,48 @@ export interface RuntimeApiOptions {
   shutdown(instanceId: string): Promise<void>;
 }
 
+export interface RuntimeApiEnvironmentOptions {
+  instanceId: string | undefined;
+  projectId: string | undefined;
+  controlToken: string | undefined;
+  pid: number;
+  port: number;
+  shutdown(instanceId: string): Promise<void>;
+}
+
+function requireRuntimeIdentity(value: string | undefined, field: string): string {
+  if (value === undefined || value.trim().length === 0) {
+    throw new Error(`Invalid preview runtime ${field}`);
+  }
+  return value;
+}
+
+export function createRuntimeApiOptions(
+  options: RuntimeApiEnvironmentOptions,
+): RuntimeApiOptions | undefined {
+  const hasRuntimeIdentity =
+    options.instanceId !== undefined ||
+    options.projectId !== undefined ||
+    options.controlToken !== undefined;
+  if (!hasRuntimeIdentity) return undefined;
+
+  const instanceId = requireRuntimeIdentity(options.instanceId, 'instanceId');
+  const projectId = requireRuntimeIdentity(options.projectId, 'projectId');
+  const controlToken = requireRuntimeIdentity(options.controlToken, 'controlToken');
+  return {
+    health: {
+      protocolVersion: 1,
+      state: 'ready',
+      instanceId,
+      projectId,
+      pid: options.pid,
+      port: options.port,
+    },
+    controlToken,
+    shutdown: options.shutdown,
+  };
+}
+
 function sendRuntimeJson(res: ServerResponse, statusCode: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.statusCode = statusCode;

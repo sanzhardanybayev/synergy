@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   type PreviewHealth,
   type RuntimeApiOptions,
+  createRuntimeApiOptions,
   runtimeApiMiddleware,
 } from '../../src/server/runtime-api.js';
 
@@ -188,4 +189,40 @@ describe('runtimeApiMiddleware', () => {
       expect(JSON.parse(response.body)).toEqual({ error: 'loopback_only' });
     },
   );
+});
+
+describe('createRuntimeApiOptions', () => {
+  const shutdown = vi.fn<RuntimeApiOptions['shutdown']>();
+
+  it('keeps the runtime API disabled for an ordinary interactive Vite launch', () => {
+    expect(
+      createRuntimeApiOptions({
+        instanceId: undefined,
+        projectId: undefined,
+        controlToken: undefined,
+        pid: 1234,
+        port: 4321,
+        shutdown,
+      }),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    [{ instanceId: 'instance-1', projectId: undefined, controlToken: undefined }, 'projectId'],
+    [
+      { instanceId: '   ', projectId: 'sha256:project-1', controlToken: CONTROL_TOKEN },
+      'instanceId',
+    ],
+    [{ instanceId: 'instance-1', projectId: '', controlToken: CONTROL_TOKEN }, 'projectId'],
+    [{ instanceId: 'instance-1', projectId: 'sha256:project-1', controlToken: '' }, 'controlToken'],
+  ])('rejects partial or blank child runtime identity %#', (identity, expectedField) => {
+    expect(() =>
+      createRuntimeApiOptions({
+        ...identity,
+        pid: 1234,
+        port: 4321,
+        shutdown,
+      }),
+    ).toThrow(expectedField);
+  });
 });
