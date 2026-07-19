@@ -259,11 +259,16 @@ function updateOwnedLockPid(
   dependencies: PreviewStartLockDependencies,
 ): boolean {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  const childFenceRecord: PreviewStartLockRecord = {
+    attemptId,
+    pid,
+    createdAt: new Date(dependencies.wallNow()).toISOString(),
+  };
+  const childFence = quarantinePath(path, attemptId, dependencies);
+  writeRecordFile(childFence, childFenceRecord);
   const parentRecord = readLockRecord(path);
   if (parentRecord?.attemptId !== attemptId) return false;
   const childRecord: PreviewStartLockRecord = { ...parentRecord, pid };
-  const childFence = quarantinePath(path, attemptId, dependencies);
-  writeRecordFile(childFence, childRecord);
   const ownerTemp = `${path}.owner.tmp.${attemptId}.${dependencies.createQuarantineId()}`;
   let hasOwnerTemp = false;
   try {

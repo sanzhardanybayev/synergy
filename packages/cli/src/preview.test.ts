@@ -753,7 +753,7 @@ describe('preview lifecycle', () => {
     expect(existsSync(paths.previewLockFile)).toBe(true);
   });
 
-  it('aborts immediately when child ownership cannot be published and retains the parent fence', async () => {
+  it('retains a live child fence when canonical ownership moves before transfer validation', async () => {
     const paths = resolveProjectPaths(rootA);
     const fetch = vi.fn(async () =>
       jsonResponse({
@@ -773,7 +773,13 @@ describe('preview lifecycle', () => {
       createControlToken: () => CONTROL_TOKEN,
       lockStaleMs: 1,
       pollIntervalMs: 1,
-      processKill: () => true,
+      processKill: (pid) => {
+        if (pid === process.pid) {
+          throw Object.assign(new Error('parent exited'), { code: 'ESRCH' });
+        }
+        if (pid === 30_012) return true;
+        throw new Error(`unexpected PID ${pid}`);
+      },
       spawnChild: (launch) => {
         spawnCount += 1;
         const child = new StuckChild(30_012);
@@ -799,6 +805,10 @@ describe('preview lifecycle', () => {
 
     await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/lock owner/i);
     expect(fetch).not.toHaveBeenCalled();
+    const quarantineRecords = readdirSync(paths.synergyDir)
+      .filter((entry) => entry.startsWith('preview.start.lock.quarantine.'))
+      .map((entry) => JSON.parse(readFileSync(join(paths.synergyDir, entry), 'utf8')));
+    expect(quarantineRecords).toContainEqual(expect.objectContaining({ pid: 30_012 }));
 
     await expect(lifecycle.start({ root: rootA })).rejects.toThrow(/start lock/i);
     expect(spawnCount).toBe(1);
