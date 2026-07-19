@@ -1,7 +1,7 @@
 {
   "name": "synergy",
-  "version": "0.11.0",
-  "description": "MDX spec authoring with live preview. Generate cross-referenced spec sessions in .synergy/sessions/, edit and comment on them in a browser at http://localhost:4321, and pull feedback back into Claude Code.",
+  "version": "0.12.0",
+  "description": "Plan and execute MDX specifications, or review Git changes and code in durable, repository-aware chunks with a live browser workflow.",
   "author": {
     "name": "Sanzhar Danybayev",
     "url": "https://github.com/sanzhardanybayev"
@@ -9,5 +9,5 @@
   "homepage": "https://github.com/sanzhardanybayev/synergy",
   "repository": "https://github.com/sanzhardanybayev/synergy",
   "license": "MIT",
-  "keywords": ["spec", "mdx", "planning", "documentation", "preview"]
+  "keywords": ["spec", "mdx", "planning", "code-review", "documentation", "preview"]
 }

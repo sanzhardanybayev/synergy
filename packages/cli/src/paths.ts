@@ -5,6 +5,8 @@ export interface ProjectPaths {
   synergyDir: string;
   sessionsDir: string;
   feedbackDir: string;
+  reviewsDir: string;
+  activeReviewFile: string;
   previewPidFile: string;
   previewLogFile: string;
 }
@@ -17,6 +19,8 @@ export function resolveProjectPaths(root: string = process.cwd()): ProjectPaths 
     synergyDir,
     sessionsDir: resolve(synergyDir, 'sessions'),
     feedbackDir: resolve(synergyDir, 'feedback'),
+    reviewsDir: resolve(synergyDir, 'reviews'),
+    activeReviewFile: resolve(synergyDir, 'active-review.json'),
     previewPidFile: resolve(synergyDir, 'preview.pid'),
     previewLogFile: resolve(synergyDir, 'preview.log'),
   };

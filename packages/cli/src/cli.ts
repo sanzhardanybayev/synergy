@@ -14,6 +14,7 @@ import {
 import { initProject } from './init.js';
 import { resolveProjectPaths } from './paths.js';
 import { previewStart, previewStatus, previewStop, printStatus } from './preview.js';
+import { registerReviewCommands } from './review-cli.js';
 
 const cli = cac('synergy');
 
@@ -295,5 +296,7 @@ cli
       }
     },
   );
+
+registerReviewCommands(cli);
 
 cli.parse();

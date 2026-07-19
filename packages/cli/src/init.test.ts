@@ -21,13 +21,15 @@ describe('initProject', () => {
     expect(existsSync(join(tmpRoot, '.synergy', 'sessions'))).toBe(true);
   });
 
-  it('writes .gitignore with all four required entries', () => {
+  it('writes .gitignore with all required local-artifact entries', () => {
     initProject(tmpRoot);
     const gitignore = readFileSync(join(tmpRoot, '.synergy', '.gitignore'), 'utf8');
     expect(gitignore).toContain('preview.pid');
     expect(gitignore).toContain('preview.log');
     expect(gitignore).toContain('active-session');
     expect(gitignore).toContain('review-state.json');
+    expect(gitignore).toContain('reviews/');
+    expect(gitignore).toContain('active-review.json');
   });
 
   it('returns the synergyDir path', () => {

@@ -3,7 +3,7 @@ name: spec-authoring
 description: Use whenever editing or extending an existing Synergy spec session in .synergy/sessions/. Enforces spec-kit component usage, cross-reference discipline, and session-local component creation. Triggers when the user asks to "update the spec", "add a section to the design doc", "extend the architecture spec", or any edit to a `.synergy/sessions/**/*.mdx` file.
 ---
 
-<!-- synergy-version: 0.11.0 -->
+<!-- synergy-version: 0.12.0 -->
 
 ## Step 0 — Freshness check (run before anything else)
 
@@ -12,7 +12,7 @@ mid-session. Before doing any work, confirm you are the newest installed version
 Set `MINE` to the version in the `synergy-version` marker just above, then run:
 
 ```bash
-MINE="0.11.0"  # ← the synergy-version marker above
+MINE="0.12.0"  # ← the synergy-version marker above
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \

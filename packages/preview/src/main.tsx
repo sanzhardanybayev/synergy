@@ -4,6 +4,7 @@ import '@fontsource-variable/jetbrains-mono';
 import '@synergy/spec-kit/styles.css';
 import './theme.css';
 import './app.css';
+import './review/review.css';
 import './edit-ui.css';
 
 import { StrictMode } from 'react';
