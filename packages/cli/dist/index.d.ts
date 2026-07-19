@@ -1,5 +1,5 @@
 import { StatusValue } from '@synergy/state';
-import { ReviewRef, ReviewGroup, ReviewItemInsight, ProposedCodeSection, CaptureReviewSourceRequest, createReviewStore, compareReviewSourceFreshness, deriveReviewReadiness, ReviewWorkspace, ReviewCaptureSourceRequest } from '@synergy/review-core';
+import { ReviewInsightConfidence, ReviewGroup, ReviewItemInsight, createReviewStore, applyCodeSections, ReviewRef, CaptureReviewSourceRequest, compareReviewSourceFreshness, deriveReviewReadiness, ReviewWorkspace, ReviewCaptureSourceRequest } from '@synergy/review-core';
 export { CaptureReviewSourceRequest, CapturedReviewSource, CommandResult, CommandRunner, capturePr, captureReviewSource, captureScope, captureStaged, captureUnstaged } from '@synergy/review-core';
 import { CAC } from 'cac';
 
@@ -83,6 +83,42 @@ interface ProgressArgs {
 /** Returns the rendered summary (also used by tests); the CLI action writes it to stdout. */
 declare function printProgress(args: ProgressArgs): string;
 
+interface ReviewAnalysisGuidance {
+    textFiles: number;
+    textLines: number;
+    minimumSections: number;
+    targetSections: number;
+    maximumSections: number;
+    scopeTooBroad: boolean;
+}
+
+interface ScopeAnalysisSectionInput {
+    key: string;
+    path: string;
+    label: string;
+    parentLabel?: string;
+    start: number;
+    end: number;
+    description: string;
+    confidence: ReviewInsightConfidence;
+    evidencePaths: string[];
+}
+interface ScopeAnalysisGroupInput {
+    id: string;
+    label: string;
+    sectionKeys: string[];
+}
+type ReviewAnalysisInput = {
+    kind: 'scope';
+    groups: ScopeAnalysisGroupInput[];
+    sections: ScopeAnalysisSectionInput[];
+} | {
+    kind: 'diff';
+    groups: ReviewGroup[];
+    items: ReviewItemInsight[];
+};
+declare function parseReviewAnalysisInput(value: unknown): ReviewAnalysisInput;
+
 interface CreateReviewRequest extends CaptureReviewSourceRequest {
 }
 interface CreateReviewResult {
@@ -90,9 +126,17 @@ interface CreateReviewResult {
     resumed: boolean;
     url: string;
     analysisRequired: boolean;
+    analysisGuidance?: ReviewAnalysisGuidance;
 }
 interface ReviewActionDependencies {
     createStore?: typeof createReviewStore;
+}
+interface ApplyReviewAnalysisDependencies {
+    createStore?: typeof createReviewStore;
+    applyCodeSections?: typeof applyCodeSections;
+    previewStatus?: typeof previewStatus;
+    now?: () => Date;
+    monotonicNow?: () => number;
 }
 interface OpenReviewDependencies {
     previewStatus?: typeof previewStatus;
@@ -103,15 +147,32 @@ interface RefreshReviewRequest {
     runner?: CaptureReviewSourceRequest['runner'];
     readFile?: CaptureReviewSourceRequest['readFile'];
 }
-interface ReviewAnalysis {
-    groups: ReviewGroup[];
-    items: ReviewItemInsight[];
-    sections?: ProposedCodeSection[];
-}
 interface ApplyReviewAnalysisRequest {
     root: string;
     reference: ReviewRef;
-    analysis: ReviewAnalysis;
+    analysis: ReviewAnalysisInput;
+    parsingInMs?: number;
+    commandStartedAt?: number;
+}
+interface ReviewAnalysisTimings {
+    parsingMs: number;
+    derivationMs: number;
+    validationMs: number;
+    publicationMs: number;
+    previewResolutionMs: number;
+    totalMs: number;
+}
+interface ReviewAnalysisSetResult {
+    reference: string;
+    analysisFinalized: true;
+    reviewItemCount: number;
+    groupCount: number;
+    withinRecommendedRange: boolean;
+    analysisFinalizedInMs: number;
+    route: string;
+    previewReady: boolean;
+    url?: string;
+    timings: ReviewAnalysisTimings;
 }
 interface ReviewStatusRequest {
     root: string;
@@ -126,10 +187,11 @@ interface ReviewStatusResult {
     readiness: ReturnType<typeof deriveReviewReadiness>;
     captureFailed: boolean;
     url: string;
+    analysisGuidance?: ReviewAnalysisGuidance;
 }
 declare function createOrResumeReview(request: CreateReviewRequest, dependencies?: ReviewActionDependencies): CreateReviewResult;
 declare function refreshReview(request: RefreshReviewRequest): CreateReviewResult;
-declare function applyReviewAnalysis(request: ApplyReviewAnalysisRequest): ReviewRef;
+declare function applyReviewAnalysis(request: ApplyReviewAnalysisRequest, dependencies?: ApplyReviewAnalysisDependencies): Promise<ReviewAnalysisSetResult>;
 declare function listReviews(root: string): ReviewWorkspace[];
 declare function openReview(root: string, reference: ReviewRef, dependencies?: OpenReviewDependencies): Promise<string>;
 declare function getReviewStatus(request: ReviewStatusRequest): ReviewStatusResult;
@@ -146,8 +208,10 @@ interface ReviewCreateFlags {
 }
 interface ReviewCliDependencies {
     openReview?: typeof openReview;
+    applyReviewAnalysis?: typeof applyReviewAnalysis;
+    monotonicNow?: () => number;
 }
 declare function createReviewSourceFromFlags(flags: ReviewCreateFlags): ReviewCaptureSourceRequest;
 declare function registerReviewCommands(cli: CAC, dependencies?: ReviewCliDependencies): void;
 
-export { type ApplyReviewAnalysisRequest, type CreateReviewRequest, type CreateReviewResult, type LogArgs, PREVIEW_PORT, type PhaseSetArgs, type PreviewStartOptions, type PreviewStatus, type PreviewStopOptions, type PreviewTimings, type ProgressArgs, type ProjectPaths, type RefreshReviewRequest, type ResumeArgs, type ReviewActionDependencies, type ReviewAnalysis, type ReviewStatusRequest, type ReviewStatusResult, applyReviewAnalysis, createOrResumeReview, createReviewSourceFromFlags, formatReviewStatusJson, getReviewStatus, initProject, listReviews, logFinding, openReview, phaseSet, previewStart, previewStatus, previewStop, printProgress, printReviewStatus, printStatus, refreshReview, registerReviewCommands, resolveProjectPaths, resumeSet };
+export { type ApplyReviewAnalysisDependencies, type ApplyReviewAnalysisRequest, type CreateReviewRequest, type CreateReviewResult, type LogArgs, PREVIEW_PORT, type PhaseSetArgs, type PreviewStartOptions, type PreviewStatus, type PreviewStopOptions, type PreviewTimings, type ProgressArgs, type ProjectPaths, type RefreshReviewRequest, type ResumeArgs, type ReviewActionDependencies, type ReviewAnalysisInput, type ReviewAnalysisSetResult, type ReviewAnalysisTimings, type ReviewStatusRequest, type ReviewStatusResult, type ScopeAnalysisGroupInput, type ScopeAnalysisSectionInput, applyReviewAnalysis, createOrResumeReview, createReviewSourceFromFlags, formatReviewStatusJson, getReviewStatus, initProject, listReviews, logFinding, openReview, parseReviewAnalysisInput, phaseSet, previewStart, previewStatus, previewStop, printProgress, printReviewStatus, printStatus, refreshReview, registerReviewCommands, resolveProjectPaths, resumeSet };

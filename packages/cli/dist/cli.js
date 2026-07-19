@@ -923,7 +923,7 @@ async function requestPreviewShutdown(origin, instanceId, controlToken, timeoutM
 }
 
 // src/version.ts
-var SYNERGY_VERSION = "0.12.1";
+var SYNERGY_VERSION = "0.13.0";
 
 // src/preview.ts
 var START_TIMEOUT_MS = 1e4;
@@ -1756,6 +1756,7 @@ function registerPreviewCommand(cli2, dependencyOverrides = {}) {
 // src/review-cli.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { readFileSync as readFileSync6 } from "node:fs";
+import { performance as performance3 } from "node:perf_hooks";
 import {
   assertSafeReviewSegment,
   claimQuestion,
@@ -1766,6 +1767,7 @@ import {
 import { bold as bold2, dim as dim3, green as green4, red as red2, yellow as yellow2 } from "kleur/colors";
 
 // src/review-actions.ts
+import { performance as performance2 } from "node:perf_hooks";
 import {
   applyCodeSections,
   buildDiffSnapshot,
@@ -1778,6 +1780,39 @@ import {
   isReviewCoreError,
   reconcileReview
 } from "@synergy/review-core";
+
+// src/review-analysis-guidance.ts
+function capturedTextCounts(snapshot) {
+  if (snapshot.kind === "scope") {
+    const textFiles2 = snapshot.files.filter((file) => !file.binary);
+    return {
+      textFiles: textFiles2.length,
+      textLines: textFiles2.reduce((total, file) => total + file.lines.length, 0)
+    };
+  }
+  const textFiles = snapshot.files.filter((file) => !file.binary);
+  return {
+    textFiles: textFiles.length,
+    textLines: textFiles.reduce(
+      (total, file) => total + file.hunks.reduce((fileTotal, hunk) => fileTotal + hunk.lines.length, 0),
+      0
+    )
+  };
+}
+function boundedSectionCount(textFiles, textLines, linesPerSection) {
+  return Math.max(textFiles, Math.min(30, Math.ceil(textLines / linesPerSection)));
+}
+function deriveReviewAnalysisGuidance(snapshot) {
+  const { textFiles, textLines } = capturedTextCounts(snapshot);
+  return {
+    textFiles,
+    textLines,
+    minimumSections: boundedSectionCount(textFiles, textLines, 150),
+    targetSections: boundedSectionCount(textFiles, textLines, 120),
+    maximumSections: boundedSectionCount(textFiles, textLines, 100),
+    scopeTooBroad: textFiles > 30 || textLines > 4500
+  };
+}
 
 // src/review-capture.ts
 import {
@@ -1792,6 +1827,83 @@ import {
   resolveRepositoryRoot,
   systemCommandRunner
 } from "@synergy/review-core";
+
+// src/review-coverage.ts
+function formatRange(section) {
+  return `${section.path}:${section.start}-${section.end} (key ${JSON.stringify(section.key)})`;
+}
+function assertCompleteScopeCoverage(snapshot, sections) {
+  const filesByPath = new Map(
+    snapshot.files.map((file) => [
+      file.path,
+      { file, capturedLineNumbers: new Set(file.lines.map((line) => line.number)) }
+    ])
+  );
+  const sectionsByPath = /* @__PURE__ */ new Map();
+  const sectionsByKey = /* @__PURE__ */ new Map();
+  for (const section of sections) {
+    const duplicate = sectionsByKey.get(section.key);
+    if (duplicate) {
+      throw new Error(
+        `duplicate scope section key ${JSON.stringify(section.key)} at ${formatRange(section)}; first declared at ${duplicate.path}:${duplicate.start}-${duplicate.end}`
+      );
+    }
+    sectionsByKey.set(section.key, section);
+    const capturedFile = filesByPath.get(section.path);
+    if (!capturedFile) {
+      throw new Error(`scope range ${formatRange(section)} targets a path that was not captured`);
+    }
+    const { file, capturedLineNumbers } = capturedFile;
+    if (file.binary) {
+      throw new Error(`scope range ${formatRange(section)} targets a binary file`);
+    }
+    if (!Number.isInteger(section.start) || !Number.isInteger(section.end)) {
+      throw new Error(`scope range ${formatRange(section)} must use integer captured line numbers`);
+    }
+    if (section.start > section.end) {
+      throw new Error(`scope range ${formatRange(section)} is a reversed range`);
+    }
+    const missingEndpoint = !capturedLineNumbers.has(section.start) ? section.start : !capturedLineNumbers.has(section.end) ? section.end : void 0;
+    if (missingEndpoint !== void 0) {
+      throw new Error(
+        `scope range ${formatRange(section)} includes ${section.path}:${missingEndpoint}, which is not a captured line`
+      );
+    }
+    const fileSections = sectionsByPath.get(section.path) ?? [];
+    fileSections.push(section);
+    sectionsByPath.set(section.path, fileSections);
+  }
+  for (const file of snapshot.files) {
+    if (file.binary || file.lines.length === 0) continue;
+    const fileSections = sectionsByPath.get(file.path) ?? [];
+    const firstLine = file.lines[0].number;
+    const lastLine = file.lines[file.lines.length - 1].number;
+    if (fileSections.length === 0) {
+      throw new Error(
+        `incomplete scope coverage for ${file.path}: no sections cover captured lines ${firstLine}-${lastLine}`
+      );
+    }
+    const sorted = [...fileSections].sort(
+      (left, right) => left.start - right.start || left.end - right.end
+    );
+    let expectedLine = firstLine;
+    for (const section of sorted) {
+      if (section.start !== expectedLine) {
+        const problem = section.start < expectedLine ? "overlap" : "gap";
+        throw new Error(
+          `incomplete scope coverage for ${file.path}: expected line ${expectedLine}; first offending range ${section.start}-${section.end} (key ${JSON.stringify(section.key)}) creates an ${problem}`
+        );
+      }
+      expectedLine = section.end + 1;
+    }
+    if (expectedLine !== lastLine + 1) {
+      const finalSection = sorted[sorted.length - 1];
+      throw new Error(
+        `incomplete scope coverage for ${file.path}: expected coverage through line ${lastLine}; final offending range ${finalSection.start}-${finalSection.end} (key ${JSON.stringify(finalSection.key)}) leaves a trailing gap`
+      );
+    }
+  }
+}
 
 // src/review-actions.ts
 var PreviewNotReadyError = class extends Error {
@@ -1861,12 +1973,13 @@ function buildSnapshot(captured, revisionId, now, predecessorRevisionId) {
 }
 function resultFor(root, reference, resumed) {
   const store = createReviewStore(root);
-  store.readBundle(reference.workspaceId, reference.revisionId);
+  const bundle = store.readBundle(reference.workspaceId, reference.revisionId);
   return {
     reference,
     resumed,
     url: reviewUrl(reference),
-    analysisRequired: !store.isAnalysisFinalized(reference.workspaceId, reference.revisionId)
+    analysisRequired: !store.isAnalysisFinalized(reference.workspaceId, reference.revisionId),
+    ...bundle.snapshot.kind === "scope" ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) } : {}
   };
 }
 function createWorkspace(root, workspaceId, revisionId, captured, existing, now) {
@@ -1983,7 +2096,7 @@ function assertValidAnalysis(snapshot, analysis) {
     if (insightIds.has(insight.reviewItemId)) {
       throw new Error(`duplicate review item analysis: ${insight.reviewItemId}`);
     }
-    if (insight.description.trim().length === 0 || insight.description.length > MAX_DESCRIPTION_LENGTH) {
+    if (insight.description.trim().length === 0 || Array.from(insight.description).length > MAX_DESCRIPTION_LENGTH) {
       throw new Error(`review item description must be 1-${MAX_DESCRIPTION_LENGTH} characters`);
     }
     if (!confidenceValues.has(insight.confidence)) {
@@ -2006,50 +2119,221 @@ function assertValidAnalysis(snapshot, analysis) {
     if (!insightIds.has(itemId)) throw new Error(`review item is missing an analysis: ${itemId}`);
   }
 }
-function applyReviewAnalysis(request) {
-  const store = createReviewStore(request.root);
+function proposedCodeSection(section) {
+  return {
+    path: section.path,
+    label: section.label,
+    ...section.parentLabel === void 0 ? {} : { parentLabel: section.parentLabel },
+    start: section.start,
+    end: section.end
+  };
+}
+function translateScopeAnalysis(snapshot, analysis, applySections) {
+  assertCompleteScopeCoverage(snapshot, analysis.sections);
+  const translatedSnapshot = applySections(snapshot, analysis.sections.map(proposedCodeSection));
+  if (translatedSnapshot.items.length !== analysis.sections.length) {
+    throw new Error("scope section translation did not return one review item per section");
+  }
+  const itemIdBySectionKey = new Map(
+    analysis.sections.map((section, index) => [section.key, translatedSnapshot.items[index].id])
+  );
+  const groups = analysis.groups.map(
+    (group) => ({
+      id: group.id,
+      label: group.label,
+      reviewItemIds: group.sectionKeys.map((sectionKey) => {
+        const reviewItemId = itemIdBySectionKey.get(sectionKey);
+        if (!reviewItemId) throw new Error(`unknown scope section key: ${sectionKey}`);
+        return reviewItemId;
+      })
+    })
+  );
+  const items = analysis.sections.map(
+    (section, index) => ({
+      reviewItemId: translatedSnapshot.items[index].id,
+      description: section.description,
+      confidence: section.confidence,
+      evidencePaths: section.evidencePaths
+    })
+  );
+  return { snapshot: translatedSnapshot, analysis: { groups, items } };
+}
+async function applyReviewAnalysis(request, dependencies = {}) {
+  const monotonicNow = dependencies.monotonicNow ?? (() => performance2.now());
+  const actionStartedAt = readMonotonic(monotonicNow);
+  const parsingMs = assertNonnegativeDuration(request.parsingInMs ?? 0, "analysis parsing");
+  const store = (dependencies.createStore ?? createReviewStore)(request.root);
   const bundle = store.readBundle(request.reference.workspaceId, request.reference.revisionId);
   if (store.isAnalysisFinalized(request.reference.workspaceId, request.reference.revisionId)) {
     throw new Error("review analysis already exists and is immutable");
   }
-  const insights = {
-    schemaVersion: 1,
-    revisionId: request.reference.revisionId,
-    groups: request.analysis.groups,
-    items: request.analysis.items
-  };
+  const now = dependencies.now ?? (() => /* @__PURE__ */ new Date());
+  let reviewItemCount;
+  let groupCount;
+  let withinRecommendedRange;
+  let finalizedAt;
+  let derivationMs = 0;
+  let validationMs = 0;
+  let publicationMs = 0;
   if (bundle.snapshot.kind === "scope") {
-    if (!request.analysis.sections)
-      throw new Error("scoped review analysis requires proposed code sections");
-    if (request.analysis.sections.length === 0) {
-      throw new Error("scoped review analysis requires at least one code section");
+    if (request.analysis.kind !== "scope") {
+      throw new Error("scoped review requires a scope analysis payload");
     }
-    const snapshot = applyCodeSections(bundle.snapshot, request.analysis.sections);
-    assertValidAnalysis(snapshot, request.analysis);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const progress = bundle.snapshot.predecessorRevisionId ? reconcileReview(
-      store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
-      snapshot,
-      now
-    ) : initialProgress(snapshot, now);
-    store.finalizeScopeAnalysis(
-      request.reference.workspaceId,
-      request.reference.revisionId,
-      snapshot,
-      insights,
-      progress
+    const scopeSnapshot = bundle.snapshot;
+    const scopeAnalysis = request.analysis;
+    const translation = measureMonotonic(
+      monotonicNow,
+      () => translateScopeAnalysis(
+        scopeSnapshot,
+        scopeAnalysis,
+        dependencies.applyCodeSections ?? applyCodeSections
+      )
     );
+    const translated = translation.value;
+    derivationMs += translation.durationMs;
+    validationMs += measureMonotonic(monotonicNow, () => {
+      assertValidAnalysis(translated.snapshot, translated.analysis);
+    }).durationMs;
+    const insights = {
+      schemaVersion: 1,
+      revisionId: request.reference.revisionId,
+      groups: translated.analysis.groups,
+      items: translated.analysis.items
+    };
+    const derived = measureMonotonic(monotonicNow, () => {
+      const progressTimestamp = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
+      const progress = bundle.snapshot.predecessorRevisionId ? reconcileReview(
+        store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
+        translated.snapshot,
+        progressTimestamp
+      ) : initialProgress(translated.snapshot, progressTimestamp);
+      const guidance = deriveReviewAnalysisGuidance(bundle.snapshot);
+      return { progress, guidance, progressTimestamp };
+    });
+    derivationMs += derived.durationMs;
+    finalizedAt = nondecreasingIsoTimestamp(derived.value.progressTimestamp, now());
+    publicationMs += measureMonotonic(monotonicNow, () => {
+      store.finalizeScopeAnalysis(
+        request.reference.workspaceId,
+        request.reference.revisionId,
+        translated.snapshot,
+        insights,
+        derived.value.progress,
+        finalizedAt
+      );
+    }).durationMs;
+    reviewItemCount = translated.snapshot.items.length;
+    groupCount = translated.analysis.groups.length;
+    withinRecommendedRange = reviewItemCount >= derived.value.guidance.minimumSections && reviewItemCount <= derived.value.guidance.maximumSections;
   } else {
-    if (request.analysis.sections)
-      throw new Error("diff review analysis cannot define code sections");
-    assertValidAnalysis(bundle.snapshot, request.analysis);
-    store.writeInitialInsights(
-      request.reference.workspaceId,
-      request.reference.revisionId,
-      insights
-    );
+    if (request.analysis.kind !== "diff") {
+      throw new Error("diff review requires a diff analysis payload");
+    }
+    const diffAnalysis = request.analysis;
+    validationMs += measureMonotonic(monotonicNow, () => {
+      assertValidAnalysis(bundle.snapshot, diffAnalysis);
+    }).durationMs;
+    const insights = {
+      schemaVersion: 1,
+      revisionId: request.reference.revisionId,
+      groups: diffAnalysis.groups,
+      items: diffAnalysis.items
+    };
+    finalizedAt = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
+    publicationMs += measureMonotonic(monotonicNow, () => {
+      store.writeInitialInsights(
+        request.reference.workspaceId,
+        request.reference.revisionId,
+        insights,
+        finalizedAt
+      );
+    }).durationMs;
+    reviewItemCount = bundle.snapshot.items.length;
+    groupCount = diffAnalysis.groups.length;
+    withinRecommendedRange = true;
   }
-  return request.reference;
+  const persistedFinalizedAt = store.getAnalysisFinalizedAt(
+    request.reference.workspaceId,
+    request.reference.revisionId
+  );
+  if (persistedFinalizedAt !== finalizedAt) {
+    throw new Error("review analysis finalization milestone was not persisted");
+  }
+  const analysisFinalizedInMs = assertFinalizationInterval(
+    bundle.snapshot.createdAt,
+    persistedFinalizedAt
+  );
+  const route = reviewUrl(request.reference);
+  const baseResult = {
+    reference: formatReviewRef(request.reference.workspaceId, request.reference.revisionId),
+    analysisFinalized: true,
+    reviewItemCount,
+    groupCount,
+    withinRecommendedRange,
+    analysisFinalizedInMs,
+    route
+  };
+  let previewReady = false;
+  let url;
+  const previewStartedAt = readMonotonic(monotonicNow);
+  try {
+    const status = await (dependencies.previewStatus ?? previewStatus)(request.root);
+    if (status.running && status.origin !== null) {
+      url = new URL(route, status.origin).toString();
+      previewReady = true;
+    }
+  } catch {
+  }
+  const previewResolutionMs = elapsedMonotonic(monotonicNow, previewStartedAt);
+  const totalEndedAt = readMonotonic(monotonicNow);
+  const actionTotalMs = assertNonnegativeDuration(totalEndedAt - actionStartedAt, "analysis total");
+  const totalMs = request.commandStartedAt === void 0 ? assertNonnegativeDuration(parsingMs + actionTotalMs, "analysis total") : assertNonnegativeDuration(totalEndedAt - request.commandStartedAt, "analysis total");
+  return {
+    ...baseResult,
+    previewReady,
+    ...url === void 0 ? {} : { url },
+    timings: {
+      parsingMs,
+      derivationMs,
+      validationMs,
+      publicationMs,
+      previewResolutionMs,
+      totalMs
+    }
+  };
+}
+function assertFinalizationInterval(capturedAt, finalizedAt) {
+  const duration = Date.parse(finalizedAt) - Date.parse(capturedAt);
+  if (!Number.isFinite(duration) || duration < 0) {
+    throw new Error("review analysis finalization cannot precede the captured snapshot");
+  }
+  return duration;
+}
+function nondecreasingIsoTimestamp(minimum, candidate) {
+  const minimumMs = Date.parse(minimum);
+  const candidateMs = candidate.getTime();
+  if (!Number.isFinite(minimumMs) || !Number.isFinite(candidateMs)) {
+    throw new Error("review analysis finalization timestamps must be valid");
+  }
+  return new Date(Math.max(minimumMs, candidateMs)).toISOString();
+}
+function assertNonnegativeDuration(value, label) {
+  if (!Number.isFinite(value) || value < 0)
+    throw new Error(`${label} duration must be nonnegative`);
+  return value;
+}
+function readMonotonic(clock) {
+  const value = clock();
+  if (!Number.isFinite(value)) throw new Error("analysis monotonic clock must be finite");
+  return value;
+}
+function elapsedMonotonic(clock, startedAt) {
+  return assertNonnegativeDuration(readMonotonic(clock) - startedAt, "analysis phase");
+}
+function measureMonotonic(clock, operation) {
+  const startedAt = readMonotonic(clock);
+  const value = operation();
+  return { value, durationMs: elapsedMonotonic(clock, startedAt) };
 }
 function listReviews(root) {
   return createReviewStore(root).listWorkspaces();
@@ -2085,7 +2369,8 @@ function getReviewStatus(request) {
     analysisRequired: !analysisFinalized,
     readiness,
     captureFailed: freshness.captureFailed,
-    url: reviewUrl(request.reference)
+    url: reviewUrl(request.reference),
+    ...bundle.snapshot.kind === "scope" ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) } : {}
   };
 }
 function formatReviewStatusJson(request) {
@@ -2104,6 +2389,233 @@ function printReviewStatus(request) {
     `unanswered: ${status.readiness.unanswered}`,
     `url: ${status.url}`
   ].join("\n");
+}
+
+// src/review-analysis.ts
+var IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
+var GROUP_ID2 = /^[a-z0-9][a-z0-9_-]*$/u;
+var MAX_DESCRIPTION_LENGTH2 = 600;
+function propertyPath(path, key) {
+  return IDENTIFIER.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
+}
+function fail(path, expectation) {
+  throw new Error(`${path} ${expectation}`);
+}
+function assertRecord(value, path) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    fail(path, "must be an object");
+  }
+}
+function assertOnlyKeys(value, keys, path) {
+  const allowed = new Set(keys);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) fail(propertyPath(path, key), "is not allowed");
+  }
+}
+function assertArray(value, path) {
+  if (!Array.isArray(value)) fail(path, "must be an array");
+}
+function assertNonEmptyArray(value, path) {
+  assertArray(value, path);
+  if (value.length === 0) fail(path, "must not be empty");
+}
+function assertString(value, path) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    fail(path, "must be a non-empty string");
+  }
+}
+function assertGroupId(value, path) {
+  assertString(value, path);
+  if (!GROUP_ID2.test(value)) {
+    fail(path, "must match ^[a-z0-9][a-z0-9_-]*$");
+  }
+}
+function assertDescription(value, path) {
+  assertString(value, path);
+  if (Array.from(value).length > MAX_DESCRIPTION_LENGTH2) {
+    fail(path, `must contain at most ${MAX_DESCRIPTION_LENGTH2} characters`);
+  }
+}
+function assertInteger(value, path) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    fail(path, "must be a positive integer");
+  }
+}
+function parseConfidence(value, path) {
+  if (value === "high" || value === "medium" || value === "low") return value;
+  return fail(path, 'must be one of "high", "medium", or "low"');
+}
+function parseStringArray(value, path) {
+  assertNonEmptyArray(value, path);
+  const result = value.map((entry, index) => {
+    assertString(entry, `${path}[${index}]`);
+    return entry;
+  });
+  assertUniqueValues(result, path);
+  return result;
+}
+function assertUniqueValues(values, path) {
+  const indexes = /* @__PURE__ */ new Map();
+  for (const [index, value] of values.entries()) {
+    const firstIndex = indexes.get(value);
+    if (firstIndex !== void 0) {
+      fail(`${path}[${index}]`, `duplicates ${path}[${firstIndex}]`);
+    }
+    indexes.set(value, index);
+  }
+}
+function assertUniqueProperty(values, path, property, select) {
+  const indexes = /* @__PURE__ */ new Map();
+  for (const [index, value] of values.entries()) {
+    const selected = select(value);
+    const firstIndex = indexes.get(selected);
+    if (firstIndex !== void 0) {
+      fail(
+        propertyPath(`${path}[${index}]`, property),
+        `duplicates ${propertyPath(`${path}[${firstIndex}]`, property)}`
+      );
+    }
+    indexes.set(selected, index);
+  }
+}
+function parseDiffGroup(value, index) {
+  const path = `$.groups[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(value, ["id", "label", "reviewItemIds"], path);
+  assertGroupId(value.id, `${path}.id`);
+  assertString(value.label, `${path}.label`);
+  return {
+    id: value.id,
+    label: value.label,
+    reviewItemIds: parseStringArray(value.reviewItemIds, `${path}.reviewItemIds`)
+  };
+}
+function parseDiffItem(value, index) {
+  const path = `$.items[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(value, ["reviewItemId", "description", "confidence", "evidencePaths"], path);
+  assertString(value.reviewItemId, `${path}.reviewItemId`);
+  assertDescription(value.description, `${path}.description`);
+  return {
+    reviewItemId: value.reviewItemId,
+    description: value.description,
+    confidence: parseConfidence(value.confidence, `${path}.confidence`),
+    evidencePaths: parseStringArray(value.evidencePaths, `${path}.evidencePaths`)
+  };
+}
+function parseScopeGroup(value, index) {
+  const path = `$.groups[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(value, ["id", "label", "sectionKeys"], path);
+  assertGroupId(value.id, `${path}.id`);
+  assertString(value.label, `${path}.label`);
+  return {
+    id: value.id,
+    label: value.label,
+    sectionKeys: parseStringArray(value.sectionKeys, `${path}.sectionKeys`)
+  };
+}
+function parseScopeSection(value, index) {
+  const path = `$.sections[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(
+    value,
+    [
+      "key",
+      "path",
+      "label",
+      "parentLabel",
+      "start",
+      "end",
+      "description",
+      "confidence",
+      "evidencePaths"
+    ],
+    path
+  );
+  assertString(value.key, `${path}.key`);
+  assertString(value.path, `${path}.path`);
+  assertString(value.label, `${path}.label`);
+  if (value.parentLabel !== void 0) {
+    assertString(value.parentLabel, `${path}.parentLabel`);
+  }
+  assertInteger(value.start, `${path}.start`);
+  assertInteger(value.end, `${path}.end`);
+  assertDescription(value.description, `${path}.description`);
+  return {
+    key: value.key,
+    path: value.path,
+    label: value.label,
+    ...value.parentLabel === void 0 ? {} : { parentLabel: value.parentLabel },
+    start: value.start,
+    end: value.end,
+    description: value.description,
+    confidence: parseConfidence(value.confidence, `${path}.confidence`),
+    evidencePaths: parseStringArray(value.evidencePaths, `${path}.evidencePaths`)
+  };
+}
+function parseGroups(value, parseGroup) {
+  assertNonEmptyArray(value, "$.groups");
+  const groups = value.map(parseGroup);
+  assertUniqueProperty(groups, "$.groups", "id", (group) => group.id);
+  return groups;
+}
+function assertEveryReferenceIsOwned(definitions, definitionPath, references, referencePath) {
+  const definitionIndexes = new Map(definitions.map((key, index) => [key, index]));
+  const owners = /* @__PURE__ */ new Map();
+  for (const [groupIndex, groupReferences] of references.entries()) {
+    for (const [referenceIndex, reference] of groupReferences.entries()) {
+      const path = referencePath(groupIndex, referenceIndex);
+      if (!definitionIndexes.has(reference)) fail(path, "references an unknown item");
+      const firstPath = owners.get(reference);
+      if (firstPath !== void 0) fail(path, `duplicates ${firstPath}`);
+      owners.set(reference, path);
+    }
+  }
+  for (const [index, key] of definitions.entries()) {
+    if (!owners.has(key)) fail(definitionPath(index), "is not referenced by any group");
+  }
+}
+function parseDiffAnalysis(value) {
+  assertOnlyKeys(value, ["groups", "items"], "$");
+  const groups = parseGroups(value.groups, parseDiffGroup);
+  assertNonEmptyArray(value.items, "$.items");
+  const items = value.items.map(parseDiffItem);
+  assertUniqueProperty(items, "$.items", "reviewItemId", (item) => item.reviewItemId);
+  assertEveryReferenceIsOwned(
+    items.map((item) => item.reviewItemId),
+    (index) => `$.items[${index}].reviewItemId`,
+    groups.map((group) => group.reviewItemIds),
+    (groupIndex, referenceIndex) => `$.groups[${groupIndex}].reviewItemIds[${referenceIndex}]`
+  );
+  return { kind: "diff", groups, items };
+}
+function parseScopeAnalysis(value) {
+  assertOnlyKeys(value, ["groups", "sections"], "$");
+  const groups = parseGroups(value.groups, parseScopeGroup);
+  assertNonEmptyArray(value.sections, "$.sections");
+  const sections = value.sections.map(parseScopeSection);
+  assertUniqueProperty(sections, "$.sections", "key", (section) => section.key);
+  assertEveryReferenceIsOwned(
+    sections.map((section) => section.key),
+    (index) => `$.sections[${index}].key`,
+    groups.map((group) => group.sectionKeys),
+    (groupIndex, referenceIndex) => `$.groups[${groupIndex}].sectionKeys[${referenceIndex}]`
+  );
+  return { kind: "scope", groups, sections };
+}
+function parseReviewAnalysisInput(value) {
+  assertRecord(value, "$");
+  assertOnlyKeys(value, ["groups", "items", "sections"], "$");
+  const hasItems = Object.hasOwn(value, "items");
+  const hasSections = Object.hasOwn(value, "sections");
+  if (hasItems && hasSections) {
+    fail("$.items", "is not allowed when $.sections is present");
+  }
+  if (!hasItems && !hasSections) {
+    fail("$", "must contain exactly one of $.items or $.sections");
+  }
+  return hasItems ? parseDiffAnalysis(value) : parseScopeAnalysis(value);
 }
 
 // src/review-wait.ts
@@ -2180,7 +2692,7 @@ function waitForReviewQuestions(options) {
       cleanup();
       resolvePromise(result);
     };
-    const fail = (error) => {
+    const fail2 = (error) => {
       if (settled) return;
       settled = true;
       cleanup();
@@ -2191,7 +2703,7 @@ function waitForReviewQuestions(options) {
         const questions = scanQuestions(root, reference);
         if (questions.length > 0) finish({ status: "questions", listenerId, questions });
       } catch (error) {
-        fail(error);
+        fail2(error);
       }
     };
     const schedule = () => {
@@ -2208,7 +2720,7 @@ function waitForReviewQuestions(options) {
           questions.length > 0 ? { status: "questions", listenerId, questions } : { status: "timeout", listenerId, questions: [] }
         );
       } catch (error) {
-        fail(error);
+        fail2(error);
       }
     };
     try {
@@ -2216,13 +2728,13 @@ function waitForReviewQuestions(options) {
         if (filename?.toString().startsWith(".listeners")) return;
         schedule();
       });
-      watcher.on("error", fail);
+      watcher.on("error", fail2);
       heartbeat = setInterval(() => {
         try {
           touchListener(root, reference, listenerId);
           check();
         } catch (error) {
-          fail(error);
+          fail2(error);
         }
       }, heartbeatMs);
       heartbeat.unref?.();
@@ -2234,7 +2746,7 @@ function waitForReviewQuestions(options) {
       if (timeoutMs !== void 0) timeoutTimer = setTimeout(onTimeout, timeoutMs);
       schedule();
     } catch (error) {
-      fail(error);
+      fail2(error);
     }
   });
 }
@@ -2242,63 +2754,6 @@ function waitForReviewQuestions(options) {
 // src/review-cli.ts
 var ReviewUsageError = class extends Error {
 };
-function isRecord6(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function isReviewInsightConfidence(value) {
-  return value === "high" || value === "medium" || value === "low";
-}
-function isIntegerNumber(value) {
-  return typeof value === "number" && Number.isInteger(value);
-}
-function readAnalysis(body) {
-  let value;
-  try {
-    value = JSON.parse(body);
-  } catch {
-    throw new Error("analysis body must contain valid JSON");
-  }
-  if (!isRecord6(value) || !Array.isArray(value.groups) || !Array.isArray(value.items)) {
-    throw new Error("analysis body must include groups and items arrays");
-  }
-  const groups = value.groups.map((group) => {
-    if (!isRecord6(group) || typeof group.id !== "string" || typeof group.label !== "string" || !Array.isArray(group.reviewItemIds) || !group.reviewItemIds.every((item) => typeof item === "string")) {
-      throw new Error("analysis groups must contain id, label, and reviewItemIds");
-    }
-    return { id: group.id, label: group.label, reviewItemIds: group.reviewItemIds };
-  });
-  const items = value.items.map((item) => {
-    if (!isRecord6(item) || typeof item.reviewItemId !== "string" || typeof item.description !== "string" || !isReviewInsightConfidence(item.confidence) || !Array.isArray(item.evidencePaths) || !item.evidencePaths.every((path) => typeof path === "string")) {
-      throw new Error(
-        "analysis items must contain reviewItemId, description, confidence, and evidencePaths"
-      );
-    }
-    const confidence = item.confidence;
-    return {
-      reviewItemId: item.reviewItemId,
-      description: item.description,
-      confidence,
-      evidencePaths: item.evidencePaths
-    };
-  });
-  let sections;
-  if (value.sections !== void 0) {
-    if (!Array.isArray(value.sections)) throw new Error("analysis sections must be an array");
-    sections = value.sections.map((section) => {
-      if (!isRecord6(section) || typeof section.path !== "string" || typeof section.label !== "string" || !isIntegerNumber(section.start) || !isIntegerNumber(section.end) || section.parentLabel !== void 0 && typeof section.parentLabel !== "string") {
-        throw new Error("analysis sections must contain path, label, start, and end");
-      }
-      return {
-        path: section.path,
-        label: section.label,
-        start: section.start,
-        end: section.end,
-        ...section.parentLabel === void 0 ? {} : { parentLabel: section.parentLabel }
-      };
-    });
-  }
-  return { groups, items, ...sections === void 0 ? {} : { sections } };
-}
 function createReviewSourceFromFlags(flags) {
   const selected = [
     flags.pr !== void 0,
@@ -2358,8 +2813,16 @@ function parseUsageReviewRef(value) {
 }
 function readUsageAnalysis(path) {
   try {
-    return readAnalysis(readFileSync6(path, "utf8"));
+    const body = readFileSync6(path, "utf8");
+    let value;
+    try {
+      value = JSON.parse(body);
+    } catch {
+      throw new ReviewUsageError("$ must contain valid JSON");
+    }
+    return parseReviewAnalysisInput(value);
   } catch (error) {
+    if (error instanceof ReviewUsageError) throw error;
     const detail = error instanceof Error ? error.message : "invalid analysis body";
     throw new ReviewUsageError(detail);
   }
@@ -2433,7 +2896,7 @@ function assertActionOptions(action, flags) {
   if (action !== "answer" && flags.review !== void 0) {
     throw new ReviewUsageError(`review ${action} does not accept --review`);
   }
-  if (action !== "create" && action !== "open" && action !== "status" && action !== "list" && flags.json === true) {
+  if (action !== "create" && action !== "open" && action !== "status" && action !== "list" && action !== "analysis-set" && flags.json === true) {
     throw new ReviewUsageError(`review ${action} does not accept --json`);
   }
 }
@@ -2446,7 +2909,7 @@ function parseUsageWorkspaceId(value) {
     throw new ReviewUsageError(detail);
   }
 }
-function validateReviewCommand(actionValue, references, flags) {
+function validateReviewCommand(actionValue, references, flags, monotonicNow = () => performance3.now()) {
   assertKnownAction(actionValue);
   assertKnownOptions(flags);
   assertActionOptions(actionValue, flags);
@@ -2460,11 +2923,20 @@ function validateReviewCommand(actionValue, references, flags) {
     case "analysis-set":
       assertReferenceCount(actionValue, references, 1);
       if (!flags.bodyFile) throw new ReviewUsageError("review analysis-set requires --body-file");
-      return {
-        action: actionValue,
-        reference: parseUsageReviewRef(references[0] ?? ""),
-        analysis: readUsageAnalysis(flags.bodyFile)
-      };
+      {
+        const parsingStartedAt = monotonicNow();
+        const analysis = readUsageAnalysis(flags.bodyFile);
+        const analysisParsingMs = monotonicNow() - parsingStartedAt;
+        if (!Number.isFinite(analysisParsingMs) || analysisParsingMs < 0) {
+          throw new ReviewUsageError("analysis parsing duration must be nonnegative");
+        }
+        return {
+          action: actionValue,
+          reference: parseUsageReviewRef(references[0] ?? ""),
+          analysis,
+          analysisParsingMs
+        };
+      }
     case "list":
       assertReferenceCount(actionValue, references, 0);
       return { action: actionValue };
@@ -2533,12 +3005,15 @@ async function runReviewWaitCommand(options) {
 }
 function registerReviewCommands(cli2, dependencies = {}) {
   const open = dependencies.openReview ?? openReview;
+  const applyAnalysis = dependencies.applyReviewAnalysis ?? applyReviewAnalysis;
+  const monotonicNow = dependencies.monotonicNow ?? (() => performance3.now());
   cli2.command("review <action> [...references]", "Manage local guided code reviews").option("--root <dir>", "Project root (default: cwd)").option("--pr <number-or-url>", "GitHub PR number or URL").option("--staged", "Review the Git index").option("--unstaged", "Review tracked worktree and non-ignored untracked changes").option(
     "--scope <path>",
     "Review tracked and non-ignored files under a repository-relative path"
   ).option("--json", "Print machine-readable output").option("--body-file <path>", "Analysis or answer body file").option("--for <duration>", "Bounded question wait, e.g. 90s, 10m, 1h").option("--review <reference>", "Review reference for review answer").allowUnknownOptions().action(async (action, references, flags) => {
     try {
-      const command = validateReviewCommand(action, references, flags);
+      const commandStartedAt = monotonicNow();
+      const command = validateReviewCommand(action, references, flags, monotonicNow);
       const root = resolveRepositoryRoot(flags.root ?? process.cwd());
       if (command.action === "create") {
         printCreateResult(
@@ -2555,13 +3030,27 @@ function registerReviewCommands(cli2, dependencies = {}) {
         return;
       }
       if (command.action === "analysis-set") {
-        applyReviewAnalysis({
-          root,
-          reference: requireValidatedValue(command.reference),
-          analysis: requireValidatedValue(command.analysis)
-        });
+        const result = await applyAnalysis(
+          {
+            root,
+            reference: requireValidatedValue(command.reference),
+            analysis: requireValidatedValue(command.analysis),
+            parsingInMs: command.analysisParsingMs,
+            commandStartedAt
+          },
+          { monotonicNow }
+        );
+        if (flags.json) {
+          process.stdout.write(`${JSON.stringify(result, null, 2)}
+`);
+          return;
+        }
+        const destination = result.previewReady ? result.url : result.route;
         process.stdout.write(
-          `${green4("\u2713")} analysis recorded for ${bold2(references[0] ?? "")}
+          `${green4("\u2713")} analysis recorded for ${bold2(result.reference)}
+${dim3("Analysis interval:")} ${result.analysisFinalizedInMs}ms
+${dim3("Tool timing:")} ${result.timings.totalMs}ms
+${dim3(result.previewReady ? "Open:" : "Route:")} ${destination}
 `
         );
         return;
