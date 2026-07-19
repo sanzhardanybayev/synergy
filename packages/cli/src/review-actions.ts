@@ -21,6 +21,10 @@ import {
 } from '@synergy/review-core';
 import { previewStatus } from './preview.js';
 import {
+  type ReviewAnalysisGuidance,
+  deriveReviewAnalysisGuidance,
+} from './review-analysis-guidance.js';
+import {
   type CaptureReviewSourceRequest,
   type CapturedReviewSource,
   captureReviewSource,
@@ -35,6 +39,7 @@ export interface CreateReviewResult {
   resumed: boolean;
   url: string;
   analysisRequired: boolean;
+  analysisGuidance?: ReviewAnalysisGuidance;
 }
 
 export interface ReviewActionDependencies {
@@ -97,6 +102,7 @@ export interface ReviewStatusResult {
   readiness: ReturnType<typeof deriveReviewReadiness>;
   captureFailed: boolean;
   url: string;
+  analysisGuidance?: ReviewAnalysisGuidance;
 }
 
 const GROUP_ID = /^[a-z0-9][a-z0-9_-]*$/u;
@@ -162,12 +168,15 @@ function buildSnapshot(
 
 function resultFor(root: string, reference: ReviewRef, resumed: boolean): CreateReviewResult {
   const store = createReviewStore(root);
-  store.readBundle(reference.workspaceId, reference.revisionId);
+  const bundle = store.readBundle(reference.workspaceId, reference.revisionId);
   return {
     reference,
     resumed,
     url: reviewUrl(reference),
     analysisRequired: !store.isAnalysisFinalized(reference.workspaceId, reference.revisionId),
+    ...(bundle.snapshot.kind === 'scope'
+      ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) }
+      : {}),
   };
 }
 
@@ -435,6 +444,9 @@ export function getReviewStatus(request: ReviewStatusRequest): ReviewStatusResul
     readiness,
     captureFailed: freshness.captureFailed,
     url: reviewUrl(request.reference),
+    ...(bundle.snapshot.kind === 'scope'
+      ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) }
+      : {}),
   };
 }
 

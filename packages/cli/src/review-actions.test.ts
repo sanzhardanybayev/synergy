@@ -147,6 +147,22 @@ describe('review lifecycle actions', () => {
     }
   });
 
+  it('keeps diff create and status results free of scoped analysis guidance', () => {
+    const root = join(tmpdir(), `synergy-review-diff-guidance-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const status = JSON.parse(
+        formatReviewStatusJson({ root, reference: created.reference, runner: createRunner() }),
+      ) as Record<string, unknown>;
+
+      expect(created).not.toHaveProperty('analysisGuidance');
+      expect(status).not.toHaveProperty('analysisGuidance');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('resumes an initial revision orphaned before workspace pointer publication', () => {
     const root = join(tmpdir(), `Synergy Review Orphan ${Date.now()}`);
     mkdirSync(root, { recursive: true });
@@ -484,6 +500,16 @@ describe('review lifecycle actions', () => {
         created.reference.revisionId,
       );
       expect(before.snapshot.items).toEqual([]);
+      expect(created).toMatchObject({
+        analysisGuidance: {
+          textFiles: 1,
+          textLines: 3,
+          minimumSections: 1,
+          targetSections: 1,
+          maximumSections: 1,
+          scopeTooBroad: false,
+        },
+      });
       expect(
         JSON.parse(
           formatReviewStatusJson({
@@ -495,6 +521,14 @@ describe('review lifecycle actions', () => {
         ),
       ).toMatchObject({
         analysisRequired: true,
+        analysisGuidance: {
+          textFiles: 1,
+          textLines: 3,
+          minimumSections: 1,
+          targetSections: 1,
+          maximumSections: 1,
+          scopeTooBroad: false,
+        },
         readiness: { ready: false, preparing: true, pending: 0 },
       });
       expect(() =>
