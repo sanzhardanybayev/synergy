@@ -3,7 +3,7 @@ name: create-spec
 description: Use when the user wants to plan a new feature, refactor, or project. Generates a Synergy MDX spec session in .synergy/sessions/, auto-starts the preview server, and opens the browser. Triggers on phrases like "create a spec for X", "let's plan Y", "scaffold a refactor for Z", "/synergy-spec".
 ---
 
-<!-- synergy-version: 0.12.0 -->
+<!-- synergy-version: 0.13.0 -->
 
 ## Step 0 — Freshness check (run before anything else)
 
@@ -12,7 +12,7 @@ mid-session. Before doing any work, confirm you are the newest installed version
 Set `MINE` to the version in the `synergy-version` marker just above, then run:
 
 ```bash
-MINE="0.12.0"  # ← the synergy-version marker above
+MINE="0.13.0"  # ← the synergy-version marker above
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -96,8 +96,8 @@ CrossRef placeholders like `<first-phase-slug>`, `<prev-phase-slug>` are hints t
 4. **Scaffold the session in one call.** Read each template from `$CLAUDE_PLUGIN_ROOT/skills/create-spec/templates/` with the `Read` tool, substitute all placeholders in-memory, then write the entire session with a single daemon call (prefer the fast path; fall back to per-file writes when the preview is not running):
 
    ```bash
-   # Fast path (daemon running on port 4321):
-   curl -sS -X POST http://localhost:4321/api/scaffold \
+   # Fast path (daemon running): assign PREVIEW_ORIGIN from `preview status --json`.
+   curl -sS -X POST "${PREVIEW_ORIGIN}/api/scaffold" \
      -H 'content-type: application/json' \
      -d '{"session":"<YYYY-MM-DD-slug>",
           "dirs":["_components","assets","phases/01-<slug>"],
@@ -115,13 +115,13 @@ CrossRef placeholders like `<first-phase-slug>`, `<prev-phase-slug>` are hints t
    Template **reading** is always local (the `Read` tool against `$CLAUDE_PLUGIN_ROOT/skills/create-spec/templates/`). Replace `<…-slug>` hint placeholders with the real slugs before sending.
 
 5. **Start the preview** by running `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview start`. It is idempotent — safe to call when already running.
-6. **Print the URL** for the user: `http://localhost:4321/s/<session-name>/overview`. This is the contract. Browser auto-open is best-effort and OS-dependent — try it but don't fail the flow on it.
+6. **Print the URL** for the user. Run `preview status --json`, read its non-null `origin`, and resolve `/s/<session-name>/overview` against it. The complete runtime-discovered URL is the contract. Browser auto-open is best-effort and OS-dependent — try it but don't fail the flow on it.
 7. **Fill the templates.** Open the written files and replace the placeholder body text (`_..._` blocks, example phases, sample components) with content derived from the conversation.
 8. **Validate.** Prefer the daemon endpoint; fall back to the CLI when the preview is not running:
 
    ```bash
    # Fast path (daemon running):
-   curl -sS "http://localhost:4321/api/validate?session=<session-name>"
+   curl -sS "${PREVIEW_ORIGIN}/api/validate?session=<session-name>"
 
    # Fallback:
    node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" validate <session-name>
@@ -200,6 +200,6 @@ Done when **all** of these are true:
 
 - The session directory exists under `.synergy/sessions/<YYYY-MM-DD-slug>/`.
 - All `{{PLACEHOLDER}}` substitutions are complete and all `<…-slug>` hints are replaced with real slugs.
-- `curl -sS "http://localhost:4321/api/validate?session=<session-name>"` (or the CLI fallback) returns zero errors.
+- `curl -sS "${PREVIEW_ORIGIN}/api/validate?session=<session-name>"` (or the CLI fallback) returns zero errors, where `PREVIEW_ORIGIN` came from `preview status --json`.
 - `orchestrator.md` describes the actual execution strategy (dependency graph, parallel chunks, agent strategy, verification gates) — not template boilerplate.
 - The user confirms the session reflects their intent.

@@ -3,7 +3,7 @@ name: execute
 description: Use when the user runs /synergy-execute or asks Claude to implement a Synergy spec session phase by phase. Owns the disciplined execution loop — reads orchestrator + live .state, works one phase at a time, and writes a boundary note + flips phase status via the synergy CLI before moving on. Honors run-time directives (scope, model/effort overrides) layered above the plan.
 ---
 
-<!-- synergy-version: 0.12.0 -->
+<!-- synergy-version: 0.13.0 -->
 
 ## Step 0 — Freshness check (run before anything else)
 
@@ -12,7 +12,7 @@ mid-session. Before doing any work, confirm you are the newest installed version
 Set `MINE` to the version in the `synergy-version` marker just above, then run:
 
 ```bash
-MINE="0.12.0"  # ← the synergy-version marker above
+MINE="0.13.0"  # ← the synergy-version marker above
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -66,7 +66,8 @@ CLI base: `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js"`.
 - As you discover anything surprising or reusable, record it (prefer the daemon; fall back to the CLI):
   ```bash
   # Fast path:
-  curl -sS -X POST http://localhost:4321/api/log \
+  # Assign PREVIEW_ORIGIN from `preview status --json`; do not assume a port.
+  curl -sS -X POST "${PREVIEW_ORIGIN}/api/log" \
     -H 'content-type: application/json' \
     -d '{"session":"<session>","text":"<finding>","phase":"<phaseId>"}'
   # For cross-cutting findings use "global":true instead of "phase":"..."
@@ -82,7 +83,7 @@ You may NOT start the next phase until all three are done:
 - Write the phase status (prefer the daemon; fall back to the CLI on `ECONNREFUSED`):
   ```bash
   # Fast path (daemon running):
-  curl -sS -X POST http://localhost:4321/api/phase \
+  curl -sS -X POST "${PREVIEW_ORIGIN}/api/phase" \
     -H 'content-type: application/json' \
     -d '{"session":"<session>","phaseId":"<phaseId>","status":"done","note":"<terse boundary note: what changed, deviations>"}'
 
@@ -94,7 +95,7 @@ You may NOT start the next phase until all three are done:
 - Write the resume pointer:
   ```bash
   # Fast path:
-  curl -sS -X POST http://localhost:4321/api/resume \
+  curl -sS -X POST "${PREVIEW_ORIGIN}/api/resume" \
     -H 'content-type: application/json' \
     -d '{"session":"<session>","next":"<nextPhaseId>","note":"<where the next agent should start>"}'
 

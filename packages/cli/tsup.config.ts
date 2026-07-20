@@ -18,4 +18,12 @@ export default defineConfig([
     banner: { js: '#!/usr/bin/env node' },
     external: ['@synergy/spec-kit', '@synergy/validator', '@synergy/preview'],
   },
+  {
+    entry: { 'preview-child': 'src/preview-child.ts' },
+    format: ['esm'],
+    dts: false,
+    sourcemap: true,
+    clean: false,
+    external: ['@synergy/preview'],
+  },
 ]);

@@ -28,6 +28,7 @@ import { handleProgress } from './src/server/progress.js';
 import { handleReviewDone } from './src/server/review-done.js';
 import { handleReviewRouter } from './src/server/review-router.js';
 import { handleReview } from './src/server/review.js';
+import { type RuntimeApiOptions, runtimeApiMiddleware } from './src/server/runtime-api.js';
 import { handleScaffold } from './src/server/scaffold.js';
 import { handleSource } from './src/server/source.js';
 import { handleStatus } from './src/server/status.js';
@@ -36,16 +37,25 @@ import { handleValidate } from './src/server/validate.js';
 interface PluginOptions {
   sessionsDir: string;
   projectRoot: string;
+  runtime?: RuntimeApiOptions;
 }
 
 export function synergyEditPlugin(options: PluginOptions): Plugin {
-  const { sessionsDir, projectRoot } = options;
+  const { sessionsDir, projectRoot, runtime } = options;
   const feedbackDir = join(projectRoot, '.synergy', 'feedback');
   const synergyDir = join(projectRoot, '.synergy');
 
   return {
     name: 'synergy-edit',
     configureServer(server) {
+      if (runtime !== undefined) {
+        server.httpServer?.once('listening', () => {
+          const address = server.httpServer?.address();
+          if (address !== null && typeof address === 'object') runtime.health.port = address.port;
+        });
+        server.middlewares.use(runtimeApiMiddleware(runtime));
+      }
+
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url ?? '/', 'http://localhost');
         const pathname = url.pathname;

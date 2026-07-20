@@ -3,7 +3,7 @@ name: handoff
 description: Use when the user runs /synergy-handoff or asks Claude to capture a knowledge-transfer handoff for the active Synergy session before quitting. Snapshots the live agent's working context into .state/handoff.md so a future agent can resume exactly where it left off, even mid-phase.
 ---
 
-<!-- synergy-version: 0.12.0 -->
+<!-- synergy-version: 0.13.0 -->
 
 ## Step 0 — Freshness check (run before anything else)
 
@@ -12,7 +12,7 @@ mid-session. Before doing any work, confirm you are the newest installed version
 Set `MINE` to the version in the `synergy-version` marker just above, then run:
 
 ```bash
-MINE="0.12.0"  # ← the synergy-version marker above
+MINE="0.13.0"  # ← the synergy-version marker above
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -67,7 +67,8 @@ storage ~60%
 EOF
 
 # Fast path (daemon running):
-curl -sS -X POST http://localhost:4321/api/handoff \
+# Assign PREVIEW_ORIGIN from `preview status --json`; do not assume a port.
+curl -sS -X POST "${PREVIEW_ORIGIN}/api/handoff" \
   -H 'content-type: application/json' \
   -d "$(python3 -c 'import json,sys;print(json.dumps({"session":sys.argv[1],"next":sys.argv[2],"body":open(sys.argv[3]).read()}))' "<session>" "<nextPhaseId>" "$BODY_FILE")"
 

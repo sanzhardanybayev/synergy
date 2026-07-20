@@ -3,7 +3,7 @@ name: spec-authoring
 description: Use whenever editing or extending an existing Synergy spec session in .synergy/sessions/. Enforces spec-kit component usage, cross-reference discipline, and session-local component creation. Triggers when the user asks to "update the spec", "add a section to the design doc", "extend the architecture spec", or any edit to a `.synergy/sessions/**/*.mdx` file.
 ---
 
-<!-- synergy-version: 0.12.0 -->
+<!-- synergy-version: 0.13.0 -->
 
 ## Step 0 — Freshness check (run before anything else)
 
@@ -12,7 +12,7 @@ mid-session. Before doing any work, confirm you are the newest installed version
 Set `MINE` to the version in the `synergy-version` marker just above, then run:
 
 ```bash
-MINE="0.12.0"  # ← the synergy-version marker above
+MINE="0.13.0"  # ← the synergy-version marker above
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -117,7 +117,7 @@ Keep the prefix; change the slug.
 
 ## Iterating with the preview
 
-1. The preview server is at `http://localhost:4321/s/<session-name>/overview`. Start it with `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview start` if it isn't running.
+1. Start the preview with `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview start` if needed, then run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview status --json`. Use its non-null `origin` to build `/s/<session-name>/overview`; never assume a fixed port.
 2. On every save, MDX files hot-reload in the browser. Confirm the user can see your change before moving on.
 3. When you add, remove, or rename a phase folder, the virtual session index is rebuilt and the page does a full reload.
 

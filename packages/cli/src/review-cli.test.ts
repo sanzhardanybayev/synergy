@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import cac from 'cac';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PreviewNotReadyError } from './review-actions.js';
 import {
+  type ReviewCliDependencies,
   createReviewSourceFromFlags,
   registerReviewCommands,
   runReviewWaitCommand,
@@ -16,9 +18,12 @@ interface CliResult {
   stderr: string;
 }
 
-function runReviewCli(args: string[]): CliResult {
+async function runReviewCli(
+  args: string[],
+  dependencies: ReviewCliDependencies = {},
+): Promise<CliResult> {
   const cli = cac('synergy');
-  registerReviewCommands(cli);
+  registerReviewCommands(cli, dependencies);
   const stdout: string[] = [];
   const stderr: string[] = [];
   const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
@@ -32,7 +37,8 @@ function runReviewCli(args: string[]): CliResult {
   const previousExitCode = process.exitCode;
   process.exitCode = undefined;
   try {
-    cli.parse(['node', 'synergy', 'review', ...args]);
+    cli.parse(['node', 'synergy', 'review', ...args], { run: false });
+    await cli.runMatchedCommand();
     return { exitCode: process.exitCode, stdout: stdout.join(''), stderr: stderr.join('') };
   } finally {
     process.exitCode = previousExitCode;
@@ -61,7 +67,7 @@ describe('review CLI source flags', () => {
     });
   });
 
-  it('rejects invalid usage before attempting Git root resolution', () => {
+  it('rejects invalid usage before attempting Git root resolution', async () => {
     const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-body-'));
     temporaryRoots.push(root);
     const malformedBody = join(root, 'invalid.json');
@@ -86,7 +92,7 @@ describe('review CLI source flags', () => {
     ];
 
     for (const args of cases) {
-      const result = runReviewCli(args);
+      const result = await runReviewCli(args);
       expect(result.exitCode).toBe(2);
       expect(result.stdout).toBe('');
       expect(result.stderr).toMatch(/Error:/);
@@ -94,18 +100,244 @@ describe('review CLI source flags', () => {
     }
   });
 
-  it('executes list through CAC from a nested directory using the canonical Git root', () => {
+  it('reports strict analysis validation failures with exact JSON paths', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-analysis-'));
+    temporaryRoots.push(root);
+    const validItem = {
+      reviewItemId: 'item-1',
+      description: 'Explains the captured change.',
+      confidence: 'high',
+      evidencePaths: ['src/example.ts'],
+    };
+    const validGroup = {
+      id: 'example',
+      label: 'Example',
+      reviewItemIds: ['item-1'],
+    };
+    const cases: Array<{ body: string; expectedPath: string; name: string }> = [
+      { name: 'invalid JSON', body: '{invalid', expectedPath: '$' },
+      {
+        name: 'unknown nested key',
+        body: JSON.stringify({
+          groups: [validGroup],
+          items: [{ ...validItem, extra: true }],
+        }),
+        expectedPath: '$.items[0].extra',
+      },
+      {
+        name: 'mixed contracts',
+        body: JSON.stringify({
+          groups: [validGroup],
+          items: [validItem],
+          sections: [],
+        }),
+        expectedPath: '$.items',
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const bodyFile = join(root, `analysis-${index}.json`);
+      writeFileSync(bodyFile, testCase.body, 'utf8');
+
+      const result = await runReviewCli([
+        'analysis-set',
+        'workspace@revision',
+        '--body-file',
+        bodyFile,
+        '--root',
+        '/not-a-repository',
+      ]);
+
+      expect(result.exitCode, testCase.name).toBe(2);
+      expect(result.stdout, testCase.name).toBe('');
+      expect(result.stderr, testCase.name).toContain(testCase.expectedPath);
+      expect(result.stderr, testCase.name).not.toMatch(/Git capture|repository root/i);
+    }
+  });
+
+  it('passes parsed scope local-key analysis to the review action', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-scope-analysis-'));
+    temporaryRoots.push(root);
+    execFileSync('git', ['init', '--quiet', root]);
+    const bodyFile = join(root, 'analysis.json');
+    const analysis = {
+      groups: [{ id: 'module', label: 'Module', sectionKeys: ['local-section'] }],
+      sections: [
+        {
+          key: 'local-section',
+          path: 'src/example.ts',
+          label: 'Example',
+          start: 1,
+          end: 1,
+          description: 'Explains the example module in repository context.',
+          confidence: 'high',
+          evidencePaths: ['src/example.ts'],
+        },
+      ],
+    };
+    writeFileSync(bodyFile, JSON.stringify(analysis), 'utf8');
+    let applied: unknown;
+    const humanTicks = [100, 101, 104];
+
+    const result = await runReviewCli(
+      ['analysis-set', 'workspace@revision', '--body-file', bodyFile, '--root', root],
+      {
+        monotonicNow: () => {
+          const tick = humanTicks.shift();
+          if (tick === undefined) throw new Error('unexpected human CLI timing read');
+          return tick;
+        },
+        applyReviewAnalysis: async (request) => {
+          applied = request;
+          return {
+            reference: `${request.reference.workspaceId}@${request.reference.revisionId}`,
+            analysisFinalized: true,
+            reviewItemCount: 1,
+            groupCount: 1,
+            withinRecommendedRange: true,
+            analysisFinalizedInMs: 1,
+            route: '/r/workspace/revision',
+            previewReady: false,
+            timings: {
+              parsingMs: 1,
+              derivationMs: 0,
+              validationMs: 1,
+              publicationMs: 1,
+              previewResolutionMs: 1,
+              totalMs: 4,
+            },
+          };
+        },
+      },
+    );
+
+    expect(result.exitCode).toBeUndefined();
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('analysis recorded');
+    expect(applied).toMatchObject({
+      root: realpathSync(root),
+      reference: { workspaceId: 'workspace', revisionId: 'revision' },
+      analysis: { kind: 'scope', ...analysis },
+      parsingInMs: 3,
+      commandStartedAt: 100,
+    });
+    expect(humanTicks).toEqual([]);
+
+    const jsonTicks = [200, 202, 207];
+    const jsonResult = await runReviewCli(
+      ['analysis-set', 'workspace@revision', '--body-file', bodyFile, '--root', root, '--json'],
+      {
+        monotonicNow: () => {
+          const tick = jsonTicks.shift();
+          if (tick === undefined) throw new Error('unexpected JSON CLI timing read');
+          return tick;
+        },
+        applyReviewAnalysis: async () => ({
+          reference: 'workspace@revision',
+          analysisFinalized: true,
+          reviewItemCount: 1,
+          groupCount: 1,
+          withinRecommendedRange: true,
+          analysisFinalizedInMs: 1,
+          route: '/r/workspace/revision',
+          previewReady: true,
+          url: 'http://127.0.0.1:4321/r/workspace/revision',
+          timings: {
+            parsingMs: 1,
+            derivationMs: 1,
+            validationMs: 1,
+            publicationMs: 1,
+            previewResolutionMs: 1,
+            totalMs: 5,
+          },
+        }),
+      },
+    );
+    expect(jsonResult.stderr).toBe('');
+    expect(jsonResult.exitCode).toBeUndefined();
+    expect(jsonTicks).toEqual([]);
+    expect(JSON.parse(jsonResult.stdout)).toEqual({
+      reference: 'workspace@revision',
+      analysisFinalized: true,
+      reviewItemCount: 1,
+      groupCount: 1,
+      withinRecommendedRange: true,
+      analysisFinalizedInMs: 1,
+      route: '/r/workspace/revision',
+      previewReady: true,
+      url: 'http://127.0.0.1:4321/r/workspace/revision',
+      timings: {
+        parsingMs: 1,
+        derivationMs: 1,
+        validationMs: 1,
+        publicationMs: 1,
+        previewResolutionMs: 1,
+        totalMs: 5,
+      },
+    });
+  });
+
+  it('executes list through CAC from a nested directory using the canonical Git root', async () => {
     const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-'));
     temporaryRoots.push(root);
     const nested = join(root, 'src', 'nested');
     mkdirSync(nested, { recursive: true });
     execFileSync('git', ['init', '--quiet', root]);
 
-    const result = runReviewCli(['list', '--root', nested, '--json']);
+    const result = await runReviewCli(['list', '--root', nested, '--json']);
 
     expect(result.exitCode).toBeUndefined();
     expect(result.stderr).toBe('');
     expect(JSON.parse(result.stdout)).toEqual([]);
+  });
+
+  it('awaits open and returns typed nonzero JSON when preview is not ready', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-open-json-'));
+    temporaryRoots.push(root);
+    execFileSync('git', ['init', '--quiet', root]);
+    const canonicalRoot = realpathSync(root);
+    let openSettled = false;
+
+    const result = await runReviewCli(['open', 'workspace@revision', '--root', root, '--json'], {
+      openReview: async (requestedRoot) => {
+        expect(requestedRoot).toBe(canonicalRoot);
+        await Promise.resolve();
+        openSettled = true;
+        throw new PreviewNotReadyError(requestedRoot);
+      },
+    });
+
+    expect(openSettled).toBe(true);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe('');
+    expect(JSON.parse(result.stdout)).toEqual({
+      error: 'preview_not_ready',
+      message: `Preview is not ready for project root ${JSON.stringify(canonicalRoot)}. Invoke the Synergy executable with argv ${JSON.stringify(['preview', 'start', '--root', canonicalRoot])}.`,
+      root: canonicalRoot,
+      suggestedCommand: {
+        command: 'synergy',
+        args: ['preview', 'start', '--root', canonicalRoot],
+      },
+    });
+  });
+
+  it('preserves text error output when preview is not ready', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-open-text-'));
+    temporaryRoots.push(root);
+    execFileSync('git', ['init', '--quiet', root]);
+
+    const result = await runReviewCli(['open', 'workspace@revision', '--root', root], {
+      openReview: async () => {
+        throw new PreviewNotReadyError(root);
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain(
+      `Error: Preview is not ready for project root ${JSON.stringify(root)}. Invoke the Synergy executable with argv ${JSON.stringify(['preview', 'start', '--root', root])}.`,
+    );
+    expect(result.stderr).not.toContain('synergy preview start --root');
   });
 
   it('removes direct wait signal handlers after success and failure', async () => {

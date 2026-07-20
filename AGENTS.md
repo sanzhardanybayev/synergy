@@ -4,7 +4,7 @@ Rules and conventions for any agent (Claude Code, Codex, or otherwise) that auth
 
 ## What Synergy is
 
-A planning and guided-review system. Agents generate cross-referenced MDX documents in `.synergy/sessions/<session-name>/` or prepare immutable code-review artifacts in `.synergy/reviews/<workspace>/`, rendered by the same Vite + React preview at `http://localhost:4321`. Specification sessions keep a separate `orchestrator.md` that tells the implementing agent how to execute the work.
+A planning and guided-review system. Agents generate cross-referenced MDX documents in `.synergy/sessions/<session-name>/` or prepare immutable code-review artifacts in `.synergy/reviews/<workspace>/`, rendered by the same Vite + React preview at the verified origin returned by `synergy preview status --json`. Specification sessions keep a separate `orchestrator.md` that tells the implementing agent how to execute the work.
 
 ## Hard rules
 
@@ -16,7 +16,7 @@ A planning and guided-review system. Agents generate cross-referenced MDX docume
 6. **Orchestrator file is required.** Every session has a root `orchestrator.md` (plain markdown, not MDX) describing dependency graph, parallel chunks, agent strategy, verification gates. Per-phase orchestrators are optional but recommended for multi-task phases.
 7. **Validator is the gate.** A session is not "ready" until `synergy validate <session>` returns zero errors. Warnings are acceptable but must be reviewed.
 8. **Charts.** Default to `<Chart>` (Mermaid). When Mermaid can't express what you need, write a session-local chart component in `_components/` using any library (recharts, visx, react-flow, …).
-9. **Preview lifecycle.** The preview server runs on port `4321` only. PID at `.synergy/preview.pid`. Never bypass the CLI — always use `synergy preview start|stop|status`.
+9. **Preview lifecycle.** The preview server prefers port `4321` and may select an alternate. Never bypass the CLI or infer its origin — use `synergy preview start|stop|status` and consume the verified runtime status.
 10. **Required overview headings.** `00-overview.mdx` must contain `## Summary` and `## Goals`. The validator errors out otherwise. Other sections are optional.
 
 ## Session structure
@@ -50,7 +50,7 @@ The skill:
 3. Scaffolds the session from templates that ship inside the skill (`skills/synergy/create-spec/templates/`).
 4. Creates `phases/<NN>-<slug>/` folders for each phase it decided on.
 5. Starts the preview server via `synergy preview start` (idempotent).
-6. Prints the session URL: `http://localhost:4321/s/<session-name>/overview`.
+6. Prints the session URL using the origin returned by the preview runtime.
 
 Editing or extending an existing session uses the `synergy:spec-authoring` skill, which covers adding/inserting/renaming/removing phase folders without breaking cross-refs.
 
@@ -123,9 +123,9 @@ Anchors are GitHub-style: lowercase, spaces → `-`, special chars stripped, ded
 
 ## Inline editing and feedback (v2)
 
-The preview at `http://localhost:4321` adds an edit and feedback layer on top of the
-read-only v1 preview. Agents interact with it via the feedback skill; the browser UI is
-for human reviewers.
+The preview runtime adds an edit and feedback layer on top of the read-only v1 preview.
+Discover its current origin with `synergy preview status --json`; agents interact with it
+via the feedback skill, while the browser UI is for human reviewers.
 
 - **Apply / Discard buffer.** Prose blocks are contentEditable in the browser. Every edit is
   held in memory until the human clicks **Apply** (flushes to the MDX file on disk) or
@@ -185,7 +185,7 @@ documents it. When touching preview or spec-kit CSS, consume `--syn-*` tokens (o
 - Don't bypass validation by silencing errors.
 - Don't bundle implementation code in the spec — it describes work, agents do work.
 - Don't edit `orchestrator.md` to be MDX-flavored — it must stay plain markdown for CLI legibility.
-- Don't pin the preview to a port other than 4321 without updating CLAUDE.md and the docs.
+- Don't treat the preferred port `4321` as the runtime authority; consume the verified origin.
 - Don't reference phases by numeric prefix in CrossRefs. The slug is the identifier; the prefix is just sort order.
 - Don't try to add a `synergy spec` CLI command. Authoring is a skill.
 

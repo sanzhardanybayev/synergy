@@ -13,13 +13,14 @@ import {
 } from './feedback-wait.js';
 import { initProject } from './init.js';
 import { resolveProjectPaths } from './paths.js';
-import { previewStart, previewStatus, previewStop, printStatus } from './preview.js';
+import { registerPreviewCommand } from './preview-cli.js';
 import { registerReviewCommands } from './review-cli.js';
+import { SYNERGY_VERSION } from './version.js';
 
 const cli = cac('synergy');
 
 cli.help();
-cli.version('0.1.0');
+cli.version(SYNERGY_VERSION);
 
 cli
   .command('init', 'Scaffold .synergy/ in the current directory')
@@ -28,24 +29,7 @@ cli
     initProject(flags.root);
   });
 
-cli
-  .command('preview <action>', 'Manage the preview server (start | stop | status)')
-  .option('--root <dir>', 'Project root (default: cwd)')
-  .option('--port <port>', 'Override port', { default: 4321 })
-  .action((action: string, flags: { root?: string; port: number }) => {
-    if (action === 'start') {
-      previewStart({ root: flags.root, port: Number(flags.port) });
-    } else if (action === 'stop') {
-      previewStop(flags.root);
-    } else if (action === 'status') {
-      printStatus(previewStatus(flags.root, Number(flags.port)));
-    } else {
-      process.stderr.write(
-        `${red('Error:')} unknown action "${action}" — use start | stop | status\n`,
-      );
-      process.exit(2);
-    }
-  });
+registerPreviewCommand(cli);
 
 const HEARTBEAT_MS = 30_000;
 

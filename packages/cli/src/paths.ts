@@ -7,6 +7,8 @@ export interface ProjectPaths {
   feedbackDir: string;
   reviewsDir: string;
   activeReviewFile: string;
+  previewRuntimeFile: string;
+  previewLockFile: string;
   previewPidFile: string;
   previewLogFile: string;
 }
@@ -21,6 +23,8 @@ export function resolveProjectPaths(root: string = process.cwd()): ProjectPaths 
     feedbackDir: resolve(synergyDir, 'feedback'),
     reviewsDir: resolve(synergyDir, 'reviews'),
     activeReviewFile: resolve(synergyDir, 'active-review.json'),
+    previewRuntimeFile: resolve(synergyDir, 'preview.runtime.json'),
+    previewLockFile: resolve(synergyDir, 'preview.start.lock'),
     previewPidFile: resolve(synergyDir, 'preview.pid'),
     previewLogFile: resolve(synergyDir, 'preview.log'),
   };

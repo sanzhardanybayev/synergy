@@ -5,6 +5,8 @@
   "type": "module",
   "description": "Release-time + runtime freshness guard tooling for the Synergy plugin.",
   "scripts": {
+    "check:artifacts": "tsx src/check-artifacts.ts",
+    "smoke:archive": "tsx src/smoke-plugin-archive.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

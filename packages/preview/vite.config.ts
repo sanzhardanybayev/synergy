@@ -6,6 +6,7 @@ import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { defineConfig } from 'vite';
 import { rehypeSourceRange } from './src/rehype-source-range.js';
+import { createRuntimeApiOptions } from './src/server/runtime-api.js';
 import { buildFsAllowList } from './vite-fs-allow.js';
 import { synergyEditPlugin } from './vite-plugin-edit.js';
 import { synergySessionsPlugin } from './vite-plugin-sessions.js';
@@ -17,13 +18,25 @@ const projectRoot = process.env.SYNERGY_PROJECT_ROOT ?? process.cwd();
 const sessionsDir =
   process.env.SYNERGY_SESSIONS_DIR ?? resolve(projectRoot, '.synergy', 'sessions');
 const port = Number(process.env.SYNERGY_PORT ?? 4321);
+const strictPort = process.env.SYNERGY_STRICT_PORT === 'true';
+
+const runtime = createRuntimeApiOptions({
+  instanceId: process.env.SYNERGY_INSTANCE_ID,
+  projectId: process.env.SYNERGY_PROJECT_ID,
+  controlToken: process.env.SYNERGY_CONTROL_TOKEN,
+  pid: process.pid,
+  port,
+  async shutdown() {
+    process.kill(process.pid, 'SIGTERM');
+  },
+});
 
 export default defineConfig({
   root: __dirname,
   server: {
     port,
-    strictPort: true,
-    host: 'localhost',
+    strictPort,
+    host: '127.0.0.1',
     fs: {
       // Allow vite to serve files outside of cwd: the sessions dir plus the
       // self-hosted font assets (see vite-fs-allow.ts).
@@ -54,9 +67,6 @@ export default defineConfig({
     },
     react(),
     synergySessionsPlugin({ sessionsDir }),
-    synergyEditPlugin({ sessionsDir, projectRoot }),
+    synergyEditPlugin({ sessionsDir, projectRoot, runtime }),
   ],
-  define: {
-    __SYNERGY_PORT__: JSON.stringify(port),
-  },
 });

@@ -4,4 +4,4 @@ description: Stop the Synergy preview server
 
 Run `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview stop` in the current project root.
 
-The CLI reads `.synergy/preview.pid`, sends SIGTERM to the recorded pid, escalates to SIGKILL if needed, and removes the PID file. If nothing is running, it tells you and exits.
+The CLI validates `.synergy/preview.runtime.json` against the live loopback health endpoint, then requests shutdown through the runtime's authenticated control endpoint. It never signals an unverified PID. If no verified preview is running, it reports that state and exits nonzero so automation does not treat shutdown as confirmed.

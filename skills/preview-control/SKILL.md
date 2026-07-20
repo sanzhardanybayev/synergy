@@ -5,12 +5,12 @@ description: Use when the user wants to start, stop, or check the Synergy previe
 
 # preview-control
 
-Manage the Synergy preview server lifecycle. The server runs on port `4321` and serves the MDX session previews with hot reload.
+Manage the Synergy preview server lifecycle. The server prefers port `4321`, can select another loopback port, and serves the MDX session previews with hot reload.
 
 ## Lifecycle
 
-- **PID file:** `.synergy/preview.pid` in the project root. Presence + alive check = "running."
-- **Port:** fixed at `4321`. If another process is on that port, starting the preview will fail loudly — don't try to free it; ask the user.
+- **Runtime authority:** `.synergy/preview.runtime.json` is published only after project-identity health verification. Use the CLI instead of reading it directly.
+- **Port:** `4321` is the preferred port. Default startup selects another available loopback port when necessary; an explicit `--port` is strict.
 - **Log file:** `.synergy/preview.log` (gitignored). Tail it when diagnosing failures.
 
 ## CLI invocation
@@ -21,7 +21,7 @@ The plugin's CLI lives at `$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js`. Always
 node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview <action>
 ```
 
-If the file doesn't exist yet, run `/synergy-setup` first — that builds the CLI and dependencies.
+If the file doesn't exist, the plugin archive is incomplete. `/synergy-setup` installs dependencies but does not build or repair runtime artifacts.
 
 ## Commands
 
@@ -29,13 +29,13 @@ If the file doesn't exist yet, run `/synergy-setup` first — that builds the CL
 |---|---|
 | Start the preview | `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview start` |
 | Stop the preview | `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview stop` |
-| Check status | `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview status` |
+| Check status | `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js" preview status --json` |
 
 `start` is idempotent — if a server is already running, it tells you and exits without spawning a second one.
 
-`stop` sends SIGTERM, waits briefly, then SIGKILL if necessary, and removes the PID file.
+`stop` uses the authenticated runtime shutdown endpoint and removes only matching runtime metadata. It never kills an unverified process.
 
-`status` prints `running` / `stopped` plus pid and url.
+`status --json` returns `running` plus the verified `origin`; treat that origin as the only URL authority.
 
 ## When to invoke
 
@@ -45,6 +45,7 @@ If the file doesn't exist yet, run `/synergy-setup` first — that builds the CL
 
 ## Failure modes
 
-- "vite binary not found" → the plugin's workspace isn't built. Run `/synergy-setup` to install + build.
-- "port 4321 in use" → another process owns the port. Have the user identify it (`lsof -i :4321`) rather than auto-killing.
-- "stale pid in preview.pid" → the CLI handles this automatically; just retry `start`.
+- Missing dependency errors → run `/synergy-setup` to perform the frozen dependency install.
+- Default preferred-port conflict → the CLI selects another port and reports its verified origin.
+- Explicit `--port` conflict → choose another explicit port or omit `--port`; never kill the occupying process automatically.
+- Stale or unhealthy runtime metadata → the CLI leaves unrelated processes untouched; retry `start` and use `preview status --json` to discover the new origin.

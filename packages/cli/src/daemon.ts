@@ -1,9 +1,8 @@
-import { PREVIEW_PORT } from './paths.js';
 import { previewStatus } from './preview.js';
 
-/** True when a live preview daemon owns the PID file. */
-export function daemonRunning(root?: string): boolean {
-  return previewStatus(root, PREVIEW_PORT).running;
+/** True when runtime metadata and the identified preview daemon agree. */
+export async function daemonRunning(root?: string): Promise<boolean> {
+  return (await previewStatus(root)).running;
 }
 
 /**
@@ -17,8 +16,9 @@ export async function tryDaemon(
   path: string,
   body?: unknown,
 ): Promise<unknown | null> {
-  if (!daemonRunning(root)) return null;
-  const url = `http://localhost:${PREVIEW_PORT}${path}`;
+  const status = await previewStatus(root);
+  if (!status.running || status.origin === null) return null;
+  const url = `${status.origin}${path}`;
   let resp: Response;
   try {
     resp = await fetch(url, {
@@ -27,7 +27,7 @@ export async function tryDaemon(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    // PID file said "alive" but the socket refused — fall back in-process.
+    // The verified daemon disappeared before this request — fall back in-process.
     return null;
   }
   const text = await resp.text();

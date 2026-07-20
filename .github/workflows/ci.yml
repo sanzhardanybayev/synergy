@@ -18,6 +18,12 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Check tracked runtime artifacts before build
+        run: pnpm check:artifacts
+      - name: Rebuild runtime artifacts
+        run: pnpm build:runtime
+      - name: Check runtime artifact drift after build
+        run: pnpm check:artifacts
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm lint
@@ -46,3 +52,22 @@ jobs:
         run: |
           git fetch origin "$BASE_BRANCH" --depth=1 || true
           BASE_REF="origin/$BASE_BRANCH" pnpm exec tsx packages/plugin-guard/src/check-bump.ts
+
+  archive-smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm smoke:plugin-archive

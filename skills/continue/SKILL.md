@@ -3,7 +3,7 @@ name: continue
 description: Use when the user runs /synergy-continue or asks a fresh-context agent to continue an in-progress Synergy session. Reconstructs context from the execution-state hand-off (resume pointer + journals) before reading the plan, then continues the execute loop from where the previous agent stopped.
 ---
 
-<!-- synergy-version: 0.12.0 -->
+<!-- synergy-version: 0.13.0 -->
 
 ## Step 0 — Freshness check (run before anything else)
 
@@ -12,7 +12,7 @@ mid-session. Before doing any work, confirm you are the newest installed version
 Set `MINE` to the version in the `synergy-version` marker just above, then run:
 
 ```bash
-MINE="0.12.0"  # ← the synergy-version marker above
+MINE="0.13.0"  # ← the synergy-version marker above
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -43,7 +43,8 @@ CLI base: `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist/cli.js"`.
   Prefer the daemon endpoint; fall back when the preview is not running:
   ```bash
   # Fast path (daemon running):
-  curl -sS "http://localhost:4321/api/progress?session=<session>"
+  # Assign PREVIEW_ORIGIN from `preview status --json`; do not assume a port.
+  curl -sS "${PREVIEW_ORIGIN}/api/progress?session=<session>"
   # The response contains progress.resume.nextPhase and progress.resume.note.
 
   # Fallback (preview not running):
