@@ -2224,13 +2224,21 @@ function readFinalizedBundle(projectRoot, workspaceId, revisionId) {
   } catch {
     throw new ReviewCoreError("review_corrupt", `invalid finalized review bundle ${path}`);
   }
+  const finalizedAt = "finalizedAt" in value ? value.finalizedAt : void 0;
+  if (finalizedAt !== void 0) assertFinalizedAt(finalizedAt);
   return {
     schemaVersion: 1,
     finalized: true,
+    ...typeof finalizedAt === "string" ? { finalizedAt } : {},
     snapshot: value.snapshot,
     insights: value.insights,
     progress: value.progress
   };
+}
+function assertFinalizedAt(value) {
+  if (typeof value !== "string" || value.length === 0 || Number.isNaN(Date.parse(value)) || new Date(value).toISOString() !== value) {
+    throw new ReviewCoreError("review_corrupt", "invalid review analysis finalization timestamp");
+  }
 }
 function validateInheritedProgress(projectRoot, workspaceId, snapshot, progress) {
   const inherited = Object.entries(progress.items).filter(
@@ -2273,11 +2281,13 @@ function validateInheritedProgress(projectRoot, workspaceId, snapshot, progress)
     }
   }
 }
-function publishFinalizedBundle(projectRoot, workspaceId, revisionId, snapshot, insights, progress, beforePublish) {
+function publishFinalizedBundle(projectRoot, workspaceId, revisionId, snapshot, insights, progress, beforePublish, finalizedAt) {
+  if (finalizedAt !== void 0) assertFinalizedAt(finalizedAt);
   beforePublish?.();
   atomicWriteJson(finalizedBundleFile(projectRoot, workspaceId, revisionId), {
     schemaVersion: 1,
     finalized: true,
+    ...finalizedAt !== void 0 ? { finalizedAt } : {},
     snapshot,
     insights,
     progress
@@ -2292,7 +2302,8 @@ function publishProgress(projectRoot, workspaceId, revisionId, finalized, progre
       finalized.snapshot,
       finalized.insights,
       progress,
-      options.beforeFinalizedBundlePublish
+      options.beforeFinalizedBundlePublish,
+      finalized.finalizedAt
     );
     return;
   }
@@ -2611,7 +2622,7 @@ function createReviewStore(projectRoot, options = {}) {
       }
       return void 0;
     },
-    writeInitialInsights(workspaceId, revisionId, insights) {
+    writeInitialInsights(workspaceId, revisionId, insights, finalizedAt) {
       withLock(workspaceId, () => {
         if (readFinalizedBundle(projectRoot, workspaceId, revisionId)) {
           throw new ReviewCoreError(
@@ -2660,11 +2671,12 @@ function createReviewStore(projectRoot, options = {}) {
           snapshot,
           insights,
           progress,
-          options.beforeFinalizedBundlePublish
+          options.beforeFinalizedBundlePublish,
+          finalizedAt ?? new Date(options.now?.() ?? Date.now()).toISOString()
         );
       });
     },
-    finalizeScopeAnalysis(workspaceId, revisionId, snapshot, insights, progress) {
+    finalizeScopeAnalysis(workspaceId, revisionId, snapshot, insights, progress, finalizedAt) {
       withLock(workspaceId, () => {
         if (readFinalizedBundle(projectRoot, workspaceId, revisionId)) {
           throw new ReviewCoreError(
@@ -2713,7 +2725,8 @@ function createReviewStore(projectRoot, options = {}) {
           snapshot,
           insights,
           progress,
-          options.beforeFinalizedBundlePublish
+          options.beforeFinalizedBundlePublish,
+          finalizedAt ?? new Date(options.now?.() ?? Date.now()).toISOString()
         );
       });
     },
@@ -2773,6 +2786,9 @@ function createReviewStore(projectRoot, options = {}) {
     },
     isAnalysisFinalized(workspaceId, revisionId) {
       return readFinalizedBundle(projectRoot, workspaceId, revisionId) !== void 0;
+    },
+    getAnalysisFinalizedAt(workspaceId, revisionId) {
+      return readFinalizedBundle(projectRoot, workspaceId, revisionId)?.finalizedAt;
     },
     updateProgress(workspaceId, revisionId, update) {
       return withLock(workspaceId, () => {

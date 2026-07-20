@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-07-19",
+  "environment": {
+    "platform": "Darwin 25.5.0 arm64",
+    "node": "24.17.0",
+    "pnpm": "10.28.2"
+  },
+  "runtime": {
+    "version": "0.13.0",
+    "revision": "dbd654e347b86155abbd7f4029608583877c7ad1"
+  },
+  "scope": {
+    "textFiles": 15,
+    "textLines": 2977,
+    "minimumSections": 20,
+    "targetSections": 25,
+    "maximumSections": 30
+  },
+  "thresholdsMs": {
+    "median": 210000,
+    "maximum": 240000
+  },
+  "summary": {
+    "medianUpperBoundMs": 160392,
+    "maximumUpperBoundMs": 189213,
+    "passed": true
+  },
+  "runs": [
+    {
+      "run": 1,
+      "reference": "synergy-review-dogfood-t2ekcp-scope-4e65d3fbe8@rev-eb5ca69704aef2ab",
+      "fingerprint": "eb5ca69704aef2abb906890ee8d29893e9976285109ee7bea1697308034d8cc6",
+      "snapshotCreatedAt": "2026-07-19T21:34:52.460Z",
+      "analysisFinalizedAt": "2026-07-19T21:37:07.972Z",
+      "analysisStartMs": 1784496894828,
+      "analysisEndMs": 1784497023794,
+      "agentAnalysisMs": 128966,
+      "analysisFinalizedInMs": 135512,
+      "capture": { "kind": "command", "upperBoundMs": 91.411125 },
+      "publication": { "kind": "command", "upperBoundMs": 95.175625 },
+      "previewReadinessMs": 177.37375,
+      "totalUpperBoundMs": 135781,
+      "reviewItemCount": 29,
+      "groupCount": 8,
+      "withinRecommendedRange": true,
+      "payloadSha256": "4b81d6cebafd2d4d0d44f4460c2f4361c3bf234635c9136970035cc4a805f4ee",
+      "toolTimingsMs": {
+        "parsing": 0.786625,
+        "derivation": 2.243125,
+        "validation": 0.173,
+        "publication": 16.626792,
+        "previewResolution": 15.596917,
+        "total": 61.727333
+      }
+    },
+    {
+      "run": 2,
+      "reference": "synergy-review-dogfood-t2ekcp-scope-b9d17232a4@rev-230af227f12b8370",
+      "fingerprint": "230af227f12b837080762a8b0f536ade54fd2c02cabab8f0f1ea38fc53d246d5",
+      "snapshotCreatedAt": "2026-07-19T21:35:05.106Z",
+      "analysisFinalizedAt": "2026-07-19T21:38:13.744Z",
+      "analysisStartMs": 1784496905221,
+      "analysisEndMs": 1784497093517,
+      "agentAnalysisMs": 188296,
+      "analysisFinalizedInMs": 188638,
+      "capture": { "kind": "wrapper", "upperBoundMs": 400 },
+      "publication": { "kind": "wrapper", "upperBoundMs": 400 },
+      "previewReadinessMs": 174.917083,
+      "totalUpperBoundMs": 189213,
+      "reviewItemCount": 29,
+      "groupCount": 7,
+      "withinRecommendedRange": true,
+      "payloadSha256": "6c1f4dfa471d55c9c29f029a15e222a7ebb9e21ee7c0742b61995d08e77e0d2f",
+      "toolTimingsMs": {
+        "parsing": 0.606,
+        "derivation": 2.707375,
+        "validation": 0.26675,
+        "publication": 16.0365,
+        "previewResolution": 14.173084,
+        "total": 58.010042
+      }
+    },
+    {
+      "run": 3,
+      "reference": "synergy-review-dogfood-t2ekcp-scope-14713de982@rev-5b4d641de499ce41",
+      "fingerprint": "5b4d641de499ce41fdd5f2f219ec71ce30099c15adfd23f5d171779d32f0ca5d",
+      "snapshotCreatedAt": "2026-07-19T21:35:12.621Z",
+      "analysisFinalizedAt": "2026-07-19T21:37:56.439Z",
+      "analysisStartMs": 1784496912682,
+      "analysisEndMs": 1784497076272,
+      "agentAnalysisMs": 163590,
+      "analysisFinalizedInMs": 163818,
+      "capture": { "kind": "wrapper", "upperBoundMs": 400 },
+      "publication": { "kind": "wrapper", "upperBoundMs": 300 },
+      "previewReadinessMs": 140.653292,
+      "totalUpperBoundMs": 164359,
+      "reviewItemCount": 30,
+      "groupCount": 8,
+      "withinRecommendedRange": true,
+      "payloadSha256": "53b1e547f9cbce9f18abb775d964467dfedf2d6efa3e5879b51c6f5c8a51962f",
+      "toolTimingsMs": {
+        "parsing": 0.659959,
+        "derivation": 2.538666,
+        "validation": 0.284417,
+        "publication": 14.532916,
+        "previewResolution": 17.830083,
+        "total": 60.911542
+      }
+    },
+    {
+      "run": 4,
+      "reference": "synergy-review-dogfood-t2ekcp-scope-3dfdd1f239@rev-c2dee1af86e5adda",
+      "fingerprint": "c2dee1af86e5adda0d6242bf6cac0cda1565fcc5f1fe9d336c66c82f2b8e8b05",
+      "snapshotCreatedAt": "2026-07-19T21:37:39.770Z",
+      "analysisFinalizedAt": "2026-07-19T21:39:40.257Z",
+      "analysisStartMs": 1784497062222,
+      "analysisEndMs": 1784497173468,
+      "agentAnalysisMs": 111246,
+      "analysisFinalizedInMs": 120487,
+      "capture": { "kind": "command", "upperBoundMs": 96.53375 },
+      "publication": { "kind": "command", "upperBoundMs": 72.029 },
+      "previewReadinessMs": 169.88125,
+      "totalUpperBoundMs": 120754,
+      "reviewItemCount": 25,
+      "groupCount": 7,
+      "withinRecommendedRange": true,
+      "payloadSha256": "21422e818b9fab8efb0857d48709974b5f3947c0fbd7b98124d27927bb79a460",
+      "toolTimingsMs": {
+        "parsing": 0.752125,
+        "derivation": 3.131083,
+        "validation": 0.33825,
+        "publication": 16.521167,
+        "previewResolution": 16.465583,
+        "total": 63.572875
+      }
+    },
+    {
+      "run": 5,
+      "reference": "synergy-review-dogfood-t2ekcp-scope-5a1ae19119@rev-b363eeb4bc25bc0b",
+      "fingerprint": "b363eeb4bc25bc0b94b85a778d33a32059d9b40cf215a078bbc3020d6ddc36d0",
+      "snapshotCreatedAt": "2026-07-19T21:38:48.466Z",
+      "analysisFinalizedAt": "2026-07-19T21:41:28.385Z",
+      "analysisStartMs": 1784497128530,
+      "analysisEndMs": 1784497288222,
+      "agentAnalysisMs": 159692,
+      "analysisFinalizedInMs": 159919,
+      "capture": { "kind": "wrapper", "upperBoundMs": 300 },
+      "publication": { "kind": "wrapper", "upperBoundMs": 300 },
+      "previewReadinessMs": 172.680333,
+      "totalUpperBoundMs": 160392,
+      "reviewItemCount": 29,
+      "groupCount": 7,
+      "withinRecommendedRange": true,
+      "payloadSha256": "6780248b45933c5d594cd130799f36022d911a99f577726f32d42f4054765109",
+      "toolTimingsMs": {
+        "parsing": 0.528542,
+        "derivation": 2.5475,
+        "validation": 0.222416,
+        "publication": 14.088458,
+        "previewResolution": 13.651042,
+        "total": 52.025083
+      }
+    }
+  ]
+}

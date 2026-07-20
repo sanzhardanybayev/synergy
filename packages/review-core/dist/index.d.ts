@@ -1428,10 +1428,11 @@ interface ReviewStore {
     readWorkspace(workspaceId: string): ReviewWorkspace;
     listWorkspaces(): ReviewWorkspace[];
     findRevisionByFingerprint(workspaceId: string, fingerprint: string): string | undefined;
-    writeInitialInsights(workspaceId: string, revisionId: string, insights: ReviewInsights): void;
-    finalizeScopeAnalysis(workspaceId: string, revisionId: string, snapshot: ReviewSnapshot, insights: ReviewInsights, progress: ReviewProgress): void;
+    writeInitialInsights(workspaceId: string, revisionId: string, insights: ReviewInsights, finalizedAt?: string): void;
+    finalizeScopeAnalysis(workspaceId: string, revisionId: string, snapshot: ReviewSnapshot, insights: ReviewInsights, progress: ReviewProgress, finalizedAt?: string): void;
     setCurrentRevision(workspaceId: string, revisionId: string, source: ReviewSource, repository?: ReviewRepository): void;
     isAnalysisFinalized(workspaceId: string, revisionId: string): boolean;
+    getAnalysisFinalizedAt(workspaceId: string, revisionId: string): string | undefined;
     updateProgress(workspaceId: string, revisionId: string, update: ReviewProgressUpdate): ReviewProgress;
     patchItemProgress(workspaceId: string, revisionId: string, reviewItemId: string, patch: ReviewItemProgressPatch): ReviewProgress;
     setActiveReview(workspaceId: string, revisionId: string): ActiveReviewPointer;

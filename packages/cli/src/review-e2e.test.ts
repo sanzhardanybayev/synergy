@@ -6,14 +6,18 @@ import {
   type ProposedCodeSection,
   type ReviewRef,
   type ReviewSnapshot,
-  applyCodeSections,
   createQuestionQueue,
   createReviewStore,
   deriveReviewReadiness,
   resolveReviewItemContext,
 } from '@synergy/review-core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { applyReviewAnalysis, createOrResumeReview, refreshReview } from './review-actions.js';
+import {
+  type ApplyReviewAnalysisDependencies,
+  applyReviewAnalysis,
+  createOrResumeReview,
+  refreshReview,
+} from './review-actions.js';
 import { waitForReviewQuestions } from './review-wait.js';
 
 const repositories = new Set<string>();
@@ -45,12 +49,13 @@ function reviewItemIdContaining(snapshot: ReviewSnapshot, text: string): string 
   return hunk.reviewItemId;
 }
 
-function applyCompleteDiffAnalysis(root: string, reference: ReviewRef): void {
+async function applyCompleteDiffAnalysis(root: string, reference: ReviewRef): Promise<void> {
   const bundle = createReviewStore(root).readBundle(reference.workspaceId, reference.revisionId);
-  applyReviewAnalysis({
+  await applyReviewAnalysis({
     root,
     reference,
     analysis: {
+      kind: 'diff',
       groups: [
         {
           id: 'staged-changes',
@@ -68,37 +73,41 @@ function applyCompleteDiffAnalysis(root: string, reference: ReviewRef): void {
   });
 }
 
-function applyCompleteScopeAnalysis(
+async function applyCompleteScopeAnalysis(
   root: string,
   reference: ReviewRef,
   sections: ProposedCodeSection[],
-): void {
+  dependencies: ApplyReviewAnalysisDependencies = {},
+): Promise<void> {
   const bundle = createReviewStore(root).readBundle(reference.workspaceId, reference.revisionId);
   if (bundle.snapshot.kind !== 'scope') throw new Error('expected a scoped snapshot');
-  const analyzedSnapshot = applyCodeSections(bundle.snapshot, sections);
-  applyReviewAnalysis({
-    root,
-    reference,
-    analysis: {
-      sections,
-      groups: [
-        {
-          id: 'scoped-sections',
-          label: 'Scoped sections',
-          reviewItemIds: analyzedSnapshot.items.map((item) => item.id),
-        },
-      ],
-      items: analyzedSnapshot.items.map((item) => ({
-        reviewItemId: item.id,
-        description: `Reviews ${item.label} in the selected scope.`,
-        confidence: 'high' as const,
-        evidencePaths: [item.path],
-      })),
+  await applyReviewAnalysis(
+    {
+      root,
+      reference,
+      analysis: {
+        kind: 'scope',
+        sections: sections.map((section, index) => ({
+          key: `section-${index + 1}`,
+          ...section,
+          description: `Reviews ${section.label} in the selected scope.`,
+          confidence: 'high' as const,
+          evidencePaths: [section.path],
+        })),
+        groups: [
+          {
+            id: 'scoped-sections',
+            label: 'Scoped sections',
+            sectionKeys: sections.map((_section, index) => `section-${index + 1}`),
+          },
+        ],
+      },
     },
-  });
+    dependencies,
+  );
 }
 
-function createTwoHunkReview(): { root: string; reference: ReviewRef } {
+async function createTwoHunkReview(): Promise<{ root: string; reference: ReviewRef }> {
   const root = createRepository();
   mkdirSync(join(root, 'src'), { recursive: true });
   const base = Array.from({ length: 30 }, (_, index) => `export const line${index + 1} = 'base';`);
@@ -112,7 +121,7 @@ function createTwoHunkReview(): { root: string; reference: ReviewRef } {
   git(root, 'add', 'src/example.ts');
 
   const created = createOrResumeReview({ root, source: { kind: 'staged' } });
-  applyCompleteDiffAnalysis(root, created.reference);
+  await applyCompleteDiffAnalysis(root, created.reference);
   return { root, reference: created.reference };
 }
 
@@ -122,8 +131,8 @@ afterEach(() => {
 });
 
 describe('integrated review workflow', () => {
-  it('completes a selected-line staged review and reconciles only the changed hunk', () => {
-    const { root, reference } = createTwoHunkReview();
+  it('completes a selected-line staged review and reconciles only the changed hunk', async () => {
+    const { root, reference } = await createTwoHunkReview();
     const store = createReviewStore(root);
     const initial = store.readBundle(reference.workspaceId, reference.revisionId);
     expect(initial.snapshot.items).toHaveLength(2);
@@ -204,7 +213,7 @@ describe('integrated review workflow', () => {
     expect(deriveReviewReadiness(next).ready).toBe(false);
   });
 
-  it('keeps ignored dependency and build output outside a scoped review', () => {
+  it('keeps ignored dependency and build output outside a scoped review', async () => {
     const root = createRepository();
     const sourcePath = 'features/subscriptions/useSubscription.ts';
     const screenPath = 'features/subscriptions/screens/Paywall.tsx';
@@ -240,28 +249,28 @@ describe('integrated review workflow', () => {
 
     if (captured.snapshot.kind !== 'scope') throw new Error('expected a scoped snapshot');
     const sections = [
-      { path: sourcePath, label: 'useSubscription', start: 1, end: 3 },
-      { path: screenPath, label: 'Paywall', start: 1, end: 1 },
+      { path: sourcePath, label: 'useSubscription', start: 1, end: 4 },
+      { path: screenPath, label: 'Paywall', start: 1, end: 2 },
     ];
-    const analyzedSnapshot = applyCodeSections(captured.snapshot, sections);
-    applyReviewAnalysis({
+    await applyReviewAnalysis({
       root,
       reference: created.reference,
       analysis: {
-        sections,
+        kind: 'scope',
+        sections: sections.map((section, index) => ({
+          key: `subscription-${index + 1}`,
+          ...section,
+          description: `Reviews ${section.label} in the subscription scope.`,
+          confidence: 'high' as const,
+          evidencePaths: [section.path],
+        })),
         groups: [
           {
             id: 'subscriptions',
             label: 'Subscription access',
-            reviewItemIds: analyzedSnapshot.items.map((item) => item.id),
+            sectionKeys: sections.map((_section, index) => `subscription-${index + 1}`),
           },
         ],
-        items: analyzedSnapshot.items.map((item) => ({
-          reviewItemId: item.id,
-          description: `Reviews ${item.label} in the subscription scope.`,
-          confidence: 'high' as const,
-          evidencePaths: [item.path],
-        })),
       },
     });
 
@@ -272,7 +281,7 @@ describe('integrated review workflow', () => {
     expect(finalized.snapshot.files.some((file) => file.path.includes('/build/'))).toBe(false);
   });
 
-  it('reconciles finalized scoped sections against their explicit predecessor revision', () => {
+  it('reconciles finalized scoped sections against their explicit predecessor revision', async () => {
     const root = createRepository();
     const changedPath = 'features/subscriptions/useSubscription.ts';
     const unchangedPath = 'features/subscriptions/formatPlan.ts';
@@ -301,14 +310,14 @@ describe('integrated review workflow', () => {
     );
     commitAll(root, 'subscription scope');
     const sections = [
-      { path: changedPath, label: 'useSubscription', start: 1, end: 3 },
-      { path: unchangedPath, label: 'formatPlan', start: 1, end: 3 },
+      { path: changedPath, label: 'useSubscription', start: 1, end: 5 },
+      { path: unchangedPath, label: 'formatPlan', start: 1, end: 5 },
     ];
     const created = createOrResumeReview({
       root,
       source: { kind: 'scope', patterns: ['features/subscriptions'] },
     });
-    applyCompleteScopeAnalysis(root, created.reference, sections);
+    await applyCompleteScopeAnalysis(root, created.reference, sections);
     const store = createReviewStore(root);
     const previous = store.readBundle(created.reference.workspaceId, created.reference.revisionId);
     for (const item of previous.snapshot.items) {
@@ -336,7 +345,33 @@ describe('integrated review workflow', () => {
       'utf8',
     );
     const refreshed = refreshReview({ root, workspaceId: created.reference.workspaceId });
-    applyCompleteScopeAnalysis(root, refreshed.reference, sections);
+    let predecessorReads = 0;
+    const trackingStore = {
+      ...store,
+      readBundle(workspaceId: string, revisionId: string) {
+        if (revisionId === created.reference.revisionId) predecessorReads += 1;
+        return store.readBundle(workspaceId, revisionId);
+      },
+    };
+    await expect(
+      applyCompleteScopeAnalysis(root, refreshed.reference, sections, {
+        createStore: () => trackingStore,
+        applyCodeSections: (snapshot) => snapshot,
+      }),
+    ).rejects.toThrow(/one review item per section/i);
+    expect(predecessorReads).toBe(0);
+    expect(
+      store.isAnalysisFinalized(refreshed.reference.workspaceId, refreshed.reference.revisionId),
+    ).toBe(false);
+    expect(
+      store.readBundle(refreshed.reference.workspaceId, refreshed.reference.revisionId).snapshot
+        .items,
+    ).toEqual([]);
+
+    await applyCompleteScopeAnalysis(root, refreshed.reference, sections, {
+      createStore: () => trackingStore,
+    });
+    expect(predecessorReads).toBe(1);
     const current = store.readBundle(
       refreshed.reference.workspaceId,
       refreshed.reference.revisionId,
@@ -365,7 +400,7 @@ describe('integrated review workflow', () => {
   });
 
   it('lets a fresh waiter claim and answer a question after the first listener is disposed', async () => {
-    const { root, reference } = createTwoHunkReview();
+    const { root, reference } = await createTwoHunkReview();
     const store = createReviewStore(root);
     const bundle = store.readBundle(reference.workspaceId, reference.revisionId);
     const item = bundle.snapshot.items[0];

@@ -267,7 +267,15 @@ Successful `analysis-set --json` output includes:
   "withinRecommendedRange": true,
   "analysisFinalizedInMs": 198000,
   "route": "/r/workspace/revision",
-  "previewReady": false
+  "previewReady": false,
+  "timings": {
+    "parsingMs": 4,
+    "derivationMs": 12,
+    "validationMs": 8,
+    "publicationMs": 6,
+    "previewResolutionMs": 10,
+    "totalMs": 40
+  }
 }
 ```
 
@@ -307,7 +315,9 @@ Every captured line in every non-binary scoped file must belong to exactly one p
 - Existing path, range, duplicate-identity, freshness, locking, conflict, and immutable-publication rules remain authoritative.
 - Any error leaves the revision unfinalized and the pending artifacts unchanged.
 
-The parser and JSON schema must reject the same inputs; the parser may not silently discard unknown properties that the schema forbids.
+The JSON Schema owns the strict structural envelope, while the parser additionally enforces
+cross-reference ownership and uniqueness that JSON Schema cannot express. The parser may not
+silently discard unknown properties that the schema forbids.
 
 ### Skill behavior
 

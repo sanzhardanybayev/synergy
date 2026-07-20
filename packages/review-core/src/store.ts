@@ -63,13 +63,19 @@ export interface ReviewStore {
   readWorkspace(workspaceId: string): ReviewWorkspace;
   listWorkspaces(): ReviewWorkspace[];
   findRevisionByFingerprint(workspaceId: string, fingerprint: string): string | undefined;
-  writeInitialInsights(workspaceId: string, revisionId: string, insights: ReviewInsights): void;
+  writeInitialInsights(
+    workspaceId: string,
+    revisionId: string,
+    insights: ReviewInsights,
+    finalizedAt?: string,
+  ): void;
   finalizeScopeAnalysis(
     workspaceId: string,
     revisionId: string,
     snapshot: ReviewSnapshot,
     insights: ReviewInsights,
     progress: ReviewProgress,
+    finalizedAt?: string,
   ): void;
   setCurrentRevision(
     workspaceId: string,
@@ -78,6 +84,7 @@ export interface ReviewStore {
     repository?: ReviewRepository,
   ): void;
   isAnalysisFinalized(workspaceId: string, revisionId: string): boolean;
+  getAnalysisFinalizedAt(workspaceId: string, revisionId: string): string | undefined;
   updateProgress(
     workspaceId: string,
     revisionId: string,
@@ -114,6 +121,8 @@ const activeWorkspaceLockTokens = new Set<string>();
 interface FinalizedRevisionBundle {
   schemaVersion: 1;
   finalized: true;
+  /** Absent only on bundles written before explicit finalization milestones were introduced. */
+  finalizedAt?: string;
   snapshot: ReviewSnapshot;
   insights: ReviewInsights;
   progress: ReviewProgress;
@@ -443,13 +452,27 @@ function readFinalizedBundle(
   } catch {
     throw new ReviewCoreError('review_corrupt', `invalid finalized review bundle ${path}`);
   }
+  const finalizedAt = 'finalizedAt' in value ? value.finalizedAt : undefined;
+  if (finalizedAt !== undefined) assertFinalizedAt(finalizedAt);
   return {
     schemaVersion: 1,
     finalized: true,
+    ...(typeof finalizedAt === 'string' ? { finalizedAt } : {}),
     snapshot: value.snapshot,
     insights: value.insights,
     progress: value.progress,
   };
+}
+
+function assertFinalizedAt(value: unknown): asserts value is string {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    Number.isNaN(Date.parse(value)) ||
+    new Date(value).toISOString() !== value
+  ) {
+    throw new ReviewCoreError('review_corrupt', 'invalid review analysis finalization timestamp');
+  }
 }
 
 function validateInheritedProgress(
@@ -520,11 +543,14 @@ function publishFinalizedBundle(
   insights: ReviewInsights,
   progress: ReviewProgress,
   beforePublish: (() => void) | undefined,
+  finalizedAt?: string,
 ): void {
+  if (finalizedAt !== undefined) assertFinalizedAt(finalizedAt);
   beforePublish?.();
   atomicWriteJson(finalizedBundleFile(projectRoot, workspaceId, revisionId), {
     schemaVersion: 1,
     finalized: true,
+    ...(finalizedAt !== undefined ? { finalizedAt } : {}),
     snapshot,
     insights,
     progress,
@@ -548,6 +574,7 @@ function publishProgress(
       finalized.insights,
       progress,
       options.beforeFinalizedBundlePublish,
+      finalized.finalizedAt,
     );
     return;
   }
@@ -952,7 +979,7 @@ export function createReviewStore(
       return undefined;
     },
 
-    writeInitialInsights(workspaceId, revisionId, insights): void {
+    writeInitialInsights(workspaceId, revisionId, insights, finalizedAt): void {
       withLock(workspaceId, () => {
         if (readFinalizedBundle(projectRoot, workspaceId, revisionId)) {
           throw new ReviewCoreError(
@@ -1002,11 +1029,19 @@ export function createReviewStore(
           insights,
           progress,
           options.beforeFinalizedBundlePublish,
+          finalizedAt ?? new Date(options.now?.() ?? Date.now()).toISOString(),
         );
       });
     },
 
-    finalizeScopeAnalysis(workspaceId, revisionId, snapshot, insights, progress): void {
+    finalizeScopeAnalysis(
+      workspaceId,
+      revisionId,
+      snapshot,
+      insights,
+      progress,
+      finalizedAt,
+    ): void {
       withLock(workspaceId, () => {
         if (readFinalizedBundle(projectRoot, workspaceId, revisionId)) {
           throw new ReviewCoreError(
@@ -1056,6 +1091,7 @@ export function createReviewStore(
           insights,
           progress,
           options.beforeFinalizedBundlePublish,
+          finalizedAt ?? new Date(options.now?.() ?? Date.now()).toISOString(),
         );
       });
     },
@@ -1117,6 +1153,10 @@ export function createReviewStore(
 
     isAnalysisFinalized(workspaceId, revisionId): boolean {
       return readFinalizedBundle(projectRoot, workspaceId, revisionId) !== undefined;
+    },
+
+    getAnalysisFinalizedAt(workspaceId, revisionId): string | undefined {
+      return readFinalizedBundle(projectRoot, workspaceId, revisionId)?.finalizedAt;
     },
 
     updateProgress(workspaceId, revisionId, update): ReviewProgress {
