@@ -27,6 +27,11 @@
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/diffItem" }
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/fileInsight" }
         }
       }
     },
@@ -75,6 +80,11 @@
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/scopeSection" }
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/fileInsight" }
         }
       }
     },
@@ -121,6 +131,21 @@
         },
         "confidence": { "$ref": "#/$defs/confidence" },
         "evidencePaths": { "$ref": "#/$defs/evidencePaths" }
+      }
+    },
+    "fileInsight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "description", "confidence"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600,
+          "pattern": "\\S"
+        },
+        "confidence": { "$ref": "#/$defs/confidence" }
       }
     }
   }

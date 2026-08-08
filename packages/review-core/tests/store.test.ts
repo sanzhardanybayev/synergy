@@ -1026,6 +1026,36 @@ describe('review storage', () => {
     );
   });
 
+  it('accepts a pending revision whose insights already carry file descriptions', () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
+    const store = createReviewStore(root);
+    const fixture = makeReviewFixture();
+    const pendingInsightsWithFiles = {
+      ...fixture.insights,
+      groups: [],
+      items: [],
+      files: [
+        {
+          path: 'src/example.ts',
+          description: 'Carried from a prior revision.',
+          confidence: 'high' as const,
+        },
+      ],
+    };
+
+    expect(() =>
+      store.createRevision(
+        fixture.workspace,
+        fixture.snapshot,
+        pendingInsightsWithFiles,
+        fixture.progress,
+      ),
+    ).not.toThrow();
+
+    const bundle = store.readBundle(fixture.workspace.id, fixture.snapshot.revisionId);
+    expect(bundle.insights.files).toEqual(pendingInsightsWithFiles.files);
+  });
+
   it('accepts insights with file descriptions for known paths', () => {
     const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
     const store = createReviewStore(root);

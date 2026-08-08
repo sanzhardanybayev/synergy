@@ -284,6 +284,192 @@ describe('review lifecycle actions', () => {
     }
   });
 
+  it('persists per-file descriptions supplied by analysis-set', async () => {
+    const root = join(tmpdir(), `synergy-review-file-insights-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const reviewItemId = createReviewStore(root).readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot.items[0]?.id;
+      if (!reviewItemId) throw new Error('fixture capture must create one review item');
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core change', reviewItemIds: [reviewItemId] }],
+          items: [
+            {
+              reviewItemId,
+              description: 'Updates the example value used by the staged module.',
+              confidence: 'high',
+              evidencePaths: ['src/example.ts'],
+            },
+          ],
+          files: [
+            {
+              path: 'src/example.ts',
+              description: 'Adjusts the exported example constant.',
+              confidence: 'high',
+            },
+          ],
+        },
+      });
+      const finalized = createReviewStore(root).readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.files).toEqual([
+        {
+          path: 'src/example.ts',
+          description: 'Adjusts the exported example constant.',
+          confidence: 'high',
+        },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('carries file descriptions across a refresh and survives analysis without a files key', async () => {
+    const root = join(tmpdir(), `synergy-review-file-carry-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const twoFilePatch = (bValue: number): string =>
+      [
+        'diff --git a/src/a.ts b/src/a.ts',
+        'index 1111111..2222222 100644',
+        '--- a/src/a.ts',
+        '+++ b/src/a.ts',
+        '@@ -1 +1 @@',
+        '-export const a = 1;',
+        '+export const a = 2;',
+        'diff --git a/src/b.ts b/src/b.ts',
+        'index 3333333..4444444 100644',
+        '--- a/src/b.ts',
+        '+++ b/src/b.ts',
+        '@@ -1 +1 @@',
+        '-export const b = 1;',
+        `+export const b = ${bValue};`,
+        '',
+      ].join('\n');
+    let patch = twoFilePatch(2);
+    const runner: CommandRunner = {
+      run(command, args, options): CommandResult {
+        const key = [command, ...args].join(' ');
+        if (key === 'git diff --cached --no-ext-diff --binary') {
+          return { exitCode: 0, stdout: patch, stderr: '' };
+        }
+        if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+        if (key === 'git rev-parse --show-toplevel') {
+          return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+        }
+        if (key === 'git config --get remote.origin.url') {
+          return { exitCode: 1, stdout: '', stderr: '' };
+        }
+        throw new Error(`missing fixture for ${key}`);
+      },
+    };
+    try {
+      const first = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const store = createReviewStore(root);
+      const firstSnapshot = store.readBundle(
+        first.reference.workspaceId,
+        first.reference.revisionId,
+      ).snapshot;
+      const itemA = firstSnapshot.items.find((item) => item.path === 'src/a.ts');
+      const itemB = firstSnapshot.items.find((item) => item.path === 'src/b.ts');
+      if (!itemA || !itemB) throw new Error('fixture capture must create two review items');
+
+      await applyReviewAnalysis({
+        root,
+        reference: first.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [itemA.id, itemB.id] }],
+          items: [
+            {
+              reviewItemId: itemA.id,
+              description: 'Updates constant a.',
+              confidence: 'high',
+              evidencePaths: ['src/a.ts'],
+            },
+            {
+              reviewItemId: itemB.id,
+              description: 'Updates constant b.',
+              confidence: 'high',
+              evidencePaths: ['src/b.ts'],
+            },
+          ],
+          files: [{ path: 'src/b.ts', description: 'File b summary.', confidence: 'high' }],
+        },
+      });
+      store.patchItemProgress(first.reference.workspaceId, first.reference.revisionId, itemB.id, {
+        status: 'reviewed',
+      });
+
+      // Refresh: only file a's content changes; file b's hunk is byte-identical, so its review
+      // item carries forward and its file insight should ride along into the new revision.
+      patch = twoFilePatch(2).replace('export const a = 2;', 'export const a = 3;');
+      const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      expect(refreshed.reference.revisionId).not.toBe(first.reference.revisionId);
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      expect(refreshedBundle.insights.files).toEqual([
+        { path: 'src/b.ts', description: 'File b summary.', confidence: 'high' },
+      ]);
+
+      const refreshedItemA = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/a.ts',
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemA || !refreshedItemB) {
+        throw new Error('refreshed snapshot must retain both review items');
+      }
+
+      // Finalize the refreshed revision without a files key: the carried file b description
+      // must survive because analysis-set omitting `files` should not erase carried entries.
+      await applyReviewAnalysis({
+        root,
+        reference: refreshed.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [
+            { id: 'core', label: 'Core', reviewItemIds: [refreshedItemA.id, refreshedItemB.id] },
+          ],
+          items: [
+            {
+              reviewItemId: refreshedItemA.id,
+              description: 'Updates constant a again.',
+              confidence: 'high',
+              evidencePaths: ['src/a.ts'],
+            },
+            {
+              reviewItemId: refreshedItemB.id,
+              description: 'Updates constant b.',
+              confidence: 'high',
+              evidencePaths: ['src/b.ts'],
+            },
+          ],
+        },
+      });
+      const finalizedRefreshed = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      expect(finalizedRefreshed.insights.files).toEqual([
+        { path: 'src/b.ts', description: 'File b summary.', confidence: 'high' },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('reports durable analysis timing and keeps finalization successful when preview is unavailable', async () => {
     const root = join(tmpdir(), `synergy-review-analysis-result-${Date.now()}`);
     mkdirSync(root, { recursive: true });
@@ -947,6 +1133,84 @@ describe('review lifecycle actions', () => {
           analysis: { kind: 'scope', sections: [section], groups: [] },
         }),
       ).rejects.toThrow(/already/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('persists scope file descriptions and rejects an unknown scope file path', async () => {
+    const root = join(tmpdir(), `synergy-review-scope-files-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const runner: CommandRunner = {
+      run(command, args, options): CommandResult {
+        const key = [command, ...args].join(' ');
+        if (key === 'git rev-parse --show-toplevel') {
+          return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+        }
+        if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+        if (key === 'git ls-files --cached --others --exclude-standard -z -- src') {
+          return { exitCode: 0, stdout: 'src/example.ts\0', stderr: '' };
+        }
+        throw new Error(`missing fixture for ${key}`);
+      },
+    };
+    try {
+      const source = 'export const first = 1;\nexport const second = 2;\n';
+      const created = createOrResumeReview({
+        root,
+        runner,
+        readFile: () => source,
+        source: { kind: 'scope', patterns: ['src'] },
+      });
+      const section = {
+        key: 'local-key',
+        path: 'src/example.ts',
+        label: 'Module exports',
+        start: 1,
+        end: 3,
+        description: 'Defines the scoped exports consumed by the module.',
+        confidence: 'high' as const,
+        evidencePaths: ['src/example.ts'],
+      };
+
+      await expect(
+        applyReviewAnalysis({
+          root,
+          reference: created.reference,
+          analysis: {
+            kind: 'scope',
+            sections: [section],
+            groups: [{ id: 'exports', label: 'Exports', sectionKeys: [section.key] }],
+            files: [{ path: 'src/missing.ts', description: 'Unknown file.', confidence: 'low' }],
+          },
+        }),
+      ).rejects.toThrow(/unknown path/i);
+      expect(
+        createReviewStore(root).isAnalysisFinalized(
+          created.reference.workspaceId,
+          created.reference.revisionId,
+        ),
+      ).toBe(false);
+
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'scope',
+          sections: [section],
+          groups: [{ id: 'exports', label: 'Exports', sectionKeys: [section.key] }],
+          files: [
+            { path: 'src/example.ts', description: 'Exports two constants.', confidence: 'high' },
+          ],
+        },
+      });
+      const finalized = createReviewStore(root).readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.files).toEqual([
+        { path: 'src/example.ts', description: 'Exports two constants.', confidence: 'high' },
+      ]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -245,4 +245,52 @@ describe('parseReviewAnalysisInput', () => {
   ])('rejects a 601-character %s description at its exact path', (_label, input, path) => {
     expect(() => parseReviewAnalysisInput(input)).toThrow(path);
   });
+
+  it('accepts diff analysis with files', () => {
+    const input = {
+      ...validDiffInput,
+      files: [{ path: 'src/a.ts', description: 'Broad file summary.', confidence: 'high' }],
+    };
+    expect(parseReviewAnalysisInput(input)).toMatchObject({
+      files: [{ path: 'src/a.ts', description: 'Broad file summary.', confidence: 'high' }],
+    });
+  });
+
+  it('accepts scope analysis with files', () => {
+    const input = {
+      ...validScopeInput,
+      files: [{ path: 'src/capture.ts', description: 'Broad file summary.', confidence: 'high' }],
+    };
+    expect(parseReviewAnalysisInput(input)).toMatchObject({
+      files: [{ path: 'src/capture.ts', description: 'Broad file summary.', confidence: 'high' }],
+    });
+  });
+
+  it('rejects files with empty description', () => {
+    const input = {
+      ...validDiffInput,
+      files: [{ path: 'src/a.ts', description: '  ', confidence: 'high' }],
+    };
+    expect(() => parseReviewAnalysisInput(input)).toThrow('$.files[0].description');
+  });
+
+  it('rejects duplicate file paths', () => {
+    const file = { path: 'src/a.ts', description: 'x', confidence: 'low' as const };
+    expect(() => parseReviewAnalysisInput({ ...validDiffInput, files: [file, file] })).toThrow(
+      'duplicates',
+    );
+  });
+
+  it('rejects an unknown key on a file insight', () => {
+    expect(() =>
+      parseReviewAnalysisInput({
+        ...validDiffInput,
+        files: [{ path: 'src/a.ts', description: 'x', confidence: 'high', extra: true }],
+      }),
+    ).toThrow('$.files[0].extra');
+  });
+
+  it('rejects an empty files array', () => {
+    expect(() => parseReviewAnalysisInput({ ...validDiffInput, files: [] })).toThrow('$.files');
+  });
 });

@@ -2,6 +2,7 @@ import { performance } from 'node:perf_hooks';
 import {
   type ProposedCodeSection,
   type ReviewBundle,
+  type ReviewFileInsight,
   type ReviewGroup,
   type ReviewInsights,
   type ReviewItemInsight,
@@ -174,18 +175,42 @@ function initialProgress(snapshot: ReviewSnapshot, now: string): ReviewProgress 
 }
 
 /**
- * Reconciles progress for a new snapshot against its predecessor, discarding the carried file
- * insights that ride alongside the progress result. Wiring carried file descriptions into the
- * persisted `ReviewInsights` is not yet implemented here; the store's `ReviewProgress` schema
- * rejects unknown properties, so the extra `insights` field cannot be forwarded as-is.
+ * Reconciles progress for a new snapshot against its predecessor. The carried file insights
+ * that ride alongside the progress result are returned separately so callers can fold them into
+ * the new revision's `ReviewInsights` document (the store's `ReviewProgress` schema rejects
+ * unknown properties, so they cannot be forwarded as part of the progress object itself).
  */
+function reconcileProgressAndFiles(
+  previous: ReviewBundle,
+  snapshot: ReviewSnapshot,
+  now: string,
+): { progress: ReviewProgress; files: ReviewFileInsight[] | undefined } {
+  const { insights, ...progress } = reconcileReview(previous, snapshot, now);
+  return { progress, files: insights.files };
+}
+
 function reconcileProgress(
   previous: ReviewBundle,
   snapshot: ReviewSnapshot,
   now: string,
 ): ReviewProgress {
-  const { insights: _carriedInsights, ...progress } = reconcileReview(previous, snapshot, now);
-  return progress;
+  return reconcileProgressAndFiles(previous, snapshot, now).progress;
+}
+
+/**
+ * Merges fresh per-file analysis with carried-forward file insights from the predecessor
+ * revision. Fresh entries win for the paths they cover; carried entries survive for paths the
+ * fresh analysis omits (typically files whose review items were all carried forward untouched).
+ */
+function mergeFileInsights(
+  carried: ReviewFileInsight[] | undefined,
+  fresh: ReviewFileInsight[] | undefined,
+): ReviewFileInsight[] | undefined {
+  if (!fresh || fresh.length === 0) return carried;
+  if (!carried || carried.length === 0) return fresh;
+  const freshPaths = new Set(fresh.map((file) => file.path));
+  const survivingCarried = carried.filter((file) => !freshPaths.has(file.path));
+  return [...fresh, ...survivingCarried];
 }
 
 function buildSnapshot(
@@ -280,14 +305,21 @@ export function createOrResumeReview(
     existingWorkspace,
     now,
   );
-  const insights: ReviewInsights = { schemaVersion: 1, revisionId, groups: [], items: [] };
-  const progress = existingWorkspace
-    ? reconcileProgress(
+  const reconciliation = existingWorkspace
+    ? reconcileProgressAndFiles(
         store.readBundle(workspaceId, existingWorkspace.currentRevisionId),
         snapshot,
         now,
       )
-    : initialProgress(snapshot, now);
+    : undefined;
+  const progress = reconciliation?.progress ?? initialProgress(snapshot, now);
+  const insights: ReviewInsights = {
+    schemaVersion: 1,
+    revisionId,
+    groups: [],
+    items: [],
+    ...(reconciliation?.files ? { files: reconciliation.files } : {}),
+  };
   try {
     store.createRevision(workspace, snapshot, insights, progress);
   } catch (error) {
@@ -487,11 +519,13 @@ export async function applyReviewAnalysis(
     validationMs += measureMonotonic(monotonicNow, () => {
       assertValidAnalysis(translated.snapshot, translated.analysis);
     }).durationMs;
+    const scopeFiles = mergeFileInsights(bundle.insights.files, scopeAnalysis.files);
     const insights: ReviewInsights = {
       schemaVersion: 1,
       revisionId: request.reference.revisionId,
       groups: translated.analysis.groups,
       items: translated.analysis.items,
+      ...(scopeFiles ? { files: scopeFiles } : {}),
     };
     const derived = measureMonotonic(monotonicNow, () => {
       const progressTimestamp = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
@@ -530,11 +564,13 @@ export async function applyReviewAnalysis(
     validationMs += measureMonotonic(monotonicNow, () => {
       assertValidAnalysis(bundle.snapshot, diffAnalysis);
     }).durationMs;
+    const diffFiles = mergeFileInsights(bundle.insights.files, diffAnalysis.files);
     const insights: ReviewInsights = {
       schemaVersion: 1,
       revisionId: request.reference.revisionId,
       groups: diffAnalysis.groups,
       items: diffAnalysis.items,
+      ...(diffFiles ? { files: diffFiles } : {}),
     };
     finalizedAt = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
     publicationMs += measureMonotonic(monotonicNow, () => {
