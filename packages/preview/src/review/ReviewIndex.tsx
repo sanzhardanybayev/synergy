@@ -37,12 +37,9 @@ export function ReviewIndex({ fetchIndex = fetchReviewIndex }: ReviewIndexProps)
 
       {reviews && reviews.length > 0 && (
         <ul className="review-index__list">
-          {reviews.map((review) => (
-            <li key={review.workspaceId}>
-              <Link
-                className="review-index__card"
-                to={`/r/${encodeURIComponent(review.workspaceId)}/${encodeURIComponent(review.revisionId)}`}
-              >
+          {reviews.map((review) => {
+            const cardBody = (
+              <>
                 <div className="review-index__card-heading">
                   <h2>{review.subject}</h2>
                   <div className="review-index__badges">
@@ -69,9 +66,23 @@ export function ReviewIndex({ fetchIndex = fetchReviewIndex }: ReviewIndexProps)
                   {' · '}
                   {review.updatedAt ? new Date(review.updatedAt).toLocaleString() : 'unknown time'}
                 </p>
-              </Link>
-            </li>
-          ))}
+              </>
+            );
+            return (
+              <li key={review.workspaceId}>
+                {review.degraded ? (
+                  <div className="review-index__card">{cardBody}</div>
+                ) : (
+                  <Link
+                    className="review-index__card"
+                    to={`/r/${encodeURIComponent(review.workspaceId)}/${encodeURIComponent(review.revisionId)}`}
+                  >
+                    {cardBody}
+                  </Link>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>

@@ -361,16 +361,8 @@
   line-height: var(--syn-leading-snug);
 }
 
-.review-stage__item {
+.review-stage__meta {
   margin: var(--syn-sp-4) 0 var(--syn-sp-2);
-}
-
-.review-stage__item h2 {
-  margin: 0 0 var(--syn-sp-1);
-  font-size: var(--syn-text-lg);
-}
-
-.review-stage__item span {
   color: var(--syn-fg-subtle);
   font-size: var(--syn-text-sm);
 }
@@ -879,9 +871,13 @@
     var(--syn-ease-out);
 }
 
-.review-index__card:hover {
+a.review-index__card:hover {
   border-color: var(--syn-accent);
   transform: translateY(-1px);
+}
+
+div.review-index__card {
+  cursor: default;
 }
 
 .review-index__card-heading {

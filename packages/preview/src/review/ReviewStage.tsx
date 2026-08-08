@@ -63,14 +63,11 @@ export function ReviewStage({
         progress={bundle.progress.items}
         onSelect={onSelectItem}
       />
-      <div className="review-stage__item">
-        <h2>{item.label}</h2>
-        <span>
-          {item.kind === 'file'
-            ? 'File-level change'
-            : `${item.kind === 'hunk' ? 'Diff hunk' : 'Code section'} · lines ${item.range.start}–${item.range.end}`}
-        </span>
-      </div>
+      <p className="review-stage__meta">
+        {item.kind === 'file'
+          ? 'File-level change'
+          : `${item.kind === 'hunk' ? 'Diff hunk' : 'Code section'} · lines ${item.range.start}–${item.range.end}`}
+      </p>
       {bundle.snapshot.kind === 'diff' && context.item.kind === 'hunk' ? (
         <DiffViewer
           rows={context.rows.filter((row) => row.kind !== 'scope')}

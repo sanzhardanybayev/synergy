@@ -62,7 +62,7 @@ describe('ReviewIndex', () => {
     expect(await screen.findByText('2 questions')).toBeVisible();
   });
 
-  it('shows an Unreadable badge for degraded workspaces', async () => {
+  it('shows an Unreadable badge for degraded workspaces and skips the navigable link', async () => {
     renderIndex({
       reviews: [
         entry({
@@ -77,6 +77,7 @@ describe('ReviewIndex', () => {
     });
 
     expect(await screen.findByText('Unreadable')).toBeVisible();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 
   it('shows an empty state when there are no reviews', async () => {
