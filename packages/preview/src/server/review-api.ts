@@ -237,7 +237,7 @@ export async function handleReviewApi(
 ): Promise<void> {
   const route =
     suppliedRoute ?? matchReviewRoute(new URL(req.url ?? '/', 'http://localhost').pathname);
-  if (!route || route.kind === 'stream') {
+  if (!route || route.kind === 'stream' || route.kind === 'index') {
     sendJson(res, 404, { error: 'review_route_not_found' });
     return;
   }

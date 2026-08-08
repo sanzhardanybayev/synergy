@@ -1200,3 +1200,34 @@ export async function getProgress(session: string): Promise<ProgressDto> {
   }
   return (await res.json()) as ProgressDto;
 }
+
+// ---------------------------------------------------------------------------
+// GET /api/reviews
+// ---------------------------------------------------------------------------
+
+export type ReviewIndexSourceKind = 'pr' | 'staged' | 'unstaged' | 'scope' | 'unknown';
+
+export interface ReviewIndexEntry {
+  workspaceId: string;
+  revisionId: string;
+  subject: string;
+  sourceKind: ReviewIndexSourceKind;
+  itemCount: number;
+  reviewedCount: number;
+  openQuestions: number;
+  updatedAt: string;
+  degraded?: string;
+}
+
+export interface ReviewIndexResponse {
+  reviews: ReviewIndexEntry[];
+}
+
+export async function fetchReviewIndex(signal?: AbortSignal): Promise<ReviewIndexResponse> {
+  const res = await fetch('/api/reviews', { signal });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`GET /api/reviews failed (${res.status}): ${text}`);
+  }
+  return (await res.json()) as ReviewIndexResponse;
+}
