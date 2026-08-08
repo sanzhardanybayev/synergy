@@ -87,6 +87,42 @@ function diffSnapshot(): DiffReviewSnapshot {
   };
 }
 
+function diffFileKindSnapshot(): DiffReviewSnapshot {
+  return {
+    schemaVersion: 1,
+    revisionId: 'rev-1',
+    source: { kind: 'staged', headSha: 'a' },
+    fingerprint: 'fp',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    kind: 'diff',
+    files: [
+      {
+        path: 'src/renamed.ts',
+        previousPath: 'src/old-name.ts',
+        status: 'renamed',
+        additions: 0,
+        deletions: 0,
+        binary: false,
+        hunks: [],
+        reviewItemId: 'item-file-1',
+        reviewItemContentHash: 'file-content-hash-1',
+        reviewItemLocationHash: 'file-loc-1',
+      },
+    ],
+    items: [
+      {
+        id: 'item-file-1',
+        kind: 'file',
+        path: 'src/renamed.ts',
+        label: 'src/renamed.ts (renamed)',
+        range: { start: 0, end: 0 },
+        contentHash: 'file-content-hash-1',
+        locationHash: 'file-loc-1',
+      },
+    ],
+  };
+}
+
 describe('fileDrift (pure)', () => {
   it('is clean when scope-captured text matches current text exactly', () => {
     const snapshot = scopeSnapshot('export const example = true;');
@@ -117,6 +153,25 @@ describe('fileDrift (pure)', () => {
     const snapshot = diffSnapshot();
     expect(fileDrift('anything at all', snapshot, 'src/unrelated.ts')).toBe('clean');
   });
+
+  it('is clean for a diff file-kind item with no textual hunk rows (e.g. a rename)', () => {
+    const snapshot = diffFileKindSnapshot();
+    // resolveBrowserReviewItemContext resolves this item to zero rows; there is nothing to
+    // compare against the current text, so this must report 'clean', not 'drifted'.
+    expect(fileDrift('anything at all', snapshot, 'src/renamed.ts')).toBe('clean');
+  });
+
+  it('is clean when a scope-captured CRLF file is read back with CRLF endings intact', () => {
+    const snapshot = scopeSnapshot('line one\nline two\nline three');
+    const currentText = 'line one\r\nline two\r\nline three';
+    expect(fileDrift(currentText, snapshot, 'src/example.ts')).toBe('clean');
+  });
+
+  it('is clean when a diff hunk add-line is read back with CRLF endings intact', () => {
+    const snapshot = diffSnapshot();
+    const currentText = 'export const value = 2;\r\nexport const other = 1;';
+    expect(fileDrift(currentText, snapshot, 'src/example.ts')).toBe('clean');
+  });
 });
 
 describe('fileDriftOnDisk', () => {
@@ -142,5 +197,14 @@ describe('fileDriftOnDisk', () => {
     expect(
       fileDriftOnDisk(root, scopeSnapshot('export const example = true;'), 'src/example.ts'),
     ).toBe('drifted');
+  });
+
+  it('reports clean for an on-disk CRLF file whose content is otherwise unchanged', () => {
+    const root = createRoot();
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(join(root, 'src', 'example.ts'), 'line one\r\nline two\r\nline three');
+    expect(
+      fileDriftOnDisk(root, scopeSnapshot('line one\nline two\nline three'), 'src/example.ts'),
+    ).toBe('clean');
   });
 });

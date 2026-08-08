@@ -14,7 +14,11 @@ export type DriftState = 'clean' | 'drifted' | 'missing';
  *
  * - `currentText === undefined` means the file no longer exists on disk -> 'missing'.
  * - Scope snapshots capture every line of the file, so we can reconstruct the exact captured
- *   text (`SourceFile.lines`) and compare it byte-for-byte against the current text.
+ *   text (`SourceFile.lines`) and compare it byte-for-byte against the current text. If the
+ *   path was never captured in this snapshot (not in `snapshot.files`) or was captured as
+ *   binary (`SourceFile.binary`), there is no captured text to compare against, so we report
+ *   'clean' rather than guessing - the same honest-limitation stance documented below for the
+ *   diff branch's incomparable cases.
  * - Diff snapshots only capture the changed hunks (and, for whole-file changes, no textual rows
  *   at all), so a full-file reconstruction is not possible in general. Instead we resolve each
  *   review item's captured context rows and check that the rows which map onto a stable
@@ -25,6 +29,10 @@ export type DriftState = 'clean' | 'drifted' | 'missing';
  *   snapshot never captured at all - there is nothing to compare, so we report 'clean' rather
  *   than guessing. This is a conservative, honest limitation: drift on such files can only be
  *   detected by a full re-capture, not by this pointwise check.
+ * - Line-ending normalization: captured text is always reconstructed from parsed line records
+ *   (no `\r`), while `currentText` is read verbatim from disk and may still carry `\r\n` on
+ *   Windows-authored or CRLF-checked-out files. Both sides are normalized to `\n` before any
+ *   comparison so a CRLF-only difference is never reported as drift.
  */
 export function fileDrift(
   currentText: string | undefined,
@@ -32,18 +40,19 @@ export function fileDrift(
   path: string,
 ): DriftState {
   if (currentText === undefined) return 'missing';
+  const normalizedCurrentText = normalizeLineEndings(currentText);
 
   if (snapshot.kind === 'scope') {
     const file = snapshot.files.find((candidate) => candidate.path === path);
     if (!file || file.binary) return 'clean';
     const capturedText = file.lines.map((line) => line.text).join('\n');
-    return hashText(capturedText) === hashText(currentText) ? 'clean' : 'drifted';
+    return hashText(capturedText) === hashText(normalizedCurrentText) ? 'clean' : 'drifted';
   }
 
   const items = snapshot.items.filter((item) => item.path === path);
   if (items.length === 0) return 'clean';
 
-  const currentLines = currentText.split('\n');
+  const currentLines = normalizedCurrentText.split('\n');
   for (const item of items) {
     let context: ReturnType<typeof resolveBrowserReviewItemContext>;
     try {
@@ -57,12 +66,18 @@ export function fileDrift(
       if (row.kind !== 'add' && row.kind !== 'context') continue;
       if (row.newLine === null) continue;
       const currentLine = currentLines[row.newLine - 1];
-      if (currentLine === undefined || hashText(currentLine) !== hashText(row.text)) {
+      const capturedLine = normalizeLineEndings(row.text);
+      if (currentLine === undefined || hashText(currentLine) !== hashText(capturedLine)) {
         return 'drifted';
       }
     }
   }
   return 'clean';
+}
+
+/** Normalizes CRLF to LF so line-ending style alone never registers as content drift. */
+function normalizeLineEndings(text: string): string {
+  return text.replace(/\r\n/g, '\n');
 }
 
 function readFileTextOrUndefined(absolutePath: string): string | undefined {
