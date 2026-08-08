@@ -9,7 +9,9 @@ import {
   saveNote,
   setItemStatus,
 } from '../data/sessions.js';
-import { hunkDecorationRanges } from '../editor/decoration-ranges.js';
+import { resolveBaseContentFromProject } from '../editor/base-content.js';
+import { parseBaseUri } from '../editor/base-provider.js';
+import { fileDecorationRanges, hunkDecorationRanges } from '../editor/decoration-ranges.js';
 import { openNativeDiff } from '../editor/native-diff.js';
 import { snapshotContentFor } from '../editor/snapshot-content.js';
 import {
@@ -36,6 +38,8 @@ type Screen = { kind: 'sessions' } | { kind: 'bundle'; projectRoot: string; ref:
 export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private view: vscode.WebviewView | undefined;
   private screen: Screen = { kind: 'sessions' };
+  /** Global diff-presentation toggle mirrored from the webview; gates every editor decoration. */
+  private diffVisible = true;
   private currentBundle: ReviewBundle | undefined;
   private watchers: vscode.Disposable[] = [];
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -179,7 +183,16 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
           break;
 
         case 'openNativeDiff':
-          await this.openNativeDiffFor(message.path);
+          await this.openNativeDiffFor(message.path, message.reviewItemId);
+          break;
+
+        case 'openFile':
+          await this.openFullFile(message.path);
+          break;
+
+        case 'setDiffVisible':
+          this.diffVisible = message.value;
+          if (!message.value) this.host.clearDecorations();
           break;
 
         case 'showSnapshot':
@@ -240,7 +253,20 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
       item.range.start,
       item.range.end,
     );
-    this.applyDecorationsFor(item);
+    if (this.diffVisible) this.applyDecorationsFor(item);
+  }
+
+  /** Opens the full working-tree file (no hunk reveal) with all-hunk decorations when enabled. */
+  private async openFullFile(path: string): Promise<void> {
+    if (this.screen.kind !== 'bundle' || !this.currentBundle) {
+      this.postError(new Error('No active session'));
+      return;
+    }
+    await this.host.openFile(join(this.screen.projectRoot, path));
+    if (!this.diffVisible || this.currentBundle.snapshot.kind !== 'diff') return;
+    const file = this.currentBundle.snapshot.files.find((candidate) => candidate.path === path);
+    if (!file) return;
+    this.host.applyDecorations(fileDecorationRanges(file));
   }
 
   /** Best-effort: not every review item overlays onto a textual hunk (e.g. whole-file items). */
@@ -258,12 +284,15 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
     this.host.applyDecorations(hunkDecorationRanges(file, item.id));
   }
 
-  private async openNativeDiffFor(path: string): Promise<void> {
+  private async openNativeDiffFor(path: string, reviewItemId?: string): Promise<void> {
     if (this.screen.kind !== 'bundle') {
       this.postError(new Error('No active session'));
       return;
     }
-    await openNativeDiff(this.screen.projectRoot, this.screen.ref, path);
+    const revealRange = reviewItemId
+      ? this.currentBundle?.snapshot.items.find((item) => item.id === reviewItemId)?.range
+      : undefined;
+    await openNativeDiff(this.screen.projectRoot, this.screen.ref, path, revealRange);
   }
 
   private async showSnapshotFor(path: string): Promise<void> {
@@ -296,6 +325,34 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
       ? `// Synergy captured snapshot: ${path} (full file as captured)\n\n`
       : `// Synergy captured snapshot: ${path} (captured hunks only - not a full-file reconstruction)\n\n`;
     return banner + resolved.text;
+  }
+
+  /**
+   * Resolves content for the `synergy-review-base:` scheme (the left side of native diffs),
+   * wired in from `extension.ts` via `registerBaseProvider`. Same active-bundle guard as
+   * `resolveSnapshotContent`. Exact reconstructions (reverse-apply, git) return the raw text so
+   * the diff aligns line-for-line; only the lossy hunks-only fallback gets a banner, since its
+   * alignment is already approximate.
+   */
+  resolveBaseContent(uri: vscode.Uri): string | undefined {
+    if (this.screen.kind !== 'bundle' || !this.currentBundle) return undefined;
+    const { ref, path } = parseBaseUri(uri);
+    if (
+      ref.workspaceId !== this.screen.ref.workspaceId ||
+      ref.revisionId !== this.screen.ref.revisionId
+    ) {
+      return undefined;
+    }
+    const resolved = resolveBaseContentFromProject(
+      this.screen.projectRoot,
+      this.currentBundle.snapshot,
+      path,
+    );
+    if (!resolved) return undefined;
+    if (resolved.origin === 'hunks-only') {
+      return `// Synergy base content: ${path} (captured hunks only - not a full-file reconstruction)\n\n${resolved.text}`;
+    }
+    return resolved.text;
   }
 
   private withActiveRef(fn: (projectRoot: string, ref: ReviewRef) => void): void {

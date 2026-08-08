@@ -34,3 +34,8 @@ dist/
 # VS Code extension integration-test artifacts
 /packages/vscode-extension/.vscode-test/
 /packages/vscode-extension/out-test/
+.synergy/active-session
+.synergy/review-state.json
+.synergy/active-review.json
+.synergy/preview.runtime.json
+.synergy/reviews/

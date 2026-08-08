@@ -13,8 +13,12 @@ export interface Host {
   onDidChangeWorkspaceFolders(cb: () => void): { dispose(): void };
   watch(globAbsoluteDir: string, cb: () => void): { dispose(): void };
   openFileAt(absPath: string, startLine: number, endLine: number): Promise<void>;
+  /** Opens the full file at its current scroll position (no reveal). */
+  openFile(absPath: string): Promise<void>;
   /** Applies hunk highlight decorations to the active text editor, if any. No-op otherwise. */
   applyDecorations(ranges: HunkDecorationRanges): void;
+  /** Clears any hunk highlight decorations from the active text editor, if any. */
+  clearDecorations(): void;
   showError(message: string): void;
 }
 
@@ -48,9 +52,19 @@ export function createVsCodeHost(): Host {
       editor.selection = new vscode.Selection(range.start, range.start);
     },
 
+    async openFile(absPath: string): Promise<void> {
+      const doc = await vscode.workspace.openTextDocument(absPath);
+      await vscode.window.showTextDocument(doc, { preview: false });
+    },
+
     applyDecorations(ranges: HunkDecorationRanges): void {
       const editor = vscode.window.activeTextEditor;
       if (editor) applyHunkDecorations(editor, ranges);
+    },
+
+    clearDecorations(): void {
+      const editor = vscode.window.activeTextEditor;
+      if (editor) applyHunkDecorations(editor, { added: [], removed: [] });
     },
 
     showError(message: string): void {

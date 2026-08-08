@@ -4,4 +4,7 @@
  */
 declare function acquireVsCodeApi(): {
   postMessage(message: unknown): void;
+  /** Persisted webview state - survives disposal, unlike in-memory variables. */
+  getState(): { diffVisible?: boolean } | undefined;
+  setState(state: { diffVisible?: boolean }): void;
 };

@@ -25,8 +25,10 @@ export type FromWebview =
   | { kind: 'setStatusBatch'; reviewItemIds: string[]; status: 'reviewed' | 'needs-review' }
   | { kind: 'saveNote'; reviewItemId: string; note: string }
   | { kind: 'backToSessions' }
-  | { kind: 'openNativeDiff'; path: string }
-  | { kind: 'showSnapshot'; path: string };
+  | { kind: 'openNativeDiff'; path: string; reviewItemId?: string }
+  | { kind: 'showSnapshot'; path: string }
+  | { kind: 'openFile'; path: string }
+  | { kind: 'setDiffVisible'; value: boolean };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -100,8 +102,25 @@ export function parseFromWebview(value: unknown): FromWebview | undefined {
       return undefined;
 
     case 'openNativeDiff':
+      if (
+        isString(value.path) &&
+        (value.reviewItemId === undefined || isString(value.reviewItemId))
+      ) {
+        return value.reviewItemId === undefined
+          ? { kind: 'openNativeDiff', path: value.path }
+          : { kind: 'openNativeDiff', path: value.path, reviewItemId: value.reviewItemId };
+      }
+      return undefined;
+
+    case 'openFile':
       if (isString(value.path)) {
-        return { kind: 'openNativeDiff', path: value.path };
+        return { kind: 'openFile', path: value.path };
+      }
+      return undefined;
+
+    case 'setDiffVisible':
+      if (typeof value.value === 'boolean') {
+        return { kind: 'setDiffVisible', value: value.value };
       }
       return undefined;
 
