@@ -1,4 +1,4 @@
-import type { DiffFile, ReviewRange } from '@synergy/review-core';
+import type { DiffFile, DiffHunk, ReviewRange } from '@synergy/review-core';
 
 /**
  * Gutter/background decoration ranges for a single hunk, expressed in the coordinates the
@@ -26,7 +26,26 @@ export function hunkDecorationRanges(file: DiffFile, reviewItemId: string): Hunk
   if (!hunk) {
     throw new Error(`No hunk found in ${file.path} for review item: ${reviewItemId}`);
   }
+  return rangesForHunk(hunk);
+}
 
+/**
+ * Union of every hunk's ranges in the file, for whole-file review (opening a file from its panel
+ * row rather than a single hunk). Hunks without a `reviewItemId` still contribute - the editor
+ * overlay should show every captured change, linked to a review item or not.
+ */
+export function fileDecorationRanges(file: DiffFile): HunkDecorationRanges {
+  const added: ReviewRange[] = [];
+  const removed: ReviewRange[] = [];
+  for (const hunk of file.hunks) {
+    const ranges = rangesForHunk(hunk);
+    added.push(...ranges.added);
+    removed.push(...ranges.removed);
+  }
+  return { added, removed };
+}
+
+function rangesForHunk(hunk: DiffHunk): HunkDecorationRanges {
   const added: ReviewRange[] = [];
   const removed: ReviewRange[] = [];
   let anchorLine = Math.max(1, hunk.newStart - 1);

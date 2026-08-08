@@ -1,6 +1,6 @@
 import type { DiffFile } from '@synergy/review-core';
 import { describe, expect, it } from 'vitest';
-import { hunkDecorationRanges } from './decoration-ranges.js';
+import { fileDecorationRanges, hunkDecorationRanges } from './decoration-ranges.js';
 
 function fileWithHunk(overrides: Partial<DiffFile['hunks'][number]> = {}): DiffFile {
   return {
@@ -114,5 +114,50 @@ describe('hunkDecorationRanges', () => {
   it('throws for unknown reviewItemId', () => {
     const file = fileWithHunk({ lines: [] });
     expect(() => hunkDecorationRanges(file, 'missing-item')).toThrow();
+  });
+});
+
+describe('fileDecorationRanges', () => {
+  it('unions ranges across every hunk in the file, including hunks without a reviewItemId', () => {
+    const base = fileWithHunk({});
+    const file: DiffFile = {
+      ...base,
+      hunks: [
+        {
+          ...base.hunks[0],
+          lines: [
+            { kind: 'context', text: 'a', oldLine: 8, newLine: 10 },
+            { kind: 'add', text: 'b', oldLine: null, newLine: 11 },
+            { kind: 'remove', text: 'c', oldLine: 9, newLine: null },
+          ],
+        },
+        {
+          ...base.hunks[0],
+          reviewItemId: undefined,
+          header: '@@ -30,2 +32,3 @@',
+          oldStart: 30,
+          oldLines: 2,
+          newStart: 32,
+          newLines: 3,
+          lines: [
+            { kind: 'context', text: 'x', oldLine: 30, newLine: 32 },
+            { kind: 'add', text: 'y', oldLine: null, newLine: 33 },
+          ],
+        },
+      ],
+    };
+
+    expect(fileDecorationRanges(file)).toEqual({
+      added: [
+        { start: 11, end: 11 },
+        { start: 33, end: 33 },
+      ],
+      removed: [{ start: 11, end: 11 }],
+    });
+  });
+
+  it('returns empty ranges for a file with no hunks', () => {
+    const file = fileWithHunk({});
+    expect(fileDecorationRanges({ ...file, hunks: [] })).toEqual({ added: [], removed: [] });
   });
 });
