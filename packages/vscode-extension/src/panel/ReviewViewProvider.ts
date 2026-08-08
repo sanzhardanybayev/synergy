@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { ReviewBundle, ReviewItem, ReviewRef } from '@synergy/review-core';
 import type * as vscode from 'vscode';
+import { type DaemonLink, tryConnectDaemon } from '../data/daemon.js';
 import { listSessions, loadBundle, saveNote, setItemStatus } from '../data/sessions.js';
 import { hunkDecorationRanges } from '../editor/decoration-ranges.js';
 import { openNativeDiff } from '../editor/native-diff.js';
@@ -32,6 +33,7 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
   private currentBundle: ReviewBundle | undefined;
   private watchers: vscode.Disposable[] = [];
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private daemonLink: DaemonLink | undefined;
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -63,9 +65,15 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
 
   dispose(): void {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.disposeDaemonLink();
     for (const disposable of [...this.watchers, ...this.disposables]) disposable.dispose();
     this.watchers = [];
     this.disposables.length = 0;
+  }
+
+  private disposeDaemonLink(): void {
+    this.daemonLink?.dispose();
+    this.daemonLink = undefined;
   }
 
   private setupWatchers(): void {
@@ -94,6 +102,7 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
           break;
 
         case 'backToSessions':
+          this.disposeDaemonLink();
           this.screen = { kind: 'sessions' };
           this.postSessions();
           break;
@@ -141,12 +150,16 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
       this.postError(new Error(`Session not found: ${workspaceId}`));
       return;
     }
+    this.disposeDaemonLink();
     this.screen = {
       kind: 'bundle',
       projectRoot: match.projectRoot,
       ref: { workspaceId, revisionId },
     };
     this.refreshActiveScreen();
+    this.daemonLink = tryConnectDaemon(match.projectRoot, { workspaceId, revisionId }, () =>
+      this.scheduleRefresh(),
+    );
   }
 
   private async openHunk(reviewItemId: string): Promise<void> {
