@@ -22,6 +22,7 @@ export type FromWebview =
   | { kind: 'openSession'; workspaceId: string; revisionId: string }
   | { kind: 'openHunk'; reviewItemId: string }
   | { kind: 'setStatus'; reviewItemId: string; status: 'reviewed' | 'needs-review' }
+  | { kind: 'setStatusBatch'; reviewItemIds: string[]; status: 'reviewed' | 'needs-review' }
   | { kind: 'saveNote'; reviewItemId: string; note: string }
   | { kind: 'backToSessions' }
   | { kind: 'openNativeDiff'; path: string }
@@ -33,6 +34,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isString(value: unknown): value is string {
   return typeof value === 'string';
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(isString);
 }
 
 /**
@@ -72,6 +77,19 @@ export function parseFromWebview(value: unknown): FromWebview | undefined {
         (value.status === 'reviewed' || value.status === 'needs-review')
       ) {
         return { kind: 'setStatus', reviewItemId: value.reviewItemId, status: value.status };
+      }
+      return undefined;
+
+    case 'setStatusBatch':
+      if (
+        isStringArray(value.reviewItemIds) &&
+        (value.status === 'reviewed' || value.status === 'needs-review')
+      ) {
+        return {
+          kind: 'setStatusBatch',
+          reviewItemIds: value.reviewItemIds,
+          status: value.status,
+        };
       }
       return undefined;
 

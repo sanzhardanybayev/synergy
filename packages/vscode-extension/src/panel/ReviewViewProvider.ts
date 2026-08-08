@@ -2,7 +2,13 @@ import { join } from 'node:path';
 import type { ReviewBundle, ReviewItem, ReviewRef } from '@synergy/review-core';
 import type * as vscode from 'vscode';
 import { type DaemonLink, tryConnectDaemon } from '../data/daemon.js';
-import { listSessions, loadBundle, saveNote, setItemStatus } from '../data/sessions.js';
+import {
+  type SessionSummary,
+  listSessions,
+  loadBundle,
+  saveNote,
+  setItemStatus,
+} from '../data/sessions.js';
 import { hunkDecorationRanges } from '../editor/decoration-ranges.js';
 import { openNativeDiff } from '../editor/native-diff.js';
 import { snapshotContentFor } from '../editor/snapshot-content.js';
@@ -35,6 +41,11 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private daemonLink: DaemonLink | undefined;
   private readonly disposables: vscode.Disposable[] = [];
+  /** Disposed and replaced on every `resolveWebviewView` call so re-resolves don't leak listeners. */
+  private messageHandler: vscode.Disposable | undefined;
+  /** Last session list posted to the webview; `openSession` looks up here instead of re-listing
+   * every bundle on disk (the refresh path already re-lists via `postSessions`). */
+  private lastSessions: SessionSummary[] | undefined;
 
   constructor(
     private readonly host: Host,
@@ -48,11 +59,12 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
     this.view = webviewView;
     webviewView.webview.options = { enableScripts: true, localResourceRoots: [this.mediaRoot] };
     webviewView.webview.html = renderWebviewHtml(webviewView.webview, this.mediaRoot);
-    this.disposables.push(
-      webviewView.webview.onDidReceiveMessage((raw: unknown) => {
-        void this.handleMessage(raw);
-      }),
-    );
+    // Re-resolves happen (e.g. the view container is fully torn down and reopened); dispose the
+    // previous handler first so we don't accumulate one listener per resolve.
+    this.messageHandler?.dispose();
+    this.messageHandler = webviewView.webview.onDidReceiveMessage((raw: unknown) => {
+      void this.handleMessage(raw);
+    });
     webviewView.onDidDispose(() => {
       if (this.view === webviewView) this.view = undefined;
     });
@@ -66,6 +78,8 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
   dispose(): void {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.disposeDaemonLink();
+    this.messageHandler?.dispose();
+    this.messageHandler = undefined;
     for (const disposable of [...this.watchers, ...this.disposables]) disposable.dispose();
     this.watchers = [];
     this.disposables.length = 0;
@@ -97,10 +111,11 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
     try {
       switch (message.kind) {
         case 'ready':
-          // The webview re-sends 'ready' on every re-init (e.g. tab hidden/shown without
-          // retainContextWhenHidden), not just first load. Dispose any daemon link left over
-          // from a prior bundle screen the same way 'backToSessions' does, or its SSE socket
-          // leaks until the next openSession.
+          // The webview re-sends 'ready' on every re-init, not just first load - e.g. the view
+          // container is reopened after being fully disposed (retainContextWhenHidden, set in
+          // extension.ts, only survives hide/show, not disposal). Dispose any daemon link left
+          // over from a prior bundle screen the same way 'backToSessions' does, or its SSE
+          // socket leaks until the next openSession.
           this.disposeDaemonLink();
           this.screen = { kind: 'sessions' };
           this.postSessions();
@@ -120,6 +135,15 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
           this.withActiveRef((projectRoot, ref) =>
             setItemStatus(projectRoot, ref, message.reviewItemId, message.status),
           );
+          this.refreshActiveScreen();
+          break;
+
+        case 'setStatusBatch':
+          this.withActiveRef((projectRoot, ref) => {
+            for (const reviewItemId of message.reviewItemIds) {
+              setItemStatus(projectRoot, ref, reviewItemId, message.status);
+            }
+          });
           this.refreshActiveScreen();
           break;
 
@@ -148,11 +172,23 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
   }
 
   private openSession(workspaceId: string, revisionId: string): void {
-    const match = listSessions(this.host.workspaceFolders()).find(
+    // The webview can only have requested a session that was in the list it was just shown, so
+    // the cache populated by the last `postSessions` call is always fresh enough here; fall back
+    // to a fresh list only if we somehow have not posted one yet (e.g. a stray message before
+    // 'ready').
+    const sessions = this.lastSessions ?? listSessions(this.host.workspaceFolders());
+    const match = sessions.find(
       (session) => session.workspaceId === workspaceId && session.revisionId === revisionId,
     );
     if (!match) {
       this.postError(new Error(`Session not found: ${workspaceId}`));
+      return;
+    }
+    if (match.degraded) {
+      // Never leave `screen` pointing at a bundle for a session that failed to load - the
+      // webview already renders degraded cards as non-interactive, but guard here too in case a
+      // stale/forged message slips through.
+      this.postError(new Error(`Session is unavailable: ${match.degraded}`));
       return;
     }
     this.disposeDaemonLink();
@@ -263,7 +299,9 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
 
   private postSessions(): void {
     try {
-      this.post({ kind: 'sessions', sessions: listSessions(this.host.workspaceFolders()) });
+      const sessions = listSessions(this.host.workspaceFolders());
+      this.lastSessions = sessions;
+      this.post({ kind: 'sessions', sessions });
     } catch (error) {
       this.postError(error);
     }

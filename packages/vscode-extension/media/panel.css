@@ -224,6 +224,16 @@ body {
   background: var(--syn-bg-hover);
 }
 
+.session-card-degraded {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.session-card-degraded:hover {
+  border-color: var(--syn-border);
+  background: var(--syn-bg-raised);
+}
+
 .session-card-header {
   display: flex;
   align-items: center;

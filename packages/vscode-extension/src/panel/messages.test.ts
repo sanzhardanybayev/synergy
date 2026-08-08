@@ -33,6 +33,38 @@ describe('parseFromWebview', () => {
     });
   });
 
+  it('parses a valid setStatusBatch message', () => {
+    expect(
+      parseFromWebview({ kind: 'setStatusBatch', reviewItemIds: ['a', 'b'], status: 'reviewed' }),
+    ).toEqual({
+      kind: 'setStatusBatch',
+      reviewItemIds: ['a', 'b'],
+      status: 'reviewed',
+    });
+  });
+
+  it('parses a valid empty setStatusBatch message', () => {
+    expect(
+      parseFromWebview({ kind: 'setStatusBatch', reviewItemIds: [], status: 'needs-review' }),
+    ).toEqual({
+      kind: 'setStatusBatch',
+      reviewItemIds: [],
+      status: 'needs-review',
+    });
+  });
+
+  it('rejects a malformed setStatusBatch message', () => {
+    expect(
+      parseFromWebview({ kind: 'setStatusBatch', reviewItemIds: ['a', 1], status: 'reviewed' }),
+    ).toBeUndefined();
+    expect(
+      parseFromWebview({ kind: 'setStatusBatch', reviewItemIds: 'a', status: 'reviewed' }),
+    ).toBeUndefined();
+    expect(
+      parseFromWebview({ kind: 'setStatusBatch', reviewItemIds: ['a'], status: 'bogus' }),
+    ).toBeUndefined();
+  });
+
   it('parses a valid saveNote message', () => {
     expect(parseFromWebview({ kind: 'saveNote', reviewItemId: 'x', note: 'hello' })).toEqual({
       kind: 'saveNote',

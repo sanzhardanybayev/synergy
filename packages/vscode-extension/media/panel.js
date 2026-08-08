@@ -85,6 +85,21 @@
       const pct = total > 0 ? Math.round((reviewed / total) * 100) : 0;
       const progressFill = el('div', { className: 'progress-bar-fill' }, []);
       progressFill.style.width = `${pct}%`;
+      const header = el('div', { className: 'session-card-header' }, [
+        el('span', { className: 'session-subject' }, [session.subject]),
+        session.degraded ? el('span', { className: 'badge badge-danger' }, ['Unreadable']) : null,
+      ]);
+      const body = el('div', { className: 'progress-bar' }, [progressFill]);
+      const meta = el('div', { className: 'session-meta' }, [
+        el('span', {}, [`${reviewed}/${total} reviewed`]),
+        el('span', {}, [formatTime(session.updatedAt)]),
+      ]);
+      // Degraded sessions have no readable bundle to open - render a non-interactive card (a
+      // `div`, not a `button`) instead of one that posts `openSession` for a session the
+      // provider would just reject anyway (see ReviewViewProvider.openSession).
+      if (session.degraded) {
+        return el('div', { className: 'session-card session-card-degraded' }, [header, body, meta]);
+      }
       return el(
         'button',
         {
@@ -96,19 +111,7 @@
               revisionId: session.revisionId,
             }),
         },
-        [
-          el('div', { className: 'session-card-header' }, [
-            el('span', { className: 'session-subject' }, [session.subject]),
-            session.degraded
-              ? el('span', { className: 'badge badge-danger' }, ['Unreadable'])
-              : null,
-          ]),
-          el('div', { className: 'progress-bar' }, [progressFill]),
-          el('div', { className: 'session-meta' }, [
-            el('span', {}, [`${reviewed}/${total} reviewed`]),
-            el('span', {}, [formatTime(session.updatedAt)]),
-          ]),
-        ],
+        [header, body, meta],
       );
     });
     return el('div', { className: 'session-list' }, cards);
@@ -162,6 +165,10 @@
     const note = el('textarea', {
       className: 'hunk-note',
       placeholder: 'Leave a note...',
+      // Identifies this textarea across a full `render()` rebuild so `restoreFocusedNote` can
+      // find the same logical note after `app.innerHTML = ''` destroys and recreates the DOM
+      // node - see that function for why this is needed at all.
+      'data-review-item-id': item.id,
       onClick: (event) => event.stopPropagation(),
       onBlur: (event) =>
         post({ kind: 'saveNote', reviewItemId: item.id, note: event.target.value }),
@@ -200,8 +207,11 @@
       onClick: (event) => {
         event.stopPropagation();
         const nextStatus = allReviewed ? 'needs-review' : 'reviewed';
-        for (const item of items)
-          post({ kind: 'setStatus', reviewItemId: item.id, status: nextStatus });
+        post({
+          kind: 'setStatusBatch',
+          reviewItemIds: items.map((item) => item.id),
+          status: nextStatus,
+        });
       },
     });
     checkbox.indeterminate = !allReviewed && !noneReviewed;
@@ -264,6 +274,11 @@
     const bundle = state.bundle;
     if (!bundle) return el('div', { className: 'empty-state' }, ['No session loaded.']);
     const groups = bundle.bundle.insights.groups || [];
+    if (groups.length === 0) {
+      return el('div', { className: 'empty-state' }, [
+        'No review items yet - analysis may still be running.',
+      ]);
+    }
     return el(
       'div',
       { className: 'review-groups' },
@@ -307,8 +322,54 @@
     ]);
   }
 
+  /**
+   * `render()` rebuilds the entire tree on every message (`app.innerHTML = ''`), which destroys
+   * and recreates every DOM node - including whichever `.hunk-note` textarea the user is
+   * currently typing in. Two problems follow from that, and this function (paired with the
+   * scroll-position capture in `render()`) fixes both:
+   *
+   * 1. A focused textarea that gets destroyed never fires `blur`, so its in-progress edit is
+   *    lost - `saveNote` only posts on blur.
+   * 2. Even ignoring data loss, losing focus and cursor position on every incoming message
+   *    (e.g. another reviewer's edit arriving over the daemon SSE link) makes typing a note
+   *    while a session is "live" nearly unusable.
+   *
+   * We chose "preserve value + selection across the rebuild" over the alternative of "skip
+   * re-render entirely while a note is focused, queue it for blur": that alternative risks the
+   * queued render being dropped or stale-guarded incorrectly, and would delay legitimate,
+   * unrelated UI updates (toolbar, other rows, error banner) for as long as the user is typing.
+   * Preserving state is strictly more robust: every render still happens, and only the one
+   * textarea's DOM identity is discontinuous, which its own value transfer papers over.
+   */
+  function captureFocusedNote() {
+    const active = document.activeElement;
+    if (!active || !app || !app.contains(active) || !active.classList.contains('hunk-note')) {
+      return null;
+    }
+    const textarea = /** @type {HTMLTextAreaElement} */ (active);
+    return {
+      reviewItemId: textarea.getAttribute('data-review-item-id'),
+      value: textarea.value,
+      selectionStart: textarea.selectionStart,
+      selectionEnd: textarea.selectionEnd,
+    };
+  }
+
+  function restoreFocusedNote(captured) {
+    if (!captured || !captured.reviewItemId || !app) return;
+    const restored = /** @type {HTMLTextAreaElement | null} */ (
+      app.querySelector(`.hunk-note[data-review-item-id="${CSS.escape(captured.reviewItemId)}"]`)
+    );
+    if (!restored) return;
+    restored.value = captured.value;
+    restored.focus();
+    restored.setSelectionRange(captured.selectionStart, captured.selectionEnd);
+  }
+
   function render() {
     if (!app) return;
+    const focusedNote = captureFocusedNote();
+    const scrollTop = app.scrollTop;
     app.innerHTML = '';
     app.appendChild(renderToolbar());
     if (state.error) {
@@ -319,6 +380,11 @@
     } else if (state.bundle) {
       app.appendChild(renderBundle());
     }
+    // Scroll position, like focus, is reset by rebuilding the DOM from scratch - restore it so a
+    // background refresh (fs watcher, daemon SSE event, or the check-all/setStatus round trip)
+    // doesn't visually jump the reviewer back to the top of a long file list.
+    app.scrollTop = scrollTop;
+    restoreFocusedNote(focusedNote);
   }
 
   window.addEventListener('message', (event) => {

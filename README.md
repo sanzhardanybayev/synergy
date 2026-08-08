@@ -105,9 +105,9 @@ marketplace listing yet.
 
 ```bash
 pnpm --filter synergy-vscode package
-code --install-extension packages/vscode-extension/synergy-vscode-<version>.vsix
+code --install-extension packages/vscode-extension/synergy-vscode-<version>.vsix --force
 # or, in Cursor:
-cursor --install-extension packages/vscode-extension/synergy-vscode-<version>.vsix
+cursor --install-extension packages/vscode-extension/synergy-vscode-<version>.vsix --force
 ```
 
 ## Quick start

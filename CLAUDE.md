@@ -12,7 +12,7 @@ See `SYNERGY_PLAN.md` for the original implementation plan and `AGENTS.md` for c
 - `packages/cli` — deterministic project, preview, validation, execution-state, and review-artifact commands. Agent reasoning lives in skills.
 - `skills` — shared agent workflows used by Claude Code and Codex.
 - `commands` — thin Claude Code command shims that dispatch to shared skills.
-- `packages/vscode-extension` — VS Code/Cursor review pane; local .vsix, bundles review-core.
+- `packages/vscode-extension` - VS Code/Cursor review pane; local .vsix, bundles review-core.
 - `examples/` — canonical dogfood sessions.
 
 Keep shared workflow logic in root skills. Claude commands must remain thin dispatch shims.

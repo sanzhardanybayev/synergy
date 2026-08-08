@@ -14,7 +14,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     provider,
     { dispose: () => disposeHunkDecorationTypes() },
-    vscode.window.registerWebviewViewProvider('synergyReview.panel', provider),
+    vscode.window.registerWebviewViewProvider('synergyReview.panel', provider, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
     vscode.commands.registerCommand('synergy-review.refresh', () => provider.refresh()),
     // These command-palette entries have no file context of their own; the webview drives the
     // real openNativeDiff/showSnapshot flows (see ReviewViewProvider) with a specific path.

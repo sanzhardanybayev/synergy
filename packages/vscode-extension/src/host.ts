@@ -5,7 +5,8 @@ import { applyHunkDecorations } from './editor/decorations.js';
 /**
  * Host is the seam between the extension's domain logic and the `vscode` API.
  * Later tasks mock this interface in tests instead of importing `vscode` directly.
- * Only this file, extension.ts, the webview host files, and src/editor/* may import `vscode`.
+ * Only these files may import `vscode`: src/host.ts, src/extension.ts,
+ * src/panel/webview-html.ts, src/panel/ReviewViewProvider.ts (type-only), and src/editor/*.ts.
  */
 export interface Host {
   workspaceFolders(): string[]; // absolute fs paths
@@ -30,10 +31,13 @@ export function createVsCodeHost(): Host {
     watch(globAbsoluteDir: string, cb: () => void): { dispose(): void } {
       const pattern = new vscode.RelativePattern(globAbsoluteDir, '**/*');
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-      watcher.onDidChange(cb);
-      watcher.onDidCreate(cb);
-      watcher.onDidDelete(cb);
-      return watcher;
+      const listeners = [watcher.onDidChange(cb), watcher.onDidCreate(cb), watcher.onDidDelete(cb)];
+      return {
+        dispose(): void {
+          for (const listener of listeners) listener.dispose();
+          watcher.dispose();
+        },
+      };
     },
 
     async openFileAt(absPath: string, startLine: number, endLine: number): Promise<void> {
