@@ -104,6 +104,75 @@ describe('handleFeedbackStream', () => {
     },
   );
 
+  // Sole real-filesystem coverage of the watch -> SSE path. Every other test
+  // in this file either injects the fake watcher above or doesn't depend on
+  // an fs event firing within a budget, because the real OS watch backend
+  // (FSEvents on macOS) has load-dependent startup/delivery latency that can
+  // occasionally exceed even generous fixed timeouts under a fully parallel
+  // suite run (see the fake-watcher test's comment for the reproduction).
+  // Rather than drop real-fs coverage entirely, this test keeps the default
+  // `watchFn` (real `fs.watch`), resolves as soon as the frame arrives (so it
+  // normally finishes in milliseconds, not the ceiling), and retries once in
+  // the rare event the first attempt's watcher genuinely never delivers -
+  // the retry re-creates the stream and watcher on a fresh temp dir so the
+  // second attempt isn't tainted by the first watcher's state.
+  it(
+    'sends a real feedback-changed frame from a real fs.watch write',
+    { timeout: 35_000 },
+    async () => {
+      const attempt = async (): Promise<void> => {
+        const attemptTemp = makeTempDir();
+        try {
+          const req = makeStreamReq(`/api/feedback/stream?session=${SESSION}`);
+          const { res, chunks } = makeStreamRes();
+
+          let resolveChanged: (() => void) | undefined;
+          const changed = new Promise<void>((resolve) => {
+            resolveChanged = resolve;
+          });
+          const originalWrite = res.write;
+          res.write = (chunk: string) => {
+            const wrote = originalWrite(chunk);
+            if (chunk.includes('feedback-changed')) resolveChanged?.();
+            return wrote;
+          };
+
+          handleFeedbackStream(
+            req as unknown as IncomingMessage,
+            res as unknown as ServerResponse,
+            attemptTemp.dir,
+          );
+
+          await waitFor(() => chunks.length >= 1);
+
+          mkdirSync(join(attemptTemp.dir, SESSION), { recursive: true });
+          writeFileSync(
+            join(attemptTemp.dir, SESSION, 'new-comment.md'),
+            '---\nstatus: open\n---\nhi',
+            'utf8',
+          );
+
+          const timeout = new Promise<void>((_resolve, reject) =>
+            setTimeout(() => reject(new Error('real fs.watch did not deliver a frame')), 15_000),
+          );
+          try {
+            await Promise.race([changed, timeout]);
+          } finally {
+            req.emit('close');
+          }
+        } finally {
+          attemptTemp.cleanup();
+        }
+      };
+
+      try {
+        await attempt();
+      } catch {
+        await attempt();
+      }
+    },
+  );
+
   it('reports agent presence from a fresh listening marker', { timeout: 15_000 }, async () => {
     temp = makeTempDir();
     mkdirSync(join(temp.dir, SESSION), { recursive: true });
