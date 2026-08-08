@@ -3,3 +3,5 @@ node_modules/**
 esbuild.mjs
 **/*.map
 tsconfig.json
+tsconfig.media.json
+media/global.d.ts

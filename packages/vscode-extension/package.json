@@ -26,7 +26,7 @@
   "scripts": {
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.media.json",
     "test": "vitest run",
     "package": "pnpm build && vsce package --no-dependencies"
   },

@@ -89,6 +89,51 @@ body.vscode-high-contrast {
   --syn-radius-full: 999px;
 }
 
+/*
+ * VS Code's HC-Light theme stamps BOTH `vscode-high-contrast` and `vscode-high-contrast-light`
+ * on <body>, so without this block HC-Light would inherit the dark palette from the rule above.
+ * This block must come after it in source order so its light values win the cascade.
+ */
+body.vscode-high-contrast-light {
+  --syn-accent: #c14f2c;
+  --syn-accent-strong: #a83f20;
+  --syn-accent-fg: #a83f20;
+  --syn-accent-contrast: #ffffff;
+  --syn-on-fill: #ffffff;
+  --syn-accent-soft: rgba(193, 79, 44, 0.1);
+  --syn-accent-soft-strong: rgba(193, 79, 44, 0.18);
+  --syn-accent-border: rgba(193, 79, 44, 0.42);
+
+  --syn-bg: #faf9f6;
+  --syn-bg-sunken: #f3f1ec;
+  --syn-bg-raised: #ffffff;
+  --syn-bg-hover: rgba(31, 28, 24, 0.05);
+  --syn-bg-active: rgba(31, 28, 24, 0.08);
+  --syn-fg: #211d18;
+  --syn-fg-muted: #5f584e;
+  --syn-fg-subtle: #736b5d;
+  --syn-border: #e6e2d9;
+  --syn-border-strong: #d2ccc0;
+  --syn-code-bg: rgba(31, 28, 24, 0.055);
+
+  --syn-status-draft: #8d8578;
+  --syn-status-in-progress: #a16207;
+  --syn-status-blocked: #c03a2b;
+  --syn-status-done: #22794a;
+
+  --syn-danger: #c03a2b;
+  --syn-danger-soft: rgba(192, 58, 43, 0.1);
+  --syn-success: #22794a;
+  --syn-success-soft: rgba(34, 121, 74, 0.12);
+  --syn-warn: #a16207;
+  --syn-warn-soft: rgba(161, 98, 7, 0.12);
+
+  --syn-radius-xs: 4px;
+  --syn-radius-sm: 6px;
+  --syn-radius-md: 8px;
+  --syn-radius-full: 999px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -199,19 +244,9 @@ body {
   border-radius: var(--syn-radius-full);
 }
 
-.badge-warn {
-  background: var(--syn-warn-soft);
-  color: var(--syn-warn);
-}
-
 .badge-danger {
   background: var(--syn-danger-soft);
   color: var(--syn-danger);
-}
-
-.badge-muted {
-  background: var(--syn-code-bg);
-  color: var(--syn-fg-muted);
 }
 
 .progress-bar {

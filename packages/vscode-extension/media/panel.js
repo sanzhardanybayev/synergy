@@ -2,11 +2,22 @@
 // panel.js - vanilla-DOM webview UI for the Synergy Review pane. No framework: the message
 // protocol (see src/panel/messages.ts) is small enough that hand-written DOM updates stay
 // readable, and skipping React/Vue keeps the extension bundle tiny.
+//
+// Type-checked (loosely - see tsconfig.media.json) against the JSDoc typedef below so a
+// mistake like reading `serializedBundle.bundle.drift` (drift is a SIBLING of `bundle`, not
+// nested under it - see src/panel/messages.ts) is a compile error, not a silently-dead badge.
+//
+/**
+ * @typedef {object} SerializedBundle
+ * @property {{workspace: any, snapshot: any, insights: any, progress: any}} bundle
+ * @property {Record<string, 'clean'|'drifted'|'missing'>} drift
+ * @property {string} projectRoot
+ */
 (() => {
   const vscode = acquireVsCodeApi();
   const app = document.getElementById('app');
 
-  /** @type {{screen: 'sessions'|'bundle', sessions: any[], bundle: any|null, error: string|null, expanded: Set<string>}} */
+  /** @type {{screen: 'sessions'|'bundle', sessions: any[], bundle: SerializedBundle|null, error: string|null, expanded: Set<string>}} */
   const state = {
     screen: 'sessions',
     sessions: [],
@@ -22,6 +33,12 @@
   function el(tag, props, children) {
     const node = document.createElement(tag);
     for (const [key, value] of Object.entries(props || {})) {
+      if (key === 'style') {
+        // The CSP declares `style-src` without 'unsafe-inline', so a `style` ATTRIBUTE is
+        // blocked and silently no-ops. Set `node.style.<property>` (CSSOM) on the returned
+        // element instead - CSSOM writes are not subject to style-src.
+        throw new Error('el(): "style" is not supported - set node.style.<property> instead');
+      }
       if (key === 'className') node.className = value;
       else if (key.startsWith('on') && typeof value === 'function') {
         node.addEventListener(key.slice(2).toLowerCase(), value);
@@ -42,11 +59,13 @@
     return date.toLocaleString();
   }
 
+  /** @param {SerializedBundle} bundle */
   function itemStatus(bundle, reviewItemId) {
     const progress = bundle.bundle.progress.items[reviewItemId];
     return progress ? progress.status : 'needs-review';
   }
 
+  /** @param {SerializedBundle} bundle */
   function isReviewed(bundle, reviewItemId) {
     const status = itemStatus(bundle, reviewItemId);
     return status === 'reviewed' || status === 'carried-forward';
@@ -64,6 +83,8 @@
       const total = session.itemCount;
       const reviewed = session.reviewedCount;
       const pct = total > 0 ? Math.round((reviewed / total) * 100) : 0;
+      const progressFill = el('div', { className: 'progress-bar-fill' }, []);
+      progressFill.style.width = `${pct}%`;
       return el(
         'button',
         {
@@ -82,9 +103,7 @@
               ? el('span', { className: 'badge badge-danger' }, ['Unreadable'])
               : null,
           ]),
-          el('div', { className: 'progress-bar' }, [
-            el('div', { className: 'progress-bar-fill', style: `width:${pct}%` }, []),
-          ]),
+          el('div', { className: 'progress-bar' }, [progressFill]),
           el('div', { className: 'session-meta' }, [
             el('span', {}, [`${reviewed}/${total} reviewed`]),
             el('span', {}, [formatTime(session.updatedAt)]),
@@ -97,6 +116,7 @@
 
   // ---- Review screen ----
 
+  /** @param {SerializedBundle} bundle */
   function groupItemsByFile(bundle, reviewItemIds) {
     const itemsById = new Map(bundle.bundle.snapshot.items.map((item) => [item.id, item]));
     /** @type {Map<string, any[]>} */
@@ -104,21 +124,25 @@
     for (const id of reviewItemIds) {
       const item = itemsById.get(id);
       if (!item) continue;
-      if (!byPath.has(item.path)) byPath.set(item.path, []);
-      byPath.get(item.path).push(item);
+      const files = byPath.get(item.path) ?? [];
+      files.push(item);
+      byPath.set(item.path, files);
     }
     return byPath;
   }
 
+  /** @param {SerializedBundle} bundle */
   function fileInsight(bundle, path) {
     const files = bundle.bundle.insights.files || [];
     return files.find((file) => file.path === path);
   }
 
+  /** @param {SerializedBundle} bundle */
   function itemInsight(bundle, reviewItemId) {
     return bundle.bundle.insights.items.find((item) => item.reviewItemId === reviewItemId);
   }
 
+  /** @param {SerializedBundle} bundle */
   function renderHunkRow(bundle, item) {
     const reviewed = isReviewed(bundle, item.id);
     const insight = itemInsight(bundle, item.id);
@@ -161,12 +185,14 @@
     );
   }
 
+  /** @param {SerializedBundle} bundle */
   function renderFileRow(bundle, path, items) {
     const expanded = state.expanded.has(path);
     const reviewedCount = items.filter((item) => isReviewed(bundle, item.id)).length;
     const allReviewed = reviewedCount === items.length;
     const noneReviewed = reviewedCount === 0;
-    const drift = bundle.bundle.drift[path] || 'clean';
+    // `drift` lives beside `bundle`, not nested under it - see the SerializedBundle typedef above.
+    const drift = bundle.drift[path] || 'clean';
 
     const checkbox = el('input', {
       type: 'checkbox',
@@ -223,6 +249,7 @@
     return el('div', {}, children);
   }
 
+  /** @param {SerializedBundle} bundle */
   function renderGroup(bundle, group) {
     const byPath = groupItemsByFile(bundle, group.reviewItemIds);
     const fileRows = [];
@@ -235,6 +262,7 @@
 
   function renderBundle() {
     const bundle = state.bundle;
+    if (!bundle) return el('div', { className: 'empty-state' }, ['No session loaded.']);
     const groups = bundle.bundle.insights.groups || [];
     return el(
       'div',
