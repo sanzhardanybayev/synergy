@@ -1,0 +1,42 @@
+{
+  "name": "synergy-vscode",
+  "displayName": "Synergy Review",
+  "description": "Guided code review sessions inside your editor.",
+  "version": "0.1.0",
+  "publisher": "synergy",
+  "private": true,
+  "engines": { "vscode": "^1.90.0" },
+  "main": "./dist/extension.js",
+  "activationEvents": ["onView:synergyReview.panel"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "synergyReview", "title": "Synergy Review", "icon": "media/icon.svg" }
+      ]
+    },
+    "views": {
+      "synergyReview": [{ "type": "webview", "id": "synergyReview.panel", "name": "Review" }]
+    },
+    "commands": [
+      { "command": "synergy-review.refresh", "title": "Synergy: Refresh Reviews" },
+      { "command": "synergy-review.openNativeDiff", "title": "Synergy: Open Native Diff" },
+      { "command": "synergy-review.showSnapshot", "title": "Synergy: Show Captured Snapshot" }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package": "pnpm build && vsce package --no-dependencies"
+  },
+  "dependencies": { "@synergy/review-core": "workspace:*" },
+  "devDependencies": {
+    "@types/node": "22.10.1",
+    "@types/vscode": "1.90.0",
+    "@vscode/vsce": "3.1.0",
+    "esbuild": "0.24.0",
+    "typescript": "5.6.3",
+    "vitest": "2.1.5"
+  }
+}
