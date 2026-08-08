@@ -242,12 +242,11 @@
 }
 
 .review-file {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
   align-items: center;
   gap: var(--syn-sp-2);
   margin-bottom: 2px;
-  padding: 4px var(--syn-sp-1);
+  padding: var(--syn-sp-2);
   border-radius: var(--syn-radius-sm);
 }
 
@@ -257,20 +256,23 @@
 }
 
 .review-file input[type="checkbox"] {
+  flex: 0 0 auto;
   width: 15px;
   height: 15px;
   margin: 0;
+  line-height: 1;
   accent-color: var(--syn-accent);
   cursor: pointer;
 }
 
 .review-file__heading {
+  flex: 1 1 auto;
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--syn-sp-2);
-  padding: 2px var(--syn-sp-1);
+  padding: 0;
   color: var(--syn-fg);
   border: 0;
   background: transparent;
@@ -278,6 +280,7 @@
   font-family: var(--syn-font-mono);
   font-size: var(--syn-text-xs);
   font-weight: 600;
+  line-height: 1.4;
   text-align: left;
 }
 
@@ -618,7 +621,9 @@
 
 .review-button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  color: var(--syn-fg-subtle);
+  border-color: var(--syn-border);
+  background: var(--syn-bg-active);
 }
 
 .review-button--primary {
