@@ -2,7 +2,15 @@
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "organizeImports": { "enabled": true },
   "files": {
-    "ignore": ["**/dist/**", "**/node_modules/**", "**/.synergy/**", "**/schemas/**", "**/*.mdx"]
+    "ignore": [
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/.synergy/**",
+      "**/schemas/**",
+      "**/*.mdx",
+      "**/.vscode-test/**",
+      "**/out-test/**"
+    ]
   },
   "formatter": {
     "enabled": true,

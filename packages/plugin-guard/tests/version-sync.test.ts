@@ -10,6 +10,7 @@ beforeEach(() => {
   mkdirSync(join(root, '.claude-plugin'), { recursive: true });
   mkdirSync(join(root, 'skills/create-spec'), { recursive: true });
   mkdirSync(join(root, 'packages/cli/src'), { recursive: true });
+  mkdirSync(join(root, 'packages/vscode-extension'), { recursive: true });
   writeFileSync(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ version: '0.7.0' }));
   writeFileSync(
     join(root, '.claude-plugin/marketplace.json'),
@@ -22,6 +23,10 @@ beforeEach(() => {
   writeFileSync(
     join(root, 'skills/create-spec/SKILL.md'),
     '---\nname: create-spec\n---\n<!-- synergy-version: 0.6.0 -->\n\nbody\n',
+  );
+  writeFileSync(
+    join(root, 'packages/vscode-extension/package.json'),
+    JSON.stringify({ name: 'synergy-vscode', version: '0.6.0', publisher: 'synergy' }, null, 2),
   );
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -41,6 +46,11 @@ describe('version-sync', () => {
     expect(readFileSync(join(root, 'packages/cli/src/version.ts'), 'utf8')).toContain(
       "export const SYNERGY_VERSION = '0.7.0';",
     );
+    const vscodePackageJson = JSON.parse(
+      readFileSync(join(root, 'packages/vscode-extension/package.json'), 'utf8'),
+    ) as { version: string; name: string };
+    expect(vscodePackageJson.version).toBe('0.7.0');
+    expect(vscodePackageJson.name).toBe('synergy-vscode'); // untouched fields survive the rewrite
     expect(run(['--check'], root)).toBe(0); // now consistent
   });
 });

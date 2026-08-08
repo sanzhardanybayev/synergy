@@ -6,6 +6,14 @@ export function setMarketplaceVersion(json: string, version: string): string {
 }
 
 /**
+ * Rewrite the first `"version": "..."` in a package.json string (used to keep
+ * packages/vscode-extension/package.json in lockstep with plugin.json).
+ */
+export function setPackageJsonVersion(json: string, version: string): string {
+  return json.replace(/("version":\s*")[^"]*(")/, `$1${version}$2`);
+}
+
+/**
  * Update the SKILL.md `synergy-version` stamp (or insert one right after the
  * frontmatter), and keep any Step-0 `MINE="..."` literal in lockstep so the two
  * textual copies of the version never drift.

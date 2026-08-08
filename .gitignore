@@ -14,6 +14,7 @@ dist/
 .turbo/
 .vite/
 *.log
+*.vsix
 .DS_Store
 
 # session preview lifecycle artifacts (kept out of git in consumer projects too)
@@ -29,3 +30,7 @@ dist/
 
 # Visual brainstorming companion
 .superpowers/
+
+# VS Code extension integration-test artifacts
+/packages/vscode-extension/.vscode-test/
+/packages/vscode-extension/out-test/
