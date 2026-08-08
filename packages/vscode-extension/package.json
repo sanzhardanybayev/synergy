@@ -2,7 +2,7 @@
   "name": "synergy-vscode",
   "displayName": "Synergy Review",
   "description": "Guided code review sessions inside your editor.",
-  "version": "0.15.2",
+  "version": "0.15.3",
   "publisher": "synergy",
   "private": true,
   "engines": {
