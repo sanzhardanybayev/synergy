@@ -1,15 +1,19 @@
 import * as vscode from 'vscode';
+import type { HunkDecorationRanges } from './editor/decoration-ranges.js';
+import { applyHunkDecorations } from './editor/decorations.js';
 
 /**
  * Host is the seam between the extension's domain logic and the `vscode` API.
  * Later tasks mock this interface in tests instead of importing `vscode` directly.
- * Only this file and extension.ts/webview host files may import `vscode`.
+ * Only this file, extension.ts, the webview host files, and src/editor/* may import `vscode`.
  */
 export interface Host {
   workspaceFolders(): string[]; // absolute fs paths
   onDidChangeWorkspaceFolders(cb: () => void): { dispose(): void };
   watch(globAbsoluteDir: string, cb: () => void): { dispose(): void };
   openFileAt(absPath: string, startLine: number, endLine: number): Promise<void>;
+  /** Applies hunk highlight decorations to the active text editor, if any. No-op otherwise. */
+  applyDecorations(ranges: HunkDecorationRanges): void;
   showError(message: string): void;
 }
 
@@ -38,6 +42,11 @@ export function createVsCodeHost(): Host {
       const range = new vscode.Range(startLine - 1, 0, endLine - 1, 0);
       editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
       editor.selection = new vscode.Selection(range.start, range.start);
+    },
+
+    applyDecorations(ranges: HunkDecorationRanges): void {
+      const editor = vscode.window.activeTextEditor;
+      if (editor) applyHunkDecorations(editor, ranges);
     },
 
     showError(message: string): void {

@@ -1,7 +1,11 @@
 import { join } from 'node:path';
-import type { ReviewBundle, ReviewRef } from '@synergy/review-core';
-import type * as vscode from 'vscode';
+import type { ReviewBundle, ReviewItem, ReviewRef } from '@synergy/review-core';
+import * as vscode from 'vscode';
 import { listSessions, loadBundle, saveNote, setItemStatus } from '../data/sessions.js';
+import { hunkDecorationRanges } from '../editor/decoration-ranges.js';
+import { openNativeDiff } from '../editor/native-diff.js';
+import { snapshotContentFor } from '../editor/snapshot-content.js';
+import { parseSnapshotUri, snapshotUri } from '../editor/snapshot-provider.js';
 import type { Host } from '../host.js';
 import { parseFromWebview } from './messages.js';
 import type { ToWebview } from './messages.js';
@@ -113,9 +117,11 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
           break;
 
         case 'openNativeDiff':
+          await this.openNativeDiffFor(message.path);
+          break;
+
         case 'showSnapshot':
-          // The real commands land in a later task; for now surface that plainly.
-          this.host.showError('Not implemented yet');
+          await this.showSnapshotFor(message.path);
           break;
       }
     } catch (error) {
@@ -156,6 +162,62 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
       item.range.start,
       item.range.end,
     );
+    this.applyDecorationsFor(item);
+  }
+
+  /** Best-effort: not every review item overlays onto a textual hunk (e.g. whole-file items). */
+  private applyDecorationsFor(item: ReviewItem): void {
+    if (!this.currentBundle || this.currentBundle.snapshot.kind !== 'diff') return;
+    const file = this.currentBundle.snapshot.files.find(
+      (candidate) => candidate.path === item.path,
+    );
+    if (!file) return;
+    try {
+      this.host.applyDecorations(hunkDecorationRanges(file, item.id));
+    } catch {
+      // No matching hunk for this item - nothing to decorate.
+    }
+  }
+
+  private async openNativeDiffFor(path: string): Promise<void> {
+    if (this.screen.kind !== 'bundle') {
+      this.postError(new Error('No active session'));
+      return;
+    }
+    await openNativeDiff(this.screen.projectRoot, this.screen.ref, path);
+  }
+
+  private async showSnapshotFor(path: string): Promise<void> {
+    if (this.screen.kind !== 'bundle') {
+      this.postError(new Error('No active session'));
+      return;
+    }
+    const doc = await vscode.workspace.openTextDocument(snapshotUri(this.screen.ref, path));
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+
+  /**
+   * Resolves content for the `synergy-review-snapshot:` scheme, wired in from `extension.ts` via
+   * `registerSnapshotProvider`. Only resolves against whichever bundle is currently loaded in
+   * this panel - a snapshot URI for a session that is not the active one returns `undefined`
+   * (surfaced by the provider as an "unavailable" placeholder document) rather than silently
+   * re-reading a different session's files from disk.
+   */
+  resolveSnapshotContent(uri: vscode.Uri): string | undefined {
+    if (this.screen.kind !== 'bundle' || !this.currentBundle) return undefined;
+    const { ref, path } = parseSnapshotUri(uri);
+    if (
+      ref.workspaceId !== this.screen.ref.workspaceId ||
+      ref.revisionId !== this.screen.ref.revisionId
+    ) {
+      return undefined;
+    }
+    const resolved = snapshotContentFor(this.currentBundle.snapshot, path);
+    if (!resolved) return undefined;
+    const banner = resolved.isFullReconstruction
+      ? `// Synergy captured snapshot: ${path} (full file as captured)\n\n`
+      : `// Synergy captured snapshot: ${path} (captured hunks only - not a full-file reconstruction)\n\n`;
+    return banner + resolved.text;
   }
 
   private withActiveRef(fn: (projectRoot: string, ref: ReviewRef) => void): void {
