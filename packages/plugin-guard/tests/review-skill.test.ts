@@ -100,12 +100,32 @@ describe('synergy review skill contract', () => {
     const schema = JSON.parse(readFileSync(analysisSchemaPath, 'utf8')) as {
       description?: string;
       oneOf?: Array<Record<string, unknown>>;
+      $defs?: Record<string, unknown>;
     };
     expect(schema.oneOf).toHaveLength(2);
     expect(schema.description).toMatch(/strict structural envelope/iu);
     expect(schema.description).toMatch(/validated semantically by the CLI parser/iu);
     expect(JSON.stringify(schema)).toContain('sectionKeys');
     expect(JSON.stringify(schema)).toContain('reviewItemIds');
+
+    // Assert fileInsight definition with required shape for file descriptions
+    expect(schema.$defs).toBeDefined();
+    const defs = schema.$defs as Record<string, unknown>;
+    expect(defs.fileInsight).toBeDefined();
+    const fileInsight = defs.fileInsight as {
+      type?: string;
+      required?: string[];
+      properties?: Record<string, unknown>;
+    };
+    expect(fileInsight.type).toBe('object');
+    expect(fileInsight.required).toContain('path');
+    expect(fileInsight.required).toContain('description');
+    expect(fileInsight.required).toContain('confidence');
+    expect(fileInsight.properties?.description).toBeDefined();
+    const descriptionSchema = fileInsight.properties?.description as {
+      maxLength?: number;
+    };
+    expect(descriptionSchema.maxLength).toBe(600);
 
     const assertStrictObjects = (value: unknown): void => {
       if (Array.isArray(value)) {

@@ -145,6 +145,21 @@ function indexByReconciliationKey(items) {
 function reconciliationKey(item) {
   return [item.path, item.kind, item.contentHash, item.locationHash].join(":");
 }
+function carryForwardFileInsights(previousInsights, nextSnapshot, carriedItemIds) {
+  const previousFiles = previousInsights.files;
+  if (!previousFiles || previousFiles.length === 0) return void 0;
+  const nextItemsByPath = /* @__PURE__ */ new Map();
+  for (const item of nextSnapshot.items) {
+    const list = nextItemsByPath.get(item.path) ?? [];
+    list.push(item);
+    nextItemsByPath.set(item.path, list);
+  }
+  const carried = previousFiles.filter((file) => {
+    const items = nextItemsByPath.get(file.path);
+    return items?.every((item) => carriedItemIds.has(item.id)) ?? false;
+  });
+  return carried.length > 0 ? carried : void 0;
+}
 function reconcileReview(previous, currentSnapshot, now) {
   const previousItemsById = new Map(previous.snapshot.items.map((item) => [item.id, item]));
   const exactStateIds = /* @__PURE__ */ new Set();
@@ -189,7 +204,11 @@ function reconcileReview(previous, currentSnapshot, now) {
     }
     items[currentItem.id] = oldMatches.length > 0 ? { status: "stale" } : { status: "needs-review" };
   }
-  return { schemaVersion: 1, updatedAt: now, items };
+  const carriedItemIds = new Set(
+    Object.entries(items).filter(([, itemProgress]) => itemProgress.status === "carried-forward").map(([id]) => id)
+  );
+  const files = carryForwardFileInsights(previous.insights, currentSnapshot, carriedItemIds);
+  return { schemaVersion: 1, updatedAt: now, items, insights: { files } };
 }
 
 // src/review-lines.ts
@@ -769,6 +788,16 @@ var reviewSnapshotSchema = {
     }
   ]
 };
+var fileInsightSchema = {
+  type: "object",
+  required: ["path", "description", "confidence"],
+  additionalProperties: false,
+  properties: {
+    path: nonEmptyString,
+    description: nonEmptyString,
+    confidence: { enum: ["high", "medium", "low"] }
+  }
+};
 var reviewInsightsSchema = {
   type: "object",
   required: ["schemaVersion", "revisionId", "groups", "items"],
@@ -802,7 +831,8 @@ var reviewInsightsSchema = {
           evidencePaths: { type: "array", items: nonEmptyString }
         }
       }
-    }
+    },
+    files: { type: "array", items: fileInsightSchema }
   }
 };
 var itemProgressSchema = {
@@ -2024,6 +2054,19 @@ function validateRevisionRelationships(workspace, snapshot, insights, progress, 
   }
   if (insights.items.some((insight) => !itemIds.has(insight.reviewItemId))) {
     throw new Error("review insights reference unknown review item");
+  }
+  if (insights.files !== void 0) {
+    const knownPaths = new Set(snapshot.files.map((file) => file.path));
+    const seen = /* @__PURE__ */ new Set();
+    for (const file of insights.files) {
+      if (!knownPaths.has(file.path)) {
+        throw new Error(`file insight references unknown path: ${file.path}`);
+      }
+      if (seen.has(file.path)) {
+        throw new Error(`duplicate file insight path: ${file.path}`);
+      }
+      seen.add(file.path);
+    }
   }
   if (snapshot.kind === "scope") {
     const filePaths = new Set(snapshot.files.map((file) => file.path));

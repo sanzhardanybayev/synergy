@@ -1,5 +1,18 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { parseReviewAnalysisInput } from './review-analysis.js';
+import {
+  FILE_INSIGHT_KEYS,
+  MAX_DESCRIPTION_LENGTH,
+  parseReviewAnalysisInput,
+} from './review-analysis.js';
+
+const schemaPath = fileURLToPath(new URL('./review-analysis.schema.json', import.meta.url));
+const reviewAnalysisSchema = JSON.parse(readFileSync(schemaPath, 'utf8')) as {
+  $defs: {
+    fileInsight: { required: string[]; properties: { description: { maxLength: number } } };
+  };
+};
 
 const validDiffInput = {
   groups: [{ id: 'capture', label: 'Event capture', reviewItemIds: ['item-1'] }],
@@ -244,5 +257,59 @@ describe('parseReviewAnalysisInput', () => {
     ],
   ])('rejects a 601-character %s description at its exact path', (_label, input, path) => {
     expect(() => parseReviewAnalysisInput(input)).toThrow(path);
+  });
+
+  it('accepts diff analysis with files', () => {
+    const input = {
+      ...validDiffInput,
+      files: [{ path: 'src/a.ts', description: 'Broad file summary.', confidence: 'high' }],
+    };
+    expect(parseReviewAnalysisInput(input)).toMatchObject({
+      files: [{ path: 'src/a.ts', description: 'Broad file summary.', confidence: 'high' }],
+    });
+  });
+
+  it('accepts scope analysis with files', () => {
+    const input = {
+      ...validScopeInput,
+      files: [{ path: 'src/capture.ts', description: 'Broad file summary.', confidence: 'high' }],
+    };
+    expect(parseReviewAnalysisInput(input)).toMatchObject({
+      files: [{ path: 'src/capture.ts', description: 'Broad file summary.', confidence: 'high' }],
+    });
+  });
+
+  it('rejects files with empty description', () => {
+    const input = {
+      ...validDiffInput,
+      files: [{ path: 'src/a.ts', description: '  ', confidence: 'high' }],
+    };
+    expect(() => parseReviewAnalysisInput(input)).toThrow('$.files[0].description');
+  });
+
+  it('rejects duplicate file paths', () => {
+    const file = { path: 'src/a.ts', description: 'x', confidence: 'low' as const };
+    expect(() => parseReviewAnalysisInput({ ...validDiffInput, files: [file, file] })).toThrow(
+      'duplicates',
+    );
+  });
+
+  it('rejects an unknown key on a file insight', () => {
+    expect(() =>
+      parseReviewAnalysisInput({
+        ...validDiffInput,
+        files: [{ path: 'src/a.ts', description: 'x', confidence: 'high', extra: true }],
+      }),
+    ).toThrow('$.files[0].extra');
+  });
+
+  it('rejects an empty files array', () => {
+    expect(() => parseReviewAnalysisInput({ ...validDiffInput, files: [] })).toThrow('$.files');
+  });
+
+  it('keeps the fileInsight schema in lockstep with the parser', () => {
+    const fileInsightSchema = reviewAnalysisSchema.$defs.fileInsight;
+    expect(fileInsightSchema.properties.description.maxLength).toBe(MAX_DESCRIPTION_LENGTH);
+    expect(new Set(fileInsightSchema.required)).toEqual(new Set(FILE_INSIGHT_KEYS));
   });
 });

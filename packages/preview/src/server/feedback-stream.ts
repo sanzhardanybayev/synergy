@@ -1,4 +1,4 @@
-import { type FSWatcher, mkdirSync, statSync, watch } from 'node:fs';
+import { type FSWatcher, watch as fsWatch, mkdirSync, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { LISTENING_FILE, REVIEW_DONE_FILE } from '@synergy/state';
@@ -37,11 +37,18 @@ export function isAgentListening(sessionDir: string, now = Date.now()): boolean 
  * filename (platform-dependent) conservatively triggers both.
  * Frames carry no comment data — clients refetch GET /api/feedback, so the
  * payload can never go stale or race a half-written file.
+ *
+ * `watchFn` defaults to `node:fs`'s `watch` and exists as a test seam: the
+ * real OS-level watch backend (FSEvents on macOS) has load-dependent startup
+ * and delivery latency that can exceed any fixed test timeout under a fully
+ * parallel suite run, so unit tests inject a synchronous fake instead of
+ * racing real filesystem events.
  */
 export function handleFeedbackStream(
   req: IncomingMessage,
   res: ServerResponse,
   feedbackDir: string,
+  watchFn: typeof fsWatch = fsWatch,
 ): void {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const session = url.searchParams.get('session');
@@ -101,7 +108,7 @@ export function handleFeedbackStream(
     watcher?.close();
   };
   try {
-    watcher = watch(sessionDir, (_event, filename) => {
+    watcher = watchFn(sessionDir, (_event, filename) => {
       const name = filename?.toString() ?? '';
       // The presence marker's heartbeat churns constantly; keep it off the
       // comment-refetch channel. Only .md comment files change the queue.

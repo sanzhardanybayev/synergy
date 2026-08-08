@@ -3,7 +3,7 @@ name: create-spec
 description: Use when the user wants to plan a new feature, refactor, or project. Generates a Synergy MDX spec session in .synergy/sessions/, auto-starts the preview server, and opens the browser. Triggers on phrases like "create a spec for X", "let's plan Y", "scaffold a refactor for Z", "/synergy-spec".
 ---
 
-<!-- synergy-version: 0.13.0 -->
+<!-- synergy-version: 0.14.0 -->
 
 ## Step 0 — Freshness check (run before anything else)
 
@@ -12,7 +12,7 @@ mid-session. Before doing any work, confirm you are the newest installed version
 Set `MINE` to the version in the `synergy-version` marker just above, then run:
 
 ```bash
-MINE="0.13.0"  # ← the synergy-version marker above
+MINE="0.14.0"  # ← the synergy-version marker above
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \

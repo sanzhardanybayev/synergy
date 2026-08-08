@@ -180,11 +180,17 @@ interface ReviewGroup {
     label: string;
     reviewItemIds: string[];
 }
+interface ReviewFileInsight {
+    path: string;
+    description: string;
+    confidence: ReviewInsightConfidence;
+}
 interface ReviewInsights {
     schemaVersion: 1;
     revisionId: string;
     groups: ReviewGroup[];
     items: ReviewItemInsight[];
+    files?: ReviewFileInsight[];
 }
 type ReviewQuestionStatus = 'queued' | 'processing' | 'answered' | 'failed' | 'stale';
 interface ReviewClaim {
@@ -302,4 +308,4 @@ interface ActiveReviewPointer {
 /** Calculates readiness solely from the current snapshot, review progress, questions, and freshness. */
 declare function deriveReviewReadiness(bundle: ReviewBundle, analysisFinalized?: boolean): ReviewReadiness;
 
-export { type ActiveReviewPointer as A, type ReviewQuestionGenerationState as B, type ClaimResult as C, type DiffFile as D, type ReviewQuestionInput as E, type ReviewQuestionStatus as F, type ReviewRange as G, type ReviewReadiness as H, type ReviewRef as I, type ReviewRepository as J, type ReviewScopeLineRow as K, type ReviewSnapshot as L, type ReviewSource as M, type ReviewWorkspace as N, type SourceFile as O, type SourceLine as P, type QuestionQueue as Q, type ReviewAnswer as R, type ScopeReviewSnapshot as S, deriveReviewReadiness as T, type DiffFileStatus as a, type DiffHunk as b, type DiffLine as c, type DiffLineKind as d, type DiffReviewSnapshot as e, type ReviewAnswerReference as f, type ReviewBundle as g, type ReviewClaim as h, type ReviewDiffLineRow as i, type ReviewGroup as j, type ReviewInsightConfidence as k, type ReviewInsights as l, type ReviewItem as m, type ReviewItemContext as n, type ReviewItemInsight as o, type ReviewItemKind as p, type ReviewItemProgress as q, type ReviewItemProgressPatch as r, type ReviewItemStatus as s, type ReviewLineRow as t, type ReviewLineSelection as u, type ReviewProgress as v, type ReviewProgressUpdate as w, type ReviewQuestion as x, type ReviewQuestionEnvelope as y, type ReviewQuestionGeneration as z };
+export { type ActiveReviewPointer as A, type ReviewQuestionGeneration as B, type ClaimResult as C, type DiffFile as D, type ReviewQuestionGenerationState as E, type ReviewQuestionInput as F, type ReviewQuestionStatus as G, type ReviewRange as H, type ReviewReadiness as I, type ReviewRef as J, type ReviewRepository as K, type ReviewScopeLineRow as L, type ReviewSnapshot as M, type ReviewSource as N, type ReviewWorkspace as O, type SourceFile as P, type QuestionQueue as Q, type ReviewAnswer as R, type ScopeReviewSnapshot as S, type SourceLine as T, deriveReviewReadiness as U, type DiffFileStatus as a, type DiffHunk as b, type DiffLine as c, type DiffLineKind as d, type DiffReviewSnapshot as e, type ReviewAnswerReference as f, type ReviewBundle as g, type ReviewClaim as h, type ReviewDiffLineRow as i, type ReviewFileInsight as j, type ReviewGroup as k, type ReviewInsightConfidence as l, type ReviewInsights as m, type ReviewItem as n, type ReviewItemContext as o, type ReviewItemInsight as p, type ReviewItemKind as q, type ReviewItemProgress as r, type ReviewItemProgressPatch as s, type ReviewItemStatus as t, type ReviewLineRow as u, type ReviewLineSelection as v, type ReviewProgress as w, type ReviewProgressUpdate as x, type ReviewQuestion as y, type ReviewQuestionEnvelope as z };

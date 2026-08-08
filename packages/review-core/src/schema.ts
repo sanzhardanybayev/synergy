@@ -287,6 +287,17 @@ export const reviewSnapshotSchema = {
   ],
 } as const;
 
+const fileInsightSchema = {
+  type: 'object',
+  required: ['path', 'description', 'confidence'],
+  additionalProperties: false,
+  properties: {
+    path: nonEmptyString,
+    description: nonEmptyString,
+    confidence: { enum: ['high', 'medium', 'low'] },
+  },
+} as const;
+
 export const reviewInsightsSchema = {
   type: 'object',
   required: ['schemaVersion', 'revisionId', 'groups', 'items'],
@@ -321,6 +332,7 @@ export const reviewInsightsSchema = {
         },
       },
     },
+    files: { type: 'array', items: fileInsightSchema },
   },
 } as const;
 

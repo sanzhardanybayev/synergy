@@ -190,11 +190,18 @@ export interface ReviewGroup {
   reviewItemIds: string[];
 }
 
+export interface ReviewFileInsight {
+  path: string;
+  description: string;
+  confidence: ReviewInsightConfidence;
+}
+
 export interface ReviewInsights {
   schemaVersion: 1;
   revisionId: string;
   groups: ReviewGroup[];
   items: ReviewItemInsight[];
+  files?: ReviewFileInsight[];
 }
 
 export type ReviewQuestionStatus = 'queued' | 'processing' | 'answered' | 'failed' | 'stale';

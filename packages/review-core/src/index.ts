@@ -109,6 +109,7 @@ export type {
   ActiveReviewPointer,
   ReviewBundle,
   ReviewClaim,
+  ReviewFileInsight,
   ReviewGroup,
   ReviewInsightConfidence,
   ReviewInsights,

@@ -923,7 +923,7 @@ async function requestPreviewShutdown(origin, instanceId, controlToken, timeoutM
 }
 
 // src/version.ts
-var SYNERGY_VERSION = "0.13.0";
+var SYNERGY_VERSION = "0.14.0";
 
 // src/preview.ts
 var START_TIMEOUT_MS = 1e4;
@@ -1949,6 +1949,17 @@ function initialProgress(snapshot, now) {
     items: Object.fromEntries(snapshot.items.map((item) => [item.id, { status: "needs-review" }]))
   };
 }
+function reconcileProgressAndFiles(previous, snapshot, now) {
+  const { insights, ...progress } = reconcileReview(previous, snapshot, now);
+  return { progress, files: insights.files };
+}
+function mergeFileInsights(carried, fresh) {
+  if (!fresh || fresh.length === 0) return carried;
+  if (!carried || carried.length === 0) return fresh;
+  const freshPaths = new Set(fresh.map((file) => file.path));
+  const survivingCarried = carried.filter((file) => !freshPaths.has(file.path));
+  return [...fresh, ...survivingCarried];
+}
 function buildSnapshot(captured, revisionId, now, predecessorRevisionId) {
   if (captured.source.kind === "scope") {
     if (!captured.files) throw new Error("scope capture did not include eligible source files");
@@ -2018,12 +2029,19 @@ function createOrResumeReview(request, dependencies = {}) {
     existingWorkspace,
     now
   );
-  const insights = { schemaVersion: 1, revisionId, groups: [], items: [] };
-  const progress = existingWorkspace ? reconcileReview(
+  const reconciliation = existingWorkspace ? reconcileProgressAndFiles(
     store.readBundle(workspaceId, existingWorkspace.currentRevisionId),
     snapshot,
     now
-  ) : initialProgress(snapshot, now);
+  ) : void 0;
+  const progress = reconciliation?.progress ?? initialProgress(snapshot, now);
+  const insights = {
+    schemaVersion: 1,
+    revisionId,
+    groups: [],
+    items: [],
+    ...reconciliation?.files ? { files: reconciliation.files } : {}
+  };
   try {
     store.createRevision(workspace, snapshot, insights, progress);
   } catch (error) {
@@ -2194,23 +2212,38 @@ async function applyReviewAnalysis(request, dependencies = {}) {
     validationMs += measureMonotonic(monotonicNow, () => {
       assertValidAnalysis(translated.snapshot, translated.analysis);
     }).durationMs;
+    const derived = measureMonotonic(monotonicNow, () => {
+      const progressTimestamp = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
+      const guidance = deriveReviewAnalysisGuidance(bundle.snapshot);
+      if (!bundle.snapshot.predecessorRevisionId) {
+        return {
+          progress: initialProgress(translated.snapshot, progressTimestamp),
+          carriedFiles: void 0,
+          guidance,
+          progressTimestamp
+        };
+      }
+      const reconciled = reconcileProgressAndFiles(
+        store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
+        translated.snapshot,
+        progressTimestamp
+      );
+      return {
+        progress: reconciled.progress,
+        carriedFiles: reconciled.files,
+        guidance,
+        progressTimestamp
+      };
+    });
+    derivationMs += derived.durationMs;
+    const scopeFiles = mergeFileInsights(derived.value.carriedFiles, scopeAnalysis.files);
     const insights = {
       schemaVersion: 1,
       revisionId: request.reference.revisionId,
       groups: translated.analysis.groups,
-      items: translated.analysis.items
+      items: translated.analysis.items,
+      ...scopeFiles ? { files: scopeFiles } : {}
     };
-    const derived = measureMonotonic(monotonicNow, () => {
-      const progressTimestamp = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
-      const progress = bundle.snapshot.predecessorRevisionId ? reconcileReview(
-        store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
-        translated.snapshot,
-        progressTimestamp
-      ) : initialProgress(translated.snapshot, progressTimestamp);
-      const guidance = deriveReviewAnalysisGuidance(bundle.snapshot);
-      return { progress, guidance, progressTimestamp };
-    });
-    derivationMs += derived.durationMs;
     finalizedAt = nondecreasingIsoTimestamp(derived.value.progressTimestamp, now());
     publicationMs += measureMonotonic(monotonicNow, () => {
       store.finalizeScopeAnalysis(
@@ -2233,11 +2266,13 @@ async function applyReviewAnalysis(request, dependencies = {}) {
     validationMs += measureMonotonic(monotonicNow, () => {
       assertValidAnalysis(bundle.snapshot, diffAnalysis);
     }).durationMs;
+    const diffFiles = mergeFileInsights(bundle.insights.files, diffAnalysis.files);
     const insights = {
       schemaVersion: 1,
       revisionId: request.reference.revisionId,
       groups: diffAnalysis.groups,
-      items: diffAnalysis.items
+      items: diffAnalysis.items,
+      ...diffFiles ? { files: diffFiles } : {}
     };
     finalizedAt = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
     publicationMs += measureMonotonic(monotonicNow, () => {
@@ -2395,6 +2430,7 @@ function printReviewStatus(request) {
 var IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
 var GROUP_ID2 = /^[a-z0-9][a-z0-9_-]*$/u;
 var MAX_DESCRIPTION_LENGTH2 = 600;
+var FILE_INSIGHT_KEYS = ["path", "description", "confidence"];
 function propertyPath(path, key) {
   return IDENTIFIER.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
 }
@@ -2554,6 +2590,24 @@ function parseScopeSection(value, index) {
     evidencePaths: parseStringArray(value.evidencePaths, `${path}.evidencePaths`)
   };
 }
+function parseFile(value, index) {
+  const path = `$.files[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(value, FILE_INSIGHT_KEYS, path);
+  assertString(value.path, `${path}.path`);
+  assertDescription(value.description, `${path}.description`);
+  return {
+    path: value.path,
+    description: value.description,
+    confidence: parseConfidence(value.confidence, `${path}.confidence`)
+  };
+}
+function parseFiles(value) {
+  assertNonEmptyArray(value, "$.files");
+  const files = value.map(parseFile);
+  assertUniqueProperty(files, "$.files", "path", (file) => file.path);
+  return files;
+}
 function parseGroups(value, parseGroup) {
   assertNonEmptyArray(value, "$.groups");
   const groups = value.map(parseGroup);
@@ -2577,7 +2631,7 @@ function assertEveryReferenceIsOwned(definitions, definitionPath, references, re
   }
 }
 function parseDiffAnalysis(value) {
-  assertOnlyKeys(value, ["groups", "items"], "$");
+  assertOnlyKeys(value, ["groups", "items", "files"], "$");
   const groups = parseGroups(value.groups, parseDiffGroup);
   assertNonEmptyArray(value.items, "$.items");
   const items = value.items.map(parseDiffItem);
@@ -2588,10 +2642,11 @@ function parseDiffAnalysis(value) {
     groups.map((group) => group.reviewItemIds),
     (groupIndex, referenceIndex) => `$.groups[${groupIndex}].reviewItemIds[${referenceIndex}]`
   );
-  return { kind: "diff", groups, items };
+  const files = value.files === void 0 ? void 0 : parseFiles(value.files);
+  return { kind: "diff", groups, items, ...files ? { files } : {} };
 }
 function parseScopeAnalysis(value) {
-  assertOnlyKeys(value, ["groups", "sections"], "$");
+  assertOnlyKeys(value, ["groups", "sections", "files"], "$");
   const groups = parseGroups(value.groups, parseScopeGroup);
   assertNonEmptyArray(value.sections, "$.sections");
   const sections = value.sections.map(parseScopeSection);
@@ -2602,11 +2657,12 @@ function parseScopeAnalysis(value) {
     groups.map((group) => group.sectionKeys),
     (groupIndex, referenceIndex) => `$.groups[${groupIndex}].sectionKeys[${referenceIndex}]`
   );
-  return { kind: "scope", groups, sections };
+  const files = value.files === void 0 ? void 0 : parseFiles(value.files);
+  return { kind: "scope", groups, sections, ...files ? { files } : {} };
 }
 function parseReviewAnalysisInput(value) {
   assertRecord(value, "$");
-  assertOnlyKeys(value, ["groups", "items", "sections"], "$");
+  assertOnlyKeys(value, ["groups", "items", "sections", "files"], "$");
   const hasItems = Object.hasOwn(value, "items");
   const hasSections = Object.hasOwn(value, "sections");
   if (hasItems && hasSections) {

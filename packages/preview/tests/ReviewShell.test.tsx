@@ -57,9 +57,9 @@ describe('ReviewShell', () => {
   it('supports J/K navigation, R review toggle, and ? composer focus', async () => {
     const user = userEvent.setup();
     const client = renderShell();
-    expect(await screen.findByRole('heading', { name: '@@ -17,1 +17,1 @@' })).toBeVisible();
+    expect(await screen.findByText('Diff hunk · lines 17–17')).toBeVisible();
     await user.keyboard('j');
-    expect(screen.getByRole('heading', { name: '@@ -224,1 +224,2 @@' })).toBeVisible();
+    expect(screen.getByText('Diff hunk · lines 224–225')).toBeVisible();
     await user.keyboard('r');
     await waitFor(() =>
       expect(client.patchProgress).toHaveBeenCalledWith(
@@ -75,9 +75,85 @@ describe('ReviewShell', () => {
     expect(screen.getByRole('textbox', { name: 'Question' })).toHaveValue('k');
   });
 
+  it('moves J from the last item of a file into the next file and switches the stage', async () => {
+    const user = userEvent.setup();
+    const base = makeDiffBundle();
+    const snapshot = buildDiffSnapshot({
+      revisionId: base.snapshot.revisionId,
+      source: base.snapshot.source,
+      fingerprint: 'two-hunk-file-fingerprint',
+      createdAt: base.snapshot.createdAt,
+      patch: [
+        'diff --git a/src/a.ts b/src/a.ts',
+        '--- a/src/a.ts',
+        '+++ b/src/a.ts',
+        '@@ -1 +1 @@',
+        '-const x = 1;',
+        '+const x = 2;',
+        '@@ -50 +50 @@',
+        '-const y = 1;',
+        '+const y = 2;',
+        'diff --git a/src/b.ts b/src/b.ts',
+        '--- a/src/b.ts',
+        '+++ b/src/b.ts',
+        '@@ -1 +1 @@',
+        '-const z = 1;',
+        '+const z = 2;',
+      ].join('\n'),
+    });
+    const [itemA1, itemA2, itemB1] = snapshot.items;
+    if (!itemA1 || !itemA2 || !itemB1) throw new Error('fixture must produce three review items');
+    const bundle = {
+      ...base,
+      snapshot,
+      insights: {
+        schemaVersion: 1 as const,
+        revisionId: snapshot.revisionId,
+        groups: [
+          {
+            id: 'changes',
+            label: 'Changes',
+            reviewItemIds: snapshot.items.map((item) => item.id),
+          },
+        ],
+        items: snapshot.items.map((item) => ({
+          reviewItemId: item.id,
+          description: 'Updates a constant.',
+          confidence: 'high' as const,
+          evidencePaths: [item.path],
+        })),
+      },
+      progress: {
+        schemaVersion: 1 as const,
+        updatedAt: base.progress.updatedAt,
+        items: Object.fromEntries(
+          snapshot.items.map((item) => [item.id, { status: 'needs-review' as const }]),
+        ),
+      },
+    };
+    renderShell(bundle, makeReviewClient(bundle));
+
+    expect(await screen.findByText(`File · ${itemA1.path}`)).toBeVisible();
+    expect(
+      screen.getByText(`Diff hunk · lines ${itemA1.range.start}–${itemA1.range.end}`),
+    ).toBeVisible();
+
+    await user.keyboard('j');
+    expect(screen.getByText(`File · ${itemA2.path}`)).toBeVisible();
+    expect(
+      screen.getByText(`Diff hunk · lines ${itemA2.range.start}–${itemA2.range.end}`),
+    ).toBeVisible();
+
+    await user.keyboard('j');
+    expect(screen.getByText(`File · ${itemB1.path}`)).toBeVisible();
+    expect(
+      screen.getByText(`Diff hunk · lines ${itemB1.range.start}–${itemB1.range.end}`),
+    ).toBeVisible();
+  });
+
   it('ignores modified and repeated review shortcuts without blocking a plain R', async () => {
     const client = renderShell();
-    await screen.findByRole('heading', { name: '@@ -17,1 +17,1 @@' });
+    await screen.findByText('Diff hunk · lines 17–17');
     fireEvent.keyDown(window, { key: 'r', metaKey: true });
     fireEvent.keyDown(window, { key: 'r', ctrlKey: true });
     fireEvent.keyDown(window, { key: 'r', altKey: true });
@@ -151,8 +227,8 @@ describe('ReviewShell', () => {
     const client = renderShell(bundle, makeReviewClient(bundle));
 
     expect(await screen.findByText('0/2')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: /Binary file changed/ }));
-    expect(screen.getByRole('heading', { name: 'Binary file changed' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /assets\/logo\.png/ }));
+    expect(screen.getByText('File-level change')).toBeVisible();
     expect(screen.getByText(/no code lines to select/i)).toBeVisible();
     expect(screen.getByText(/line questions are unavailable/i)).toBeVisible();
     expect(screen.getByRole('textbox', { name: 'Question' })).toBeDisabled();

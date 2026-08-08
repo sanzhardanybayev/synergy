@@ -1,5 +1,5 @@
-import { M as ReviewSource, O as SourceFile, g as ReviewBundle, L as ReviewSnapshot, v as ReviewProgress, m as ReviewItem, n as ReviewItemContext, u as ReviewLineSelection, e as DiffReviewSnapshot, b as DiffHunk, D as DiffFile, S as ScopeReviewSnapshot, I as ReviewRef, R as ReviewAnswer, l as ReviewInsights, x as ReviewQuestion, y as ReviewQuestionEnvelope, z as ReviewQuestionGeneration, N as ReviewWorkspace, J as ReviewRepository, w as ReviewProgressUpdate, r as ReviewItemProgressPatch, A as ActiveReviewPointer, B as ReviewQuestionGenerationState, C as ClaimResult, Q as QuestionQueue, E as ReviewQuestionInput } from './readiness-BzMn-eIV.js';
-export { a as DiffFileStatus, c as DiffLine, d as DiffLineKind, f as ReviewAnswerReference, h as ReviewClaim, i as ReviewDiffLineRow, j as ReviewGroup, k as ReviewInsightConfidence, o as ReviewItemInsight, p as ReviewItemKind, q as ReviewItemProgress, s as ReviewItemStatus, t as ReviewLineRow, F as ReviewQuestionStatus, G as ReviewRange, H as ReviewReadiness, K as ReviewScopeLineRow, P as SourceLine, T as deriveReviewReadiness } from './readiness-BzMn-eIV.js';
+import { N as ReviewSource, P as SourceFile, g as ReviewBundle, M as ReviewSnapshot, w as ReviewProgress, j as ReviewFileInsight, n as ReviewItem, o as ReviewItemContext, v as ReviewLineSelection, e as DiffReviewSnapshot, b as DiffHunk, D as DiffFile, S as ScopeReviewSnapshot, J as ReviewRef, R as ReviewAnswer, m as ReviewInsights, y as ReviewQuestion, z as ReviewQuestionEnvelope, B as ReviewQuestionGeneration, O as ReviewWorkspace, K as ReviewRepository, x as ReviewProgressUpdate, s as ReviewItemProgressPatch, A as ActiveReviewPointer, E as ReviewQuestionGenerationState, C as ClaimResult, Q as QuestionQueue, F as ReviewQuestionInput } from './readiness-CHNg2V_A.js';
+export { a as DiffFileStatus, c as DiffLine, d as DiffLineKind, f as ReviewAnswerReference, h as ReviewClaim, i as ReviewDiffLineRow, k as ReviewGroup, l as ReviewInsightConfidence, p as ReviewItemInsight, q as ReviewItemKind, r as ReviewItemProgress, t as ReviewItemStatus, u as ReviewLineRow, G as ReviewQuestionStatus, H as ReviewRange, I as ReviewReadiness, L as ReviewScopeLineRow, T as SourceLine, U as deriveReviewReadiness } from './readiness-CHNg2V_A.js';
 
 declare function atomicWriteJson(path: string, value: unknown): void;
 
@@ -106,12 +106,18 @@ interface ReviewSourceFreshnessAsyncOptions {
 /** Runs the canonical synchronous capture authority outside the caller's event loop. */
 declare function compareReviewSourceFreshnessAsync(snapshot: Pick<CapturedReviewSource, 'source' | 'fingerprint'>, root: string, options?: ReviewSourceFreshnessAsyncOptions): Promise<ReviewSourceFreshness>;
 
+interface ReviewReconciliation extends ReviewProgress {
+    /** File-level insights carried into the next revision alongside the reconciled progress. */
+    insights: {
+        files?: ReviewFileInsight[];
+    };
+}
 /** Creates a stable identity for carry-forward matching independent of line offsets. */
 declare function reconciliationKey(item: ReviewItem): string;
 /**
  * Derives mutable progress for a new immutable snapshot without changing the prior revision.
  */
-declare function reconcileReview(previous: ReviewBundle, currentSnapshot: ReviewSnapshot, now: string): ReviewProgress;
+declare function reconcileReview(previous: ReviewBundle, currentSnapshot: ReviewSnapshot, now: string): ReviewReconciliation;
 
 /** Resolves one item's complete canonical immutable line context. */
 declare function resolveReviewItemContext(snapshot: ReviewSnapshot, reviewItemId: string): ReviewItemContext;
@@ -812,6 +818,27 @@ declare const reviewInsightsSchema: {
                 };
             };
         };
+        readonly files: {
+            readonly type: "array";
+            readonly items: {
+                readonly type: "object";
+                readonly required: readonly ["path", "description", "confidence"];
+                readonly additionalProperties: false;
+                readonly properties: {
+                    readonly path: {
+                        readonly type: "string";
+                        readonly minLength: 1;
+                    };
+                    readonly description: {
+                        readonly type: "string";
+                        readonly minLength: 1;
+                    };
+                    readonly confidence: {
+                        readonly enum: readonly ["high", "medium", "low"];
+                    };
+                };
+            };
+        };
     };
 };
 declare const reviewProgressSchema: {
@@ -1482,4 +1509,4 @@ declare function removeReviewListener(projectRoot: string, reference: ReviewRef,
 declare function createQuestionQueue(projectRoot: string, reference: ReviewRef, options?: QuestionPersistenceOptions): QuestionQueue;
 declare function reviewQuestionsDirectory(projectRoot: string, reference: ReviewRef): string;
 
-export { ActiveReviewPointer, type BuildDiffSnapshotInput, type BuildScopeSnapshotInput, type CaptureFileOptions, type CapturePrOptions, type CaptureReviewSourceRequest, type CaptureScopeOptions, type CapturedReviewSource, ClaimResult, type CommandResult, type CommandRunner, DiffFile, DiffHunk, DiffReviewSnapshot, type ProposedCodeSection, type QuestionPersistenceOptions, type QuestionPublication, QuestionQueue, ReviewAnswer, ReviewBundle, type ReviewCaptureSourceRequest, ReviewCoreError, type ReviewCoreErrorCode, ReviewFreshnessAsyncError, type ReviewFreshnessAsyncErrorCode, type ReviewFreshnessWorker, type ReviewFreshnessWorkerData, type ReviewFreshnessWorkerFactory, type ReviewFreshnessWorkerInput, ReviewInsights, ReviewItem, ReviewItemContext, ReviewItemProgressPatch, ReviewLineSelection, ReviewProgress, ReviewProgressUpdate, ReviewQuestion, ReviewQuestionEnvelope, ReviewQuestionGeneration, ReviewQuestionGenerationState, ReviewQuestionInput, ReviewRef, ReviewRepository, ReviewSnapshot, ReviewSource, type ReviewSourceFreshness, type ReviewSourceFreshnessAsyncOptions, type ReviewStore, type ReviewStoreOptions, ReviewWorkspace, SAFE_SEGMENT, ScopeReviewSnapshot, SourceFile, answersDir, applyCodeSections, assertReviewAnswer, assertReviewInsights, assertReviewProgress, assertReviewQuestion, assertReviewQuestionEnvelope, assertReviewQuestionGeneration, assertReviewSnapshot, assertReviewWorkspace, assertSafeReviewSegment, atomicWriteJson, buildDiffSnapshot, buildScopeSnapshot, capturePr, captureReviewSource, captureScope, captureStaged, captureUnstaged, claimQuestion, claimQuestions, compareReviewSourceFreshness, compareReviewSourceFreshnessAsync, createHunkReviewItem, createQuestionQueue, createReviewStore, enqueueQuestion, failQuestion, formatReviewRef, hashText, insightsFile, isReviewCoreError, listQuestions, parseReviewRef, parseUnifiedDiff, progressFile, questionsDir, recaptureReviewSource, reconcileExpiredQuestions, reconcileReview, reconciliationKey, releaseClaim, removeReviewListener, renewClaim, repositoryName, resolveRepositoryRoot, resolveReviewItemContext, resolveReviewLineSelection, reviewAnswerSchema, reviewInsightsSchema, reviewProgressSchema, reviewQuestionEnvelopeSchema, reviewQuestionGenerationSchema, reviewQuestionSchema, reviewQuestionsDirectory, reviewRevisionDir, reviewSnapshotSchema, reviewWorkspaceDir, reviewWorkspaceSchema, reviewsDir, snapshotFile, systemCommandRunner, touchReviewListener, workspaceFile, writeAnswer };
+export { ActiveReviewPointer, type BuildDiffSnapshotInput, type BuildScopeSnapshotInput, type CaptureFileOptions, type CapturePrOptions, type CaptureReviewSourceRequest, type CaptureScopeOptions, type CapturedReviewSource, ClaimResult, type CommandResult, type CommandRunner, DiffFile, DiffHunk, DiffReviewSnapshot, type ProposedCodeSection, type QuestionPersistenceOptions, type QuestionPublication, QuestionQueue, ReviewAnswer, ReviewBundle, type ReviewCaptureSourceRequest, ReviewCoreError, type ReviewCoreErrorCode, ReviewFileInsight, ReviewFreshnessAsyncError, type ReviewFreshnessAsyncErrorCode, type ReviewFreshnessWorker, type ReviewFreshnessWorkerData, type ReviewFreshnessWorkerFactory, type ReviewFreshnessWorkerInput, ReviewInsights, ReviewItem, ReviewItemContext, ReviewItemProgressPatch, ReviewLineSelection, ReviewProgress, ReviewProgressUpdate, ReviewQuestion, ReviewQuestionEnvelope, ReviewQuestionGeneration, ReviewQuestionGenerationState, ReviewQuestionInput, ReviewRef, ReviewRepository, ReviewSnapshot, ReviewSource, type ReviewSourceFreshness, type ReviewSourceFreshnessAsyncOptions, type ReviewStore, type ReviewStoreOptions, ReviewWorkspace, SAFE_SEGMENT, ScopeReviewSnapshot, SourceFile, answersDir, applyCodeSections, assertReviewAnswer, assertReviewInsights, assertReviewProgress, assertReviewQuestion, assertReviewQuestionEnvelope, assertReviewQuestionGeneration, assertReviewSnapshot, assertReviewWorkspace, assertSafeReviewSegment, atomicWriteJson, buildDiffSnapshot, buildScopeSnapshot, capturePr, captureReviewSource, captureScope, captureStaged, captureUnstaged, claimQuestion, claimQuestions, compareReviewSourceFreshness, compareReviewSourceFreshnessAsync, createHunkReviewItem, createQuestionQueue, createReviewStore, enqueueQuestion, failQuestion, formatReviewRef, hashText, insightsFile, isReviewCoreError, listQuestions, parseReviewRef, parseUnifiedDiff, progressFile, questionsDir, recaptureReviewSource, reconcileExpiredQuestions, reconcileReview, reconciliationKey, releaseClaim, removeReviewListener, renewClaim, repositoryName, resolveRepositoryRoot, resolveReviewItemContext, resolveReviewLineSelection, reviewAnswerSchema, reviewInsightsSchema, reviewProgressSchema, reviewQuestionEnvelopeSchema, reviewQuestionGenerationSchema, reviewQuestionSchema, reviewQuestionsDirectory, reviewRevisionDir, reviewSnapshotSchema, reviewWorkspaceDir, reviewWorkspaceSchema, reviewsDir, snapshotFile, systemCommandRunner, touchReviewListener, workspaceFile, writeAnswer };

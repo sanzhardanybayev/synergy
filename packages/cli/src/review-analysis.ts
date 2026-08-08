@@ -18,17 +18,38 @@ export interface ScopeAnalysisGroupInput {
   sectionKeys: string[];
 }
 
+export interface FileAnalysisInput {
+  path: string;
+  description: string;
+  confidence: ReviewInsightConfidence;
+}
+
 export type ReviewAnalysisInput =
   | {
       kind: 'scope';
       groups: ScopeAnalysisGroupInput[];
       sections: ScopeAnalysisSectionInput[];
+      files?: FileAnalysisInput[];
     }
-  | { kind: 'diff'; groups: ReviewGroup[]; items: ReviewItemInsight[] };
+  | {
+      kind: 'diff';
+      groups: ReviewGroup[];
+      items: ReviewItemInsight[];
+      files?: FileAnalysisInput[];
+    };
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
 const GROUP_ID = /^[a-z0-9][a-z0-9_-]*$/u;
-const MAX_DESCRIPTION_LENGTH = 600;
+/**
+ * Kept in lockstep with `$defs.fileInsight.properties.description.maxLength` in
+ * review-analysis.schema.json - see the agreement test in review-analysis.test.ts.
+ */
+export const MAX_DESCRIPTION_LENGTH = 600;
+/**
+ * Kept in lockstep with `$defs.fileInsight.required` in review-analysis.schema.json - see the
+ * agreement test in review-analysis.test.ts.
+ */
+export const FILE_INSIGHT_KEYS = ['path', 'description', 'confidence'] as const;
 
 function propertyPath(path: string, key: string): string {
   return IDENTIFIER.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
@@ -216,6 +237,26 @@ function parseScopeSection(value: unknown, index: number): ScopeAnalysisSectionI
   };
 }
 
+function parseFile(value: unknown, index: number): FileAnalysisInput {
+  const path = `$.files[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(value, FILE_INSIGHT_KEYS, path);
+  assertString(value.path, `${path}.path`);
+  assertDescription(value.description, `${path}.description`);
+  return {
+    path: value.path,
+    description: value.description,
+    confidence: parseConfidence(value.confidence, `${path}.confidence`),
+  };
+}
+
+function parseFiles(value: unknown): FileAnalysisInput[] {
+  assertNonEmptyArray(value, '$.files');
+  const files = value.map(parseFile);
+  assertUniqueProperty(files, '$.files', 'path', (file) => file.path);
+  return files;
+}
+
 function parseGroups<T extends { id: string }>(
   value: unknown,
   parseGroup: (entry: unknown, index: number) => T,
@@ -249,7 +290,7 @@ function assertEveryReferenceIsOwned(
 }
 
 function parseDiffAnalysis(value: Record<string, unknown>): ReviewAnalysisInput {
-  assertOnlyKeys(value, ['groups', 'items'], '$');
+  assertOnlyKeys(value, ['groups', 'items', 'files'], '$');
   const groups = parseGroups(value.groups, parseDiffGroup);
   assertNonEmptyArray(value.items, '$.items');
   const items = value.items.map(parseDiffItem);
@@ -260,11 +301,12 @@ function parseDiffAnalysis(value: Record<string, unknown>): ReviewAnalysisInput 
     groups.map((group) => group.reviewItemIds),
     (groupIndex, referenceIndex) => `$.groups[${groupIndex}].reviewItemIds[${referenceIndex}]`,
   );
-  return { kind: 'diff', groups, items };
+  const files = value.files === undefined ? undefined : parseFiles(value.files);
+  return { kind: 'diff', groups, items, ...(files ? { files } : {}) };
 }
 
 function parseScopeAnalysis(value: Record<string, unknown>): ReviewAnalysisInput {
-  assertOnlyKeys(value, ['groups', 'sections'], '$');
+  assertOnlyKeys(value, ['groups', 'sections', 'files'], '$');
   const groups = parseGroups(value.groups, parseScopeGroup);
   assertNonEmptyArray(value.sections, '$.sections');
   const sections = value.sections.map(parseScopeSection);
@@ -275,12 +317,13 @@ function parseScopeAnalysis(value: Record<string, unknown>): ReviewAnalysisInput
     groups.map((group) => group.sectionKeys),
     (groupIndex, referenceIndex) => `$.groups[${groupIndex}].sectionKeys[${referenceIndex}]`,
   );
-  return { kind: 'scope', groups, sections };
+  const files = value.files === undefined ? undefined : parseFiles(value.files);
+  return { kind: 'scope', groups, sections, ...(files ? { files } : {}) };
 }
 
 export function parseReviewAnalysisInput(value: unknown): ReviewAnalysisInput {
   assertRecord(value, '$');
-  assertOnlyKeys(value, ['groups', 'items', 'sections'], '$');
+  assertOnlyKeys(value, ['groups', 'items', 'sections', 'files'], '$');
   const hasItems = Object.hasOwn(value, 'items');
   const hasSections = Object.hasOwn(value, 'sections');
   if (hasItems && hasSections) {
