@@ -1,10 +1,31 @@
 import { EventEmitter } from 'node:events';
-import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { type FSWatcher, mkdirSync, rmSync, utimesSync, type watch, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { handleFeedbackStream } from '../../src/server/feedback-stream.js';
 import { makeTempDir } from './helpers.js';
+
+/**
+ * Synchronous stand-in for `node:fs`'s `watch`, injected via
+ * `handleFeedbackStream`'s `watchFn` seam. The real OS watch backend
+ * (FSEvents on macOS) has load-dependent startup/delivery latency that can
+ * exceed even a generous fixed timeout under a fully parallel suite run
+ * (observed directly: a 10s waitFor timed out under `pnpm -r test` load).
+ * Driving the watcher callback directly makes the "file change triggers a
+ * frame" assertion deterministic and load-independent, instead of racing a
+ * real filesystem event.
+ */
+function makeFakeWatch() {
+  let listener: ((event: string, filename: string | null) => void) | undefined;
+  const watcher = { close() {}, on() {} } as unknown as FSWatcher;
+  const watchFn = ((_dir: string, cb: (event: string, filename: string | null) => void) => {
+    listener = cb;
+    return watcher;
+  }) as typeof watch;
+  const emit = (event: string, filename: string | null) => listener?.(event, filename);
+  return { watchFn, emit };
+}
 
 const SESSION = '2026-07-18-checkout-flow';
 
@@ -32,8 +53,10 @@ function makeStreamReq(url: string): EventEmitter & { url: string; method: strin
   return req;
 }
 
-// Generous budget: under a fully parallel suite run, macOS FSEvents delivery
-// can lag well past 2s; this bounds flakiness, not expected latency.
+// Generous budget: under a fully parallel suite run, real timers (and, for
+// the tests still using the real `watch` backend below, macOS FSEvents
+// delivery) can lag well past what's typical; this bounds flakiness against
+// CPU-starved scheduling, not expected latency.
 const waitFor = async (predicate: () => boolean, timeoutMs = 10_000): Promise<void> => {
   const start = Date.now();
   while (!predicate()) {
@@ -54,11 +77,13 @@ describe('handleFeedbackStream', () => {
       temp = makeTempDir();
       const req = makeStreamReq(`/api/feedback/stream?session=${SESSION}`);
       const { res, chunks } = makeStreamRes();
+      const { watchFn, emit } = makeFakeWatch();
 
       handleFeedbackStream(
         req as unknown as IncomingMessage,
         res as unknown as ServerResponse,
         temp.dir,
+        watchFn,
       );
 
       await waitFor(() => chunks.length >= 1);
@@ -69,6 +94,9 @@ describe('handleFeedbackStream', () => {
         '---\nstatus: open\n---\nhi',
         'utf8',
       );
+      // Drive the watcher callback directly rather than waiting on the real
+      // fs backend to notice the write above - see makeFakeWatch().
+      emit('change', 'new-comment.md');
 
       await waitFor(() => chunks.some((c) => c.includes('feedback-changed')));
 
