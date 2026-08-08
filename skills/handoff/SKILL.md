@@ -3,7 +3,7 @@ name: handoff
 description: Use when the user runs /synergy-handoff or asks Claude to capture a knowledge-transfer handoff for the active Synergy session before quitting. Snapshots the live agent's working context into .state/handoff.md so a future agent can resume exactly where it left off, even mid-phase.
 ---
 
-<!-- synergy-version: 0.13.1 -->
+<!-- synergy-version: 0.14.0 -->
 
 ## Step 0 — Freshness check (run before anything else)
 
@@ -12,7 +12,7 @@ mid-session. Before doing any work, confirm you are the newest installed version
 Set `MINE` to the version in the `synergy-version` marker just above, then run:
 
 ```bash
-MINE="0.13.1"  # ← the synergy-version marker above
+MINE="0.14.0"  # ← the synergy-version marker above
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
