@@ -17,14 +17,28 @@
   const vscode = acquireVsCodeApi();
   const app = document.getElementById('app');
 
-  /** @type {{screen: 'sessions'|'bundle', sessions: any[], bundle: SerializedBundle|null, error: string|null, expanded: Set<string>}} */
+  /**
+   * `diffVisible` is the global diff-presentation toggle (inline hunk bodies here, decorations in
+   * the editor). It survives webview disposal via `vscode.setState` and is mirrored to the host
+   * with a `setDiffVisible` message (on toggle AND on startup, since the host resets to `true`).
+   *
+   * @type {{screen: 'sessions'|'bundle', sessions: any[], bundle: SerializedBundle|null, error: string|null, expanded: Set<string>, diffVisible: boolean}}
+   */
   const state = {
     screen: 'sessions',
     sessions: [],
     bundle: null,
     error: null,
     expanded: new Set(),
+    diffVisible: vscode.getState()?.diffVisible !== false,
   };
+
+  function setDiffVisible(value) {
+    state.diffVisible = value;
+    vscode.setState({ ...(vscode.getState() || {}), diffVisible: value });
+    post({ kind: 'setDiffVisible', value });
+    render();
+  }
 
   function post(message) {
     vscode.postMessage(message);
@@ -145,6 +159,38 @@
     return bundle.bundle.insights.items.find((item) => item.reviewItemId === reviewItemId);
   }
 
+  /**
+   * The captured diff hunk backing a review item, or undefined (scope snapshots, whole-file
+   * items). Powers the inline `.hunk-diff` body.
+   *
+   * @param {SerializedBundle} bundle
+   */
+  function hunkForItem(bundle, item) {
+    const snapshot = bundle.bundle.snapshot;
+    if (snapshot.kind !== 'diff') return undefined;
+    const file = snapshot.files.find((candidate) => candidate.path === item.path);
+    if (!file) return undefined;
+    return file.hunks.find((hunk) => hunk.reviewItemId === item.id);
+  }
+
+  function renderDiffLines(hunk) {
+    const rows = hunk.lines.map((line) => {
+      const kindClass =
+        line.kind === 'add' ? 'diff-line-add' : line.kind === 'remove' ? 'diff-line-remove' : '';
+      const marker = line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' ';
+      return el('div', { className: `diff-line ${kindClass}` }, [
+        el('span', { className: 'diff-gutter' }, [
+          line.oldLine === null ? '' : String(line.oldLine),
+        ]),
+        el('span', { className: 'diff-gutter' }, [
+          line.newLine === null ? '' : String(line.newLine),
+        ]),
+        el('span', { className: 'diff-text' }, [`${marker}${line.text}`]),
+      ]);
+    });
+    return el('div', { className: 'hunk-diff' }, rows);
+  }
+
   /** @param {SerializedBundle} bundle */
   function renderHunkRow(bundle, item) {
     const reviewed = isReviewed(bundle, item.id);
@@ -175,6 +221,20 @@
     });
     note.value = progress?.note || '';
 
+    const diffButton = el(
+      'button',
+      {
+        className: 'hunk-diff-button',
+        title: 'Open diff for this hunk',
+        onClick: (event) => {
+          event.stopPropagation();
+          post({ kind: 'openNativeDiff', path: item.path, reviewItemId: item.id });
+        },
+      },
+      ['diff'],
+    );
+    const hunk = state.diffVisible ? hunkForItem(bundle, item) : undefined;
+
     return el(
       'div',
       {
@@ -185,8 +245,10 @@
         el('div', { className: 'hunk-row-header' }, [
           checkbox,
           el('span', { className: 'hunk-label' }, [item.label]),
+          diffButton,
         ]),
         insight ? el('div', { className: 'hunk-description' }, [insight.description]) : null,
+        hunk ? renderDiffLines(hunk) : null,
         note,
       ],
     );
@@ -231,7 +293,18 @@
       },
       [
         checkbox,
-        el('span', { className: 'file-path' }, [path]),
+        el(
+          'span',
+          {
+            className: 'file-path',
+            title: 'Open the full file',
+            onClick: (event) => {
+              event.stopPropagation();
+              post({ kind: 'openFile', path });
+            },
+          },
+          [path],
+        ),
         el('span', { className: 'file-count' }, [`${reviewedCount}/${items.length}`]),
         driftBadge,
       ],
@@ -242,18 +315,17 @@
       const insight = fileInsight(bundle, path);
       if (insight)
         children.push(el('div', { className: 'file-description' }, [insight.description]));
+      const actions = [
+        el('button', { onClick: () => post({ kind: 'openNativeDiff', path }) }, ['Open diff']),
+      ];
       if (drift === 'drifted') {
-        children.push(
-          el('div', { className: 'file-actions' }, [
-            el('button', { onClick: () => post({ kind: 'openNativeDiff', path }) }, [
-              'Open native diff',
-            ]),
-            el('button', { onClick: () => post({ kind: 'showSnapshot', path }) }, [
-              'Show captured snapshot',
-            ]),
+        actions.push(
+          el('button', { onClick: () => post({ kind: 'showSnapshot', path }) }, [
+            'Show captured snapshot',
           ]),
         );
       }
+      children.push(el('div', { className: 'file-actions' }, actions));
       for (const item of items) children.push(renderHunkRow(bundle, item));
     }
     return el('div', {}, children);
@@ -316,9 +388,22 @@
       state.screen === 'bundle' && state.bundle
         ? subjectLabel(state.bundle.bundle.workspace.source)
         : 'Reviews';
+    const diffToggle =
+      state.screen === 'bundle'
+        ? el(
+            'button',
+            {
+              className: `icon-button diff-toggle${state.diffVisible ? ' diff-toggle-on' : ''}`,
+              title: 'Toggle diff presentation (inline hunk bodies and editor highlights)',
+              onClick: () => setDiffVisible(!state.diffVisible),
+            },
+            [state.diffVisible ? 'Diff: on' : 'Diff: off'],
+          )
+        : null;
     return el('div', { className: 'toolbar' }, [
       back,
       el('span', { className: 'toolbar-title' }, [title]),
+      diffToggle,
     ]);
   }
 
@@ -431,4 +516,7 @@
 
   render();
   post({ kind: 'ready' });
+  // The extension host resets its toggle to `true` on activation; replay the persisted value so
+  // editor decorations stay in sync with what this panel shows.
+  if (!state.diffVisible) post({ kind: 'setDiffVisible', value: false });
 })();

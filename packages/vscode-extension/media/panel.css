@@ -181,6 +181,22 @@ body {
 .toolbar-title {
   font-weight: 600;
   color: var(--syn-fg);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-toggle {
+  border: 1px solid var(--syn-border-strong);
+  flex: none;
+}
+
+.diff-toggle-on {
+  background: var(--syn-accent-soft);
+  border-color: var(--syn-accent-border);
+  color: var(--syn-accent-fg);
 }
 
 .empty-state {
@@ -319,6 +335,11 @@ body {
   font-size: 12px;
 }
 
+.file-path:hover {
+  color: var(--syn-accent-fg);
+  text-decoration: underline;
+}
+
 .file-count {
   color: var(--syn-fg-subtle);
   font-size: 11px;
@@ -384,6 +405,68 @@ body {
 .hunk-description {
   color: var(--syn-fg-muted);
   font-size: 12px;
+}
+
+.hunk-diff-button {
+  flex: none;
+  border: 1px solid var(--syn-border-strong);
+  background: var(--syn-bg-raised);
+  color: var(--syn-fg-muted);
+  border-radius: var(--syn-radius-xs);
+  padding: 1px 6px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.hunk-diff-button:hover {
+  border-color: var(--syn-accent-border);
+  color: var(--syn-accent-fg);
+}
+
+/* Inline hunk body: one grid row per diff line, horizontal scroll contained to the block. */
+.hunk-diff {
+  overflow-x: auto;
+  background: var(--syn-bg-sunken);
+  border: 1px solid var(--syn-border);
+  border-radius: var(--syn-radius-xs);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.diff-line {
+  display: flex;
+  min-width: max-content;
+}
+
+.diff-line-add {
+  background: var(--syn-success-soft);
+}
+
+.diff-line-remove {
+  background: var(--syn-danger-soft);
+}
+
+.diff-gutter {
+  flex: none;
+  width: 34px;
+  padding-right: 6px;
+  text-align: right;
+  color: var(--syn-fg-subtle);
+  user-select: none;
+}
+
+.diff-text {
+  white-space: pre;
+  padding-right: 8px;
+}
+
+.diff-line-add .diff-text {
+  color: var(--syn-success);
+}
+
+.diff-line-remove .diff-text {
+  color: var(--syn-danger);
 }
 
 .hunk-note {

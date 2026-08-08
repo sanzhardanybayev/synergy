@@ -18,6 +18,7 @@ import { type WebviewHarness, createWebviewHarness } from './webview-harness.js'
 
 const EXTENSION_ID = 'synergy.synergy-vscode';
 const SNAPSHOT_SCHEME = 'synergy-review-snapshot';
+const BASE_SCHEME = 'synergy-review-base';
 
 interface ToWebviewMessage {
   kind: string;
@@ -305,8 +306,28 @@ describe('Synergy Review extension (extension host)', () => {
       assert.doesNotMatch(text, /full file as captured/);
     });
 
-    it('vscode.diff opens a native diff tab for a drifted file', async () => {
-      await harness.click('.file-actions button', 0); // "Open native diff" on src/epsilon.ts
+    it('renders inline hunk diff bodies, removed lines included, for expanded files', async () => {
+      const bodies = await pollQuery(harness, '.hunk-diff', 1);
+      assert.ok(bodies.count >= 1, 'expected at least one inline hunk diff body');
+      const removed = await harness.query('.hunk-diff .diff-line-remove');
+      assert.ok(removed.count >= 1, 'expected removed lines to be visible in the inline diff');
+    });
+
+    it('the diff toggle hides inline hunk bodies and comes back on', async () => {
+      await harness.click('.diff-toggle', 0);
+      await pollQuery(harness, '.hunk-diff', 0);
+      const hidden = await harness.query('.hunk-diff');
+      assert.equal(hidden.count, 0, 'diff bodies must disappear when the toggle is off');
+      await harness.click('.diff-toggle', 0);
+      const shown = await pollQuery(harness, '.hunk-diff', 1);
+      assert.ok(shown.count >= 1, 'diff bodies must return when the toggle is back on');
+    });
+
+    it('vscode.diff opens a native diff tab against the reconstructed base for a drifted file', async () => {
+      // Both src/gamma.ts (index 0) and src/epsilon.ts (index 1, drifted) are expanded; every
+      // expanded file now renders an "Open diff" action, and the drifted one adds
+      // "Show captured snapshot". Button index 1 is epsilon's "Open diff".
+      await harness.click('.file-actions button', 1);
       const tab = await waitFor('a Synergy diff tab', () => {
         for (const group of vscode.window.tabGroups.all) {
           for (const candidate of group.tabs) {
@@ -320,9 +341,9 @@ describe('Synergy Review extension (extension host)', () => {
         }
         return undefined;
       });
-      assert.match(tab.label, /^Synergy: .*\(captured vs current\)$/);
+      assert.match(tab.label, /^Synergy: .*\(base vs current\)$/);
       const input = tab.input as vscode.TabInputTextDiff;
-      assert.equal(input.original.scheme, SNAPSHOT_SCHEME);
+      assert.equal(input.original.scheme, BASE_SCHEME);
       assert.equal(input.modified.fsPath, join(manifest.root, PATHS.diffDrifted));
     });
 
