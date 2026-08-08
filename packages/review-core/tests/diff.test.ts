@@ -82,6 +82,68 @@ describe('unified diff parsing', () => {
     });
   });
 
+  it('terminates hunks by their declared counts so format-patch prose is not captured', () => {
+    const patch = [
+      'From 1234567890abcdef1234567890abcdef12345678 Mon Sep 17 00:00:01 2001',
+      'From: Reviewer <reviewer@example.com>',
+      'Date: Sat, 8 Aug 2026 19:32:31 +0500',
+      'Subject: [PATCH 1/2] feat: add module',
+      '',
+      'Body line explaining the change, wrapped onto a second',
+      ' indented continuation that must not become a context row.',
+      '---',
+      ' src/created.ts | 2 ++',
+      ' 1 file changed, 2 insertions(+)',
+      '',
+      'diff --git a/src/created.ts b/src/created.ts',
+      'new file mode 100644',
+      'index 0000000..2b5aedb',
+      '--- /dev/null',
+      '+++ b/src/created.ts',
+      '@@ -0,0 +1,2 @@',
+      '+export const a = 1;',
+      '+export const b = 2;',
+      '-- ',
+      '2.47.0',
+      '',
+      'From abcdefabcdefabcdefabcdefabcdefabcdefabcd Mon Sep 17 00:00:02 2001',
+      'Subject: [PATCH 2/2] chore: follow-up',
+      '',
+      ' another wrapped body line',
+      '',
+    ].join('\n');
+
+    const files = parseUnifiedDiff(patch);
+
+    expect(files).toHaveLength(1);
+    expect(files[0]?.hunks[0]?.lines).toHaveLength(2);
+    expect(files[0]?.additions).toBe(2);
+    expect(files[0]?.deletions).toBe(0);
+    for (const line of files[0]?.hunks[0]?.lines ?? []) {
+      expect(line.kind).toBe('add');
+      if (line.oldLine !== null) expect(line.oldLine).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('still honors a trailing no-newline marker on the last counted hunk line', () => {
+    const patch = [
+      'diff --git a/src/created.ts b/src/created.ts',
+      'new file mode 100644',
+      'index 0000000..2b5aedb',
+      '--- /dev/null',
+      '+++ b/src/created.ts',
+      '@@ -0,0 +1,1 @@',
+      '+export const a = 1;',
+      '\\ No newline at end of file',
+      '',
+    ].join('\n');
+
+    const files = parseUnifiedDiff(patch);
+
+    expect(files[0]?.hunks[0]?.lines).toHaveLength(1);
+    expect(files[0]?.hunks[0]?.lines[0]?.noNewlineAtEnd).toBe(true);
+  });
+
   it('preserves rename and binary metadata without inventing text items', () => {
     const files = parseUnifiedDiff(RENAME_AND_BINARY_PATCH);
 
