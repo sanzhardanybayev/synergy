@@ -383,6 +383,18 @@ export function createFileReviewItem(file: DiffFile): ReviewItem {
 
 export function buildDiffSnapshot(input: BuildDiffSnapshotInput): DiffReviewSnapshot {
   const files = parseUnifiedDiff(input.patch);
+  // Item resolution addresses files by path, so a patch that lists the same
+  // path twice (a per-commit format-patch stream rather than one combined
+  // diff) can never produce a coherent snapshot.
+  const seenPaths = new Set<string>();
+  for (const file of files) {
+    if (seenPaths.has(file.path)) {
+      throw new Error(
+        `duplicate diff entry for ${file.path}: capture must supply one combined diff per source, not per-commit patches`,
+      );
+    }
+    seenPaths.add(file.path);
+  }
   const entries = files.flatMap((file) =>
     file.hunks.map((hunk) => ({ file, hunk, item: createHunkReviewItem(file.path, hunk) })),
   );

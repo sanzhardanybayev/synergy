@@ -19,7 +19,7 @@ import {
   repositoryName,
   resolveRepositoryRoot,
   systemCommandRunner
-} from "./chunk-E2CKW5N2.js";
+} from "./chunk-KWMKYFSK.js";
 
 // src/atomic.ts
 import { renameSync, writeFileSync } from "node:fs";

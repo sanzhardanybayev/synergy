@@ -390,7 +390,7 @@ export function capturePr(options: CapturePrOptions): CapturedReviewSource {
       ]),
     );
     const patch = filterPreviewRuntimePatch(
-      runChecked(runner, options.root, 'gh', ['pr', 'diff', before.url, '--patch']),
+      runChecked(runner, options.root, 'gh', ['pr', 'diff', before.url]),
     );
     const after = parsePullRequestView(
       runChecked(runner, options.root, 'gh', [

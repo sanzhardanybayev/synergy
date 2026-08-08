@@ -146,7 +146,7 @@ describe('review source capture', () => {
     });
     const runner = createFixtureRunner({
       'gh pr view 317 --json number,title,url,baseRefOid,headRefOid': metadata,
-      'gh pr diff https://github.com/acme/repo/pull/317 --patch': patch,
+      'gh pr diff https://github.com/acme/repo/pull/317': patch,
       'gh pr view https://github.com/acme/repo/pull/317 --json number,title,url,baseRefOid,headRefOid':
         metadata,
     });
@@ -306,7 +306,7 @@ describe('review source capture', () => {
             stderr: '',
           };
         }
-        if (key === 'gh pr diff https://github.com/acme/repo/pull/317 --patch') {
+        if (key === 'gh pr diff https://github.com/acme/repo/pull/317') {
           return { exitCode: 0, stdout: TRACKED_PATCH, stderr: '' };
         }
         if (
@@ -334,7 +334,7 @@ describe('review source capture', () => {
     expect(result.source).toMatchObject({ url: 'https://github.com/acme/repo/pull/317' });
     expect(calls).toEqual([
       'gh pr view 317 --json number,title,url,baseRefOid,headRefOid',
-      'gh pr diff https://github.com/acme/repo/pull/317 --patch',
+      'gh pr diff https://github.com/acme/repo/pull/317',
       'gh pr view https://github.com/acme/repo/pull/317 --json number,title,url,baseRefOid,headRefOid',
     ]);
   });

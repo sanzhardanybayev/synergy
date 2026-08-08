@@ -336,6 +336,15 @@ ${content}`).slice(0, 16)}`,
 }
 function buildDiffSnapshot(input) {
   const files = parseUnifiedDiff(input.patch);
+  const seenPaths = /* @__PURE__ */ new Set();
+  for (const file of files) {
+    if (seenPaths.has(file.path)) {
+      throw new Error(
+        `duplicate diff entry for ${file.path}: capture must supply one combined diff per source, not per-commit patches`
+      );
+    }
+    seenPaths.add(file.path);
+  }
   const entries = files.flatMap(
     (file) => file.hunks.map((hunk) => ({ file, hunk, item: createHunkReviewItem(file.path, hunk) }))
   );
@@ -636,7 +645,7 @@ function capturePr(options) {
       ])
     );
     const patch = filterPreviewRuntimePatch(
-      runChecked(runner, options.root, "gh", ["pr", "diff", before.url, "--patch"])
+      runChecked(runner, options.root, "gh", ["pr", "diff", before.url])
     );
     const after = parsePullRequestView(
       runChecked(runner, options.root, "gh", [
@@ -821,4 +830,4 @@ export {
   resolveRepositoryRoot,
   repositoryName
 };
-//# sourceMappingURL=chunk-E2CKW5N2.js.map
+//# sourceMappingURL=chunk-KWMKYFSK.js.map

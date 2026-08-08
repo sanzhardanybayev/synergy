@@ -125,6 +125,29 @@ describe('unified diff parsing', () => {
     }
   });
 
+  it('rejects patches that list the same file twice (per-commit patch streams)', () => {
+    const entry = [
+      'diff --git a/src/dup.ts b/src/dup.ts',
+      'index 1111111..2222222 100644',
+      '--- a/src/dup.ts',
+      '+++ b/src/dup.ts',
+      '@@ -1,1 +1,1 @@',
+      '-old',
+      '+new',
+    ].join('\n');
+    const patch = `${entry}\n${entry}\n`;
+
+    expect(() =>
+      buildDiffSnapshot({
+        revisionId: 'rev-1',
+        source: { kind: 'unstaged', headSha: 'abc' },
+        fingerprint: 'dup-fingerprint',
+        patch,
+        createdAt: '2026-08-08T00:00:00.000Z',
+      }),
+    ).toThrow(/duplicate diff entry for src\/dup\.ts/);
+  });
+
   it('still honors a trailing no-newline marker on the last counted hunk line', () => {
     const patch = [
       'diff --git a/src/created.ts b/src/created.ts',

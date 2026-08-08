@@ -122,7 +122,7 @@ describe('review source freshness', () => {
             stderr: '',
           };
         }
-        if (commandKey === 'gh pr diff https://github.com/acme/repo/pull/317 --patch') {
+        if (commandKey === 'gh pr diff https://github.com/acme/repo/pull/317') {
           return { exitCode: 0, stdout: PATCH, stderr: '' };
         }
         throw new Error(`missing fixture: ${commandKey}`);
