@@ -3,7 +3,7 @@ name: review
 description: Use when the user wants a guided human review of a GitHub PR, staged changes, unstaged changes, or a bounded current-code scope, or wants to resume an exact Synergy review and answer browser questions. Captures immutable revisions, creates repository-aware review groups and concise item descriptions, opens the local portal, and runs the durable question loop.
 ---
 
-<!-- synergy-version: 0.15.2 -->
+<!-- synergy-version: 0.15.3 -->
 
 ## Step 0 — Freshness check
 
@@ -11,7 +11,7 @@ This skill may remain loaded after Synergy is updated. Set `MINE` from the marke
 run the installed-version check used by the other Synergy skills:
 
 ```bash
-MINE="0.15.2"
+MINE="0.15.3"
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -184,6 +184,10 @@ Write the scoped payload in this shape:
 Descriptions must be one or two sentences explaining the section's application role using the
 repository context gathered above. Do not merely paraphrase the selected syntax. Diff reviews
 keep the existing `groups` plus `items` payload and use the captured diff item IDs as-is.
+
+For every file that appears in the review, also emit a `files[]` entry:
+`{ "path": "<file path>", "description": "<one broad sentence or two on what changed in this file and why>", "confidence": "high" | "medium" | "low" }`.
+The file description summarizes the whole file's change story; per-item descriptions stay focused on their single hunk or section. Same 600-character limit and conciseness rules.
 
 Generate one temporary payload that structurally conforms to
 `<synergy-root>/packages/cli/src/review-analysis.schema.json`. Do not generate an executable
