@@ -36,6 +36,12 @@ vi.mock('../editor/snapshot-provider.js', () => ({
   parseSnapshotUri: (uri: unknown) => uri,
   snapshotUri: (_ref: unknown, path: string) => `synergy-review-snapshot:${path}`,
 }));
+// `../editor/base-provider.js` is a `vscode` value-importer too (base URIs for native diffs).
+// This suite never resolves base content through a real URI, so a pass-through stub suffices.
+vi.mock('../editor/base-provider.js', () => ({
+  parseBaseUri: (uri: unknown) => uri,
+  baseUri: (_ref: unknown, path: string) => `synergy-review-base:${path}`,
+}));
 
 // `daemon.ts`'s `tryConnectDaemon` opens a real HTTP connection to whatever the project's
 // `.synergy/preview.runtime.json` (or the default :4321) resolves to. Stubbing it keeps this
