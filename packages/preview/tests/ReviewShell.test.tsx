@@ -151,7 +151,7 @@ describe('ReviewShell', () => {
     const client = renderShell(bundle, makeReviewClient(bundle));
 
     expect(await screen.findByText('0/2')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: /Binary file changed/ }));
+    await user.click(screen.getByRole('button', { name: /assets\/logo\.png/ }));
     expect(screen.getByRole('heading', { name: 'Binary file changed' })).toBeVisible();
     expect(screen.getByText(/no code lines to select/i)).toBeVisible();
     expect(screen.getByText(/line questions are unavailable/i)).toBeVisible();

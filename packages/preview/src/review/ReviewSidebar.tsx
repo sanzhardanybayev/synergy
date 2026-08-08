@@ -81,61 +81,43 @@ export function ReviewSidebar({
                 ).length;
                 const fileComplete = fileCompleted === fileItems.length;
                 const filePartial = fileCompleted > 0 && !fileComplete;
+                const fileActive = fileItems.some((item) => item.id === activeItemId);
+                const firstUnreviewed = fileItems.find(
+                  (item) => !isComplete(progress[item.id]?.status),
+                );
+                const selectionTarget = firstUnreviewed ?? fileItems[0];
                 return (
-                  <div className="review-file" key={`${group.id}:${path}`}>
-                    <label className="review-file__heading">
-                      <input
-                        type="checkbox"
-                        ref={(input) => {
-                          if (input) input.indeterminate = filePartial;
-                        }}
-                        checked={fileComplete}
-                        aria-label={`${fileComplete ? 'Reopen' : 'Mark'} ${path} ${
-                          fileComplete ? 'for review' : 'reviewed'
-                        }`}
-                        onChange={() => {
-                          const next = fileComplete ? 'needs-review' : 'reviewed';
-                          void Promise.all(fileItems.map((item) => onSetProgress(item.id, next)));
-                        }}
-                      />
+                  <div
+                    className={`review-file${fileActive ? ' is-active' : ''}`}
+                    key={`${group.id}:${path}`}
+                  >
+                    <input
+                      type="checkbox"
+                      ref={(input) => {
+                        if (input) input.indeterminate = filePartial;
+                      }}
+                      checked={fileComplete}
+                      aria-label={`${fileComplete ? 'Reopen' : 'Mark'} ${path} ${
+                        fileComplete ? 'for review' : 'reviewed'
+                      }`}
+                      onChange={() => {
+                        const next = fileComplete ? 'needs-review' : 'reviewed';
+                        void Promise.all(fileItems.map((item) => onSetProgress(item.id, next)));
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="review-file__heading"
+                      aria-current={fileActive ? 'true' : undefined}
+                      onClick={() => {
+                        if (selectionTarget) onSelectItem(selectionTarget.id);
+                      }}
+                    >
                       <span title={path}>{path}</span>
-                    </label>
-                    <ul>
-                      {fileItems.map((item) => {
-                        const itemComplete = isComplete(progress[item.id]?.status);
-                        return (
-                          <li key={item.id} className={item.id === activeItemId ? 'is-active' : ''}>
-                            <input
-                              type="checkbox"
-                              checked={itemComplete}
-                              aria-label={`${itemComplete ? 'Reopen' : 'Mark'} ${item.label} ${
-                                itemComplete ? 'for review' : 'reviewed'
-                              }`}
-                              onChange={() =>
-                                void onSetProgress(
-                                  item.id,
-                                  itemComplete ? 'needs-review' : 'reviewed',
-                                )
-                              }
-                            />
-                            <button
-                              type="button"
-                              aria-current={item.id === activeItemId ? 'true' : undefined}
-                              onClick={() => onSelectItem(item.id)}
-                            >
-                              <span>{item.label}</span>
-                              <small>
-                                {item.kind === 'file'
-                                  ? 'File-level change'
-                                  : item.kind === 'hunk'
-                                    ? `Lines ${item.range.start}–${item.range.end}`
-                                    : `Section ${item.range.start}–${item.range.end}`}
-                              </small>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                      <small>
+                        {fileCompleted}/{fileItems.length}
+                      </small>
+                    </button>
                   </div>
                 );
               })}

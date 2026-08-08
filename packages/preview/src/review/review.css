@@ -242,24 +242,18 @@
 }
 
 .review-file {
-  margin-bottom: var(--syn-sp-3);
-}
-
-.review-file__heading {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: var(--syn-sp-2);
-  color: var(--syn-fg);
-  font-family: var(--syn-font-mono);
-  font-size: var(--syn-text-xs);
-  font-weight: 600;
+  margin-bottom: 2px;
+  padding: 4px var(--syn-sp-1);
+  border-radius: var(--syn-radius-sm);
 }
 
-.review-file__heading span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.review-file.is-active {
+  background: var(--syn-accent-soft);
+  box-shadow: inset 2px 0 var(--syn-accent);
 }
 
 .review-file input[type="checkbox"] {
@@ -270,59 +264,38 @@
   cursor: pointer;
 }
 
-.review-file ul {
-  display: grid;
-  gap: 2px;
-  margin: var(--syn-sp-2) 0 0 var(--syn-sp-2);
-  padding: 0 0 0 var(--syn-sp-3);
-  border-left: 1px solid var(--syn-border);
-  list-style: none;
-}
-
-.review-file li {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: var(--syn-sp-2);
-  border-radius: var(--syn-radius-sm);
-}
-
-.review-file li.is-active {
-  background: var(--syn-accent-soft);
-  box-shadow: inset 2px 0 var(--syn-accent);
-}
-
-.review-file li > button {
+.review-file__heading {
   min-width: 0;
   display: grid;
-  gap: 1px;
-  padding: 6px var(--syn-sp-2);
-  color: var(--syn-fg-muted);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--syn-sp-2);
+  padding: 2px var(--syn-sp-1);
+  color: var(--syn-fg);
   border: 0;
   background: transparent;
   cursor: pointer;
+  font-family: var(--syn-font-mono);
+  font-size: var(--syn-text-xs);
+  font-weight: 600;
   text-align: left;
 }
 
-.review-file li > button:hover {
-  color: var(--syn-fg);
+.review-file__heading:hover {
+  color: var(--syn-accent-fg);
 }
 
-.review-file li > button span,
-.review-file li > button small {
+.review-file__heading span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.review-file li > button span {
-  font-family: var(--syn-font-mono);
-  font-size: var(--syn-text-xs);
-}
-
-.review-file li > button small {
+.review-file__heading small {
   color: var(--syn-fg-subtle);
-  font-size: var(--syn-text-xs);
+  font-family: var(--syn-font-ui);
+  font-weight: 650;
+  white-space: nowrap;
 }
 
 .review-sidebar__shortcuts {
@@ -368,6 +341,77 @@
 
 .review-stage__heading span {
   color: var(--syn-fg-subtle);
+  font-size: var(--syn-text-sm);
+}
+
+.review-file-summary {
+  margin-top: var(--syn-sp-3);
+  padding: var(--syn-sp-3) var(--syn-sp-4);
+  border: 1px solid var(--syn-border);
+  border-radius: var(--syn-radius-md);
+  background: var(--syn-bg-sunken);
+}
+
+.review-file-summary p:not(.review-eyebrow) {
+  margin: var(--syn-sp-1) 0 0;
+  color: var(--syn-fg);
+  line-height: var(--syn-leading-snug);
+}
+
+.review-stage__item {
+  margin: var(--syn-sp-4) 0 var(--syn-sp-2);
+}
+
+.review-stage__item h2 {
+  margin: 0 0 var(--syn-sp-1);
+  font-size: var(--syn-text-lg);
+}
+
+.review-stage__item span {
+  color: var(--syn-fg-subtle);
+  font-size: var(--syn-text-sm);
+}
+
+.review-hunk-tabs {
+  display: flex;
+  overflow-x: auto;
+  gap: var(--syn-sp-2);
+  margin-top: var(--syn-sp-4);
+  padding-bottom: var(--syn-sp-1);
+}
+
+.review-hunk-tab {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--syn-sp-2);
+  flex: 0 0 auto;
+  padding: 0 var(--syn-sp-3);
+  color: var(--syn-fg-muted);
+  border: 1px solid var(--syn-border);
+  border-radius: var(--syn-radius-full);
+  background: var(--syn-bg-raised);
+  cursor: pointer;
+  font-family: var(--syn-font-mono);
+  font-size: var(--syn-text-xs);
+  white-space: nowrap;
+  transition: color var(--syn-dur-fast) var(--syn-ease-out), border-color var(--syn-dur-fast)
+    var(--syn-ease-out), background var(--syn-dur-fast) var(--syn-ease-out);
+}
+
+.review-hunk-tab:hover {
+  color: var(--syn-fg);
+  border-color: var(--syn-border-strong);
+}
+
+.review-hunk-tab.is-active {
+  color: var(--syn-accent-fg);
+  border-color: var(--syn-accent);
+  background: var(--syn-accent-soft);
+}
+
+.review-hunk-tab__check {
+  color: var(--syn-success);
   font-size: var(--syn-text-sm);
 }
 

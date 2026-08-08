@@ -45,6 +45,13 @@ export function ReviewShell() {
     [review.bundle],
   );
   const activeItem = items.find((item) => item.id === review.activeItemId) ?? items[0] ?? null;
+  const fileItems = useMemo(
+    () => (activeItem ? items.filter((item) => item.path === activeItem.path) : []),
+    [items, activeItem],
+  );
+  const fileInsight = review.bundle?.insights.files?.find(
+    (candidate) => candidate.path === activeItem?.path,
+  );
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -159,6 +166,8 @@ export function ReviewShell() {
         <ReviewStage
           bundle={review.bundle}
           item={activeItem}
+          fileItems={fileItems}
+          fileInsight={fileInsight}
           selectedLineIds={review.selectedLineIds}
           noteDraft={review.noteDrafts[activeItem.id]}
           saving={review.savingItemIds.has(activeItem.id)}
@@ -166,6 +175,7 @@ export function ReviewShell() {
           onNoteChange={(value) => review.setNoteDraft(activeItem.id, value)}
           onSaveNote={() => review.saveNote(activeItem.id)}
           onSetProgress={(status) => review.markProgress(activeItem.id, status)}
+          onSelectItem={review.setActiveItem}
         />
         <QuestionRail questionInputRef={questionInputRef} />
       </div>
