@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setMarketplaceVersion, setSkillStamp } from './stamp.js';
+import { setMarketplaceVersion, setPackageJsonVersion, setSkillStamp } from './stamp.js';
 
 interface Target {
   path: string;
@@ -25,6 +25,13 @@ function targets(root: string): Target[] {
       },
       rewrite: (_content, version) =>
         `// Generated from .claude-plugin/plugin.json by packages/plugin-guard/src/version-sync.ts.\nexport const SYNERGY_VERSION = '${version}';\n`,
+    },
+    {
+      path: join(root, 'packages/vscode-extension/package.json'),
+      read() {
+        return readFileSync(this.path, 'utf8');
+      },
+      rewrite: setPackageJsonVersion,
     },
   ];
   const skillsDir = join(root, 'skills');
