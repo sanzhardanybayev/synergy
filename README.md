@@ -98,6 +98,18 @@ git clone https://github.com/sanzhardanybayev/synergy
 ```
 </details>
 
+## VS Code / Cursor extension
+
+The review pane also runs natively inside VS Code or Cursor as a local `.vsix` - no
+marketplace listing yet.
+
+```bash
+pnpm --filter synergy-vscode package
+code --install-extension packages/vscode-extension/synergy-vscode-<version>.vsix
+# or, in Cursor:
+cursor --install-extension packages/vscode-extension/synergy-vscode-<version>.vsix
+```
+
 ## Quick start
 
 ```
