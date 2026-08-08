@@ -17,7 +17,9 @@ export interface HunkDecorationRanges {
  * Walks `hunk.lines` tracking the new-file line position. Contiguous `add` lines collapse into a
  * single added range; contiguous `remove` lines collapse into a single removed anchor at the
  * new-file line position immediately preceding the run (or `hunk.newStart - 1` if the hunk opens
- * with a removal).
+ * with a removal). That anchor is clamped to line 1 - editors are 1-indexed and have no line 0,
+ * so a hunk that opens with a removal at the very top of the file (`newStart` 1) still anchors on
+ * a real, renderable line instead of producing an invalid 0-or-negative line number.
  */
 export function hunkDecorationRanges(file: DiffFile, reviewItemId: string): HunkDecorationRanges {
   const hunk = file.hunks.find((candidate) => candidate.reviewItemId === reviewItemId);
@@ -27,7 +29,7 @@ export function hunkDecorationRanges(file: DiffFile, reviewItemId: string): Hunk
 
   const added: ReviewRange[] = [];
   const removed: ReviewRange[] = [];
-  let anchorLine = hunk.newStart - 1;
+  let anchorLine = Math.max(1, hunk.newStart - 1);
   let previousKind: 'context' | 'add' | 'remove' | undefined;
 
   for (const line of hunk.lines) {

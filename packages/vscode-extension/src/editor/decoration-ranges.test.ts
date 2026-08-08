@@ -96,6 +96,21 @@ describe('hunkDecorationRanges', () => {
     });
   });
 
+  it('clamps the removed anchor to line 1 when a hunk opens with a remove at newStart 1', () => {
+    const file = fileWithHunk({
+      newStart: 1,
+      lines: [
+        { kind: 'remove', text: 'a', oldLine: 1, newLine: null },
+        { kind: 'context', text: 'b', oldLine: 2, newLine: 1 },
+      ],
+    });
+
+    expect(hunkDecorationRanges(file, 'item-1')).toEqual({
+      added: [],
+      removed: [{ start: 1, end: 1 }],
+    });
+  });
+
   it('throws for unknown reviewItemId', () => {
     const file = fileWithHunk({ lines: [] });
     expect(() => hunkDecorationRanges(file, 'missing-item')).toThrow();

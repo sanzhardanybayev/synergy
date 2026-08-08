@@ -49,3 +49,13 @@ export function registerSnapshotProvider(
     vscode.workspace.registerTextDocumentContentProvider(SNAPSHOT_SCHEME, provider),
   );
 }
+
+/**
+ * Opens a `synergy-review-snapshot:` URI as a read-only document in the editor. Lives here (an
+ * already-allowed `vscode`-importing module) rather than in `ReviewViewProvider` so that file can
+ * stay on the `Host` seam instead of touching `vscode.workspace`/`vscode.window` directly.
+ */
+export async function openSnapshotDocument(uri: vscode.Uri): Promise<void> {
+  const doc = await vscode.workspace.openTextDocument(uri);
+  await vscode.window.showTextDocument(doc, { preview: false });
+}

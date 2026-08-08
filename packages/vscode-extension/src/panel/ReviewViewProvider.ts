@@ -1,11 +1,15 @@
 import { join } from 'node:path';
 import type { ReviewBundle, ReviewItem, ReviewRef } from '@synergy/review-core';
-import * as vscode from 'vscode';
+import type * as vscode from 'vscode';
 import { listSessions, loadBundle, saveNote, setItemStatus } from '../data/sessions.js';
 import { hunkDecorationRanges } from '../editor/decoration-ranges.js';
 import { openNativeDiff } from '../editor/native-diff.js';
 import { snapshotContentFor } from '../editor/snapshot-content.js';
-import { parseSnapshotUri, snapshotUri } from '../editor/snapshot-provider.js';
+import {
+  openSnapshotDocument,
+  parseSnapshotUri,
+  snapshotUri,
+} from '../editor/snapshot-provider.js';
 import type { Host } from '../host.js';
 import { parseFromWebview } from './messages.js';
 import type { ToWebview } from './messages.js';
@@ -172,11 +176,12 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
       (candidate) => candidate.path === item.path,
     );
     if (!file) return;
-    try {
-      this.host.applyDecorations(hunkDecorationRanges(file, item.id));
-    } catch {
-      // No matching hunk for this item - nothing to decorate.
-    }
+    // `hunkDecorationRanges` throws only when no hunk in `file` matches `item.id` (e.g. a
+    // whole-file item with no textual hunk); check the same condition here so the call below
+    // can never throw for an unexpected reason and hide a real bug.
+    const hasMatchingHunk = file.hunks.some((hunk) => hunk.reviewItemId === item.id);
+    if (!hasMatchingHunk) return;
+    this.host.applyDecorations(hunkDecorationRanges(file, item.id));
   }
 
   private async openNativeDiffFor(path: string): Promise<void> {
@@ -192,8 +197,7 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
       this.postError(new Error('No active session'));
       return;
     }
-    const doc = await vscode.workspace.openTextDocument(snapshotUri(this.screen.ref, path));
-    await vscode.window.showTextDocument(doc, { preview: false });
+    await openSnapshotDocument(snapshotUri(this.screen.ref, path));
   }
 
   /**
