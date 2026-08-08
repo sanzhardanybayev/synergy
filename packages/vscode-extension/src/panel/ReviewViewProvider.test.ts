@@ -185,7 +185,9 @@ function makeStubHost(projectRoot: string): Host & {
     openFileAt: async (absPath, startLine, endLine) => {
       openFileAtCalls.push({ absPath, startLine, endLine });
     },
+    openFile: async () => {},
     applyDecorations: () => {},
+    clearDecorations: () => {},
     showError: (message: string) => {
       errors.push(message);
     },

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { registerBaseProvider } from './editor/base-provider.js';
 import { disposeHunkDecorationTypes } from './editor/decorations.js';
 import { registerSnapshotProvider } from './editor/snapshot-provider.js';
 import { createVsCodeHost } from './host.js';
@@ -23,6 +24,7 @@ export function activate(context: vscode.ExtensionContext): SynergyReviewApi {
   const provider = new ReviewViewProvider(host, mediaRoot);
 
   registerSnapshotProvider(context, (uri) => provider.resolveSnapshotContent(uri));
+  registerBaseProvider(context, (uri) => provider.resolveBaseContent(uri));
 
   context.subscriptions.push(
     provider,

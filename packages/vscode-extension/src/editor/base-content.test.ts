@@ -1,6 +1,12 @@
-import type { DiffFile, DiffHunk, DiffLine } from '@synergy/review-core';
+import type {
+  DiffFile,
+  DiffHunk,
+  DiffLine,
+  DiffReviewSnapshot,
+  ReviewSource,
+} from '@synergy/review-core';
 import { describe, expect, it } from 'vitest';
-import { baseTextFromHunks, reverseApplyHunks } from './base-content.js';
+import { baseTextFromHunks, resolveBaseContent, reverseApplyHunks } from './base-content.js';
 
 function line(
   kind: DiffLine['kind'],
@@ -178,5 +184,137 @@ describe('baseTextFromHunks', () => {
       ],
     });
     expect(baseTextFromHunks(target)).toBe('alpha\nold-line\ngone\n');
+  });
+});
+
+describe('resolveBaseContent', () => {
+  const prSource: ReviewSource = {
+    kind: 'pr',
+    number: 1,
+    url: 'https://example.test/pr/1',
+    baseSha: 'base-sha',
+    headSha: 'head-sha',
+  };
+
+  function snapshot(files: DiffFile[], source: ReviewSource = prSource): DiffReviewSnapshot {
+    return {
+      schemaVersion: 1,
+      revisionId: 'rev-1',
+      source,
+      fingerprint: 'fp',
+      createdAt: '2026-08-09T00:00:00.000Z',
+      items: [],
+      kind: 'diff',
+      files,
+    };
+  }
+
+  const modified = file({
+    hunks: [
+      hunk({
+        oldStart: 1,
+        newStart: 1,
+        lines: [line('remove', 'old', 1, null), line('add', 'new', null, 1)],
+      }),
+    ],
+  });
+
+  it('prefers reverse-apply against the disk content', () => {
+    const result = resolveBaseContent({
+      snapshot: snapshot([modified]),
+      path: modified.path,
+      readDisk: () => 'new\n',
+      gitShow: () => {
+        throw new Error('git must not be consulted when reverse-apply succeeds');
+      },
+    });
+    expect(result).toEqual({ text: 'old\n', origin: 'reverse-apply' });
+  });
+
+  it('falls back to git show at baseSha when the disk content drifted', () => {
+    const calls: string[][] = [];
+    const result = resolveBaseContent({
+      snapshot: snapshot([modified]),
+      path: modified.path,
+      readDisk: () => 'DRIFTED\n',
+      gitShow: (ref, path) => {
+        calls.push([ref, path]);
+        return 'old\n';
+      },
+    });
+    expect(result).toEqual({ text: 'old\n', origin: 'git' });
+    expect(calls).toEqual([['base-sha', modified.path]]);
+  });
+
+  it('uses previousPath for the git lookup on renamed files', () => {
+    const renamed = { ...modified, status: 'renamed' as const, previousPath: 'src/old-name.ts' };
+    const calls: string[][] = [];
+    resolveBaseContent({
+      snapshot: snapshot([renamed]),
+      path: renamed.path,
+      readDisk: () => undefined,
+      gitShow: (ref, path) => {
+        calls.push([ref, path]);
+        return 'old\n';
+      },
+    });
+    expect(calls).toEqual([['base-sha', 'src/old-name.ts']]);
+  });
+
+  it('resolves the staged base from HEAD and the unstaged base from the index', () => {
+    const refs: string[] = [];
+    const gitShow = (ref: string): string => {
+      refs.push(ref);
+      return 'old\n';
+    };
+    resolveBaseContent({
+      snapshot: snapshot([modified], { kind: 'staged', headSha: 'head-sha' }),
+      path: modified.path,
+      readDisk: () => undefined,
+      gitShow,
+    });
+    resolveBaseContent({
+      snapshot: snapshot([modified], { kind: 'unstaged', headSha: 'head-sha' }),
+      path: modified.path,
+      readDisk: () => undefined,
+      gitShow,
+    });
+    expect(refs).toEqual(['head-sha', '']);
+  });
+
+  it('degrades to hunks-only text when disk and git both fail', () => {
+    const result = resolveBaseContent({
+      snapshot: snapshot([modified]),
+      path: modified.path,
+      readDisk: () => undefined,
+      gitShow: () => undefined,
+    });
+    expect(result).toEqual({ text: 'old\n', origin: 'hunks-only' });
+  });
+
+  it('returns empty base for added files without consulting disk or git', () => {
+    const added = { ...modified, status: 'added' as const };
+    const result = resolveBaseContent({
+      snapshot: snapshot([added]),
+      path: added.path,
+      readDisk: () => {
+        throw new Error('disk must not be read for added files');
+      },
+      gitShow: () => {
+        throw new Error('git must not be consulted for added files');
+      },
+    });
+    expect(result).toEqual({ text: '', origin: 'reverse-apply' });
+  });
+
+  it('returns undefined for binary files and unknown paths', () => {
+    const binary = { ...modified, binary: true };
+    const args = { readDisk: (): undefined => undefined, gitShow: (): undefined => undefined };
+    expect(
+      resolveBaseContent({ snapshot: snapshot([binary]), path: binary.path, ...args }),
+    ).toBeUndefined();
+    expect(
+      resolveBaseContent({ snapshot: snapshot([modified]), path: 'nope.ts', ...args }),
+    ).toBeUndefined();
   });
 });
