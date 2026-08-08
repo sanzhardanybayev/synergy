@@ -108,14 +108,21 @@ interface ScopeAnalysisGroupInput {
     label: string;
     sectionKeys: string[];
 }
+interface FileAnalysisInput {
+    path: string;
+    description: string;
+    confidence: ReviewInsightConfidence;
+}
 type ReviewAnalysisInput = {
     kind: 'scope';
     groups: ScopeAnalysisGroupInput[];
     sections: ScopeAnalysisSectionInput[];
+    files?: FileAnalysisInput[];
 } | {
     kind: 'diff';
     groups: ReviewGroup[];
     items: ReviewItemInsight[];
+    files?: FileAnalysisInput[];
 };
 declare function parseReviewAnalysisInput(value: unknown): ReviewAnalysisInput;
 

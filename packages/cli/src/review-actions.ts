@@ -189,14 +189,6 @@ function reconcileProgressAndFiles(
   return { progress, files: insights.files };
 }
 
-function reconcileProgress(
-  previous: ReviewBundle,
-  snapshot: ReviewSnapshot,
-  now: string,
-): ReviewProgress {
-  return reconcileProgressAndFiles(previous, snapshot, now).progress;
-}
-
 /**
  * Merges fresh per-file analysis with carried-forward file insights from the predecessor
  * revision. Fresh entries win for the paths they cover; carried entries survive for paths the
@@ -519,7 +511,31 @@ export async function applyReviewAnalysis(
     validationMs += measureMonotonic(monotonicNow, () => {
       assertValidAnalysis(translated.snapshot, translated.analysis);
     }).durationMs;
-    const scopeFiles = mergeFileInsights(bundle.insights.files, scopeAnalysis.files);
+    const derived = measureMonotonic(monotonicNow, () => {
+      const progressTimestamp = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
+      const guidance = deriveReviewAnalysisGuidance(bundle.snapshot);
+      if (!bundle.snapshot.predecessorRevisionId) {
+        return {
+          progress: initialProgress(translated.snapshot, progressTimestamp),
+          carriedFiles: undefined as ReviewFileInsight[] | undefined,
+          guidance,
+          progressTimestamp,
+        };
+      }
+      const reconciled = reconcileProgressAndFiles(
+        store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
+        translated.snapshot,
+        progressTimestamp,
+      );
+      return {
+        progress: reconciled.progress,
+        carriedFiles: reconciled.files,
+        guidance,
+        progressTimestamp,
+      };
+    });
+    derivationMs += derived.durationMs;
+    const scopeFiles = mergeFileInsights(derived.value.carriedFiles, scopeAnalysis.files);
     const insights: ReviewInsights = {
       schemaVersion: 1,
       revisionId: request.reference.revisionId,
@@ -527,19 +543,6 @@ export async function applyReviewAnalysis(
       items: translated.analysis.items,
       ...(scopeFiles ? { files: scopeFiles } : {}),
     };
-    const derived = measureMonotonic(monotonicNow, () => {
-      const progressTimestamp = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
-      const progress = bundle.snapshot.predecessorRevisionId
-        ? reconcileProgress(
-            store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
-            translated.snapshot,
-            progressTimestamp,
-          )
-        : initialProgress(translated.snapshot, progressTimestamp);
-      const guidance = deriveReviewAnalysisGuidance(bundle.snapshot);
-      return { progress, guidance, progressTimestamp };
-    });
-    derivationMs += derived.durationMs;
     finalizedAt = nondecreasingIsoTimestamp(derived.value.progressTimestamp, now());
     publicationMs += measureMonotonic(monotonicNow, () => {
       store.finalizeScopeAnalysis(

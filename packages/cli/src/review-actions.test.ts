@@ -1215,4 +1215,133 @@ describe('review lifecycle actions', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('carries scope file descriptions across a refresh, and fresh analysis wins when provided', async () => {
+    const root = join(tmpdir(), `synergy-review-scope-file-carry-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    let contentA = 'export const a = 1;\n';
+    const contentB = 'export const b = 1;\n';
+    const runner: CommandRunner = {
+      run(command, args, options): CommandResult {
+        const key = [command, ...args].join(' ');
+        if (key === 'git rev-parse --show-toplevel') {
+          return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+        }
+        if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+        if (key === 'git ls-files --cached --others --exclude-standard -z -- src') {
+          return { exitCode: 0, stdout: 'src/a.ts\0src/b.ts\0', stderr: '' };
+        }
+        throw new Error(`missing fixture for ${key}`);
+      },
+    };
+    const readFile = (path: string): string => (path.endsWith('a.ts') ? contentA : contentB);
+    const sectionA = {
+      key: 'section-a',
+      path: 'src/a.ts',
+      label: 'Constant a',
+      start: 1,
+      end: 2,
+      description: 'Defines constant a.',
+      confidence: 'high' as const,
+      evidencePaths: ['src/a.ts'],
+    };
+    const sectionB = {
+      key: 'section-b',
+      path: 'src/b.ts',
+      label: 'Constant b',
+      start: 1,
+      end: 2,
+      description: 'Defines constant b.',
+      confidence: 'high' as const,
+      evidencePaths: ['src/b.ts'],
+    };
+    const groups = [{ id: 'exports', label: 'Exports', sectionKeys: [sectionA.key, sectionB.key] }];
+    try {
+      const store = createReviewStore(root);
+
+      // Revision 1: describe both files, then mark file b's item reviewed so its insight
+      // becomes carryable across refreshes.
+      const first = createOrResumeReview({
+        root,
+        runner,
+        readFile,
+        source: { kind: 'scope', patterns: ['src'] },
+      });
+      await applyReviewAnalysis({
+        root,
+        reference: first.reference,
+        analysis: {
+          kind: 'scope',
+          sections: [sectionA, sectionB],
+          groups,
+          files: [{ path: 'src/b.ts', description: 'File b summary.', confidence: 'high' }],
+        },
+      });
+      const firstBundle = store.readBundle(first.reference.workspaceId, first.reference.revisionId);
+      const firstItemB = firstBundle.snapshot.items.find((item) => item.path === 'src/b.ts');
+      if (!firstItemB) throw new Error('fixture must create an item for src/b.ts');
+      store.patchItemProgress(
+        first.reference.workspaceId,
+        first.reference.revisionId,
+        firstItemB.id,
+        {
+          status: 'reviewed',
+        },
+      );
+
+      // Revision 2 (refresh): only file a's content changes, so file b's section carries
+      // forward untouched. Finalize without a `files` key - the carried description for
+      // file b must survive even though fresh analysis omits it.
+      contentA = 'export const a = 2;\n';
+      const second = createOrResumeReview({
+        root,
+        runner,
+        readFile,
+        source: { kind: 'scope', patterns: ['src'] },
+      });
+      expect(second.reference.revisionId).not.toBe(first.reference.revisionId);
+      await applyReviewAnalysis({
+        root,
+        reference: second.reference,
+        analysis: { kind: 'scope', sections: [sectionA, sectionB], groups },
+      });
+      const secondBundle = store.readBundle(
+        second.reference.workspaceId,
+        second.reference.revisionId,
+      );
+      expect(secondBundle.insights.files).toEqual([
+        { path: 'src/b.ts', description: 'File b summary.', confidence: 'high' },
+      ]);
+      const secondItemB = secondBundle.snapshot.items.find((item) => item.path === 'src/b.ts');
+      if (!secondItemB) throw new Error('refreshed snapshot must retain the item for src/b.ts');
+      expect(secondBundle.progress.items[secondItemB.id]?.status).toBe('carried-forward');
+
+      // Revision 3 (second refresh): file a changes again, file b still carries forward, but
+      // this time fresh analysis provides a file b description - it must win over the carried one.
+      contentA = 'export const a = 3;\n';
+      const third = createOrResumeReview({
+        root,
+        runner,
+        readFile,
+        source: { kind: 'scope', patterns: ['src'] },
+      });
+      expect(third.reference.revisionId).not.toBe(second.reference.revisionId);
+      await applyReviewAnalysis({
+        root,
+        reference: third.reference,
+        analysis: {
+          kind: 'scope',
+          sections: [sectionA, sectionB],
+          groups,
+          files: [{ path: 'src/b.ts', description: 'Updated file b summary.', confidence: 'high' }],
+        },
+      });
+      const thirdBundle = store.readBundle(third.reference.workspaceId, third.reference.revisionId);
+      expect(thirdBundle.insights.files).toEqual([
+        { path: 'src/b.ts', description: 'Updated file b summary.', confidence: 'high' },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
