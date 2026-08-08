@@ -9,7 +9,7 @@
       "name": "synergy",
       "source": "./",
       "description": "Live planning and durable, repository-aware code review for coding agents.",
-      "version": "0.15.1",
+      "version": "0.15.2",
       "homepage": "https://github.com/sanzhardanybayev/synergy"
     }
   ]
