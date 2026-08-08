@@ -2198,6 +2198,7 @@ function printReviewStatus(request) {
 var IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
 var GROUP_ID2 = /^[a-z0-9][a-z0-9_-]*$/u;
 var MAX_DESCRIPTION_LENGTH2 = 600;
+var FILE_INSIGHT_KEYS = ["path", "description", "confidence"];
 function propertyPath(path, key) {
   return IDENTIFIER.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
 }
@@ -2360,7 +2361,7 @@ function parseScopeSection(value, index) {
 function parseFile(value, index) {
   const path = `$.files[${index}]`;
   assertRecord(value, path);
-  assertOnlyKeys(value, ["path", "description", "confidence"], path);
+  assertOnlyKeys(value, FILE_INSIGHT_KEYS, path);
   assertString(value.path, `${path}.path`);
   assertDescription(value.description, `${path}.description`);
   return {

@@ -40,7 +40,16 @@ export type ReviewAnalysisInput =
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
 const GROUP_ID = /^[a-z0-9][a-z0-9_-]*$/u;
-const MAX_DESCRIPTION_LENGTH = 600;
+/**
+ * Kept in lockstep with `$defs.fileInsight.properties.description.maxLength` in
+ * review-analysis.schema.json - see the agreement test in review-analysis.test.ts.
+ */
+export const MAX_DESCRIPTION_LENGTH = 600;
+/**
+ * Kept in lockstep with `$defs.fileInsight.required` in review-analysis.schema.json - see the
+ * agreement test in review-analysis.test.ts.
+ */
+export const FILE_INSIGHT_KEYS = ['path', 'description', 'confidence'] as const;
 
 function propertyPath(path: string, key: string): string {
   return IDENTIFIER.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
@@ -231,7 +240,7 @@ function parseScopeSection(value: unknown, index: number): ScopeAnalysisSectionI
 function parseFile(value: unknown, index: number): FileAnalysisInput {
   const path = `$.files[${index}]`;
   assertRecord(value, path);
-  assertOnlyKeys(value, ['path', 'description', 'confidence'], path);
+  assertOnlyKeys(value, FILE_INSIGHT_KEYS, path);
   assertString(value.path, `${path}.path`);
   assertDescription(value.description, `${path}.description`);
   return {

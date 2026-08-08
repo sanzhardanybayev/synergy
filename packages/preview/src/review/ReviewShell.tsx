@@ -45,6 +45,13 @@ export function ReviewShell() {
     [review.bundle],
   );
   const activeItem = items.find((item) => item.id === review.activeItemId) ?? items[0] ?? null;
+  // Filters by path across ALL groups, not just the active item's group, whereas ReviewSidebar
+  // keys its per-file rows as `${group.id}:${path}`. This only matches the sidebar's grouping
+  // when every review item for a given path lives in a single group. The analysis validator
+  // (assertValidAnalysis in review-actions.ts) rejects a review item appearing in more than one
+  // group, but it does not forbid two distinct items at the same path from landing in different
+  // groups - that split just isn't something agent-authored analyses produce today. If it ever
+  // does happen, this filter would silently merge items from another group into the file view.
   const fileItems = useMemo(
     () => (activeItem ? items.filter((item) => item.path === activeItem.path) : []),
     [items, activeItem],

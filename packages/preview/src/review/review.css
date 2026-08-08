@@ -159,7 +159,8 @@
   font-family: var(--syn-font-mono);
 }
 
-.review-sidebar progress {
+.review-sidebar progress,
+.review-index__card progress {
   appearance: none;
   width: 100%;
   height: 5px;
@@ -169,12 +170,15 @@
   background: var(--syn-border);
 }
 
-.review-sidebar progress::-webkit-progress-bar {
+.review-sidebar progress::-webkit-progress-bar,
+.review-index__card progress::-webkit-progress-bar {
   background: var(--syn-border);
 }
 
 .review-sidebar progress::-webkit-progress-value,
-.review-sidebar progress::-moz-progress-bar {
+.review-sidebar progress::-moz-progress-bar,
+.review-index__card progress::-webkit-progress-value,
+.review-index__card progress::-moz-progress-bar {
   background: var(--syn-accent);
 }
 
@@ -920,30 +924,17 @@ div.review-index__card {
   background: var(--syn-danger-soft);
 }
 
-.review-index__card progress {
-  appearance: none;
-  width: 100%;
-  height: 5px;
-  overflow: hidden;
-  border: 0;
-  border-radius: var(--syn-radius-full);
-  background: var(--syn-border);
-}
-
-.review-index__card progress::-webkit-progress-bar {
-  background: var(--syn-border);
-}
-
-.review-index__card progress::-webkit-progress-value,
-.review-index__card progress::-moz-progress-bar {
-  background: var(--syn-accent);
-}
-
 .review-index__meta {
   margin: 0;
   color: var(--syn-fg-subtle);
   font-family: var(--syn-font-mono);
   font-size: var(--syn-text-sm);
+}
+
+.review-index__degraded-reason {
+  margin: 0;
+  color: var(--syn-danger);
+  font-size: var(--syn-text-xs);
 }
 
 .review-route-state {

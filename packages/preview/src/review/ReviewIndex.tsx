@@ -44,7 +44,10 @@ export function ReviewIndex({ fetchIndex = fetchReviewIndex }: ReviewIndexProps)
                   <h2>{review.subject}</h2>
                   <div className="review-index__badges">
                     {review.degraded && (
-                      <span className="review-index__badge review-index__badge--danger">
+                      <span
+                        className="review-index__badge review-index__badge--danger"
+                        title={review.degraded}
+                      >
                         Unreadable
                       </span>
                     )}
@@ -66,6 +69,9 @@ export function ReviewIndex({ fetchIndex = fetchReviewIndex }: ReviewIndexProps)
                   {' · '}
                   {review.updatedAt ? new Date(review.updatedAt).toLocaleString() : 'unknown time'}
                 </p>
+                {review.degraded && (
+                  <p className="review-index__degraded-reason">{review.degraded}</p>
+                )}
               </>
             );
             return (
