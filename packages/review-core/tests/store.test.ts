@@ -1026,6 +1026,57 @@ describe('review storage', () => {
     );
   });
 
+  it('accepts insights with file descriptions for known paths', () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
+    const store = createReviewStore(root);
+    const fixture = makeReviewFixture();
+    const pendingInsights = { ...fixture.insights, groups: [], items: [] };
+    store.createRevision(fixture.workspace, fixture.snapshot, pendingInsights, fixture.progress);
+
+    const insights = {
+      ...fixture.insights,
+      files: [
+        { path: 'src/example.ts', description: 'Adds retry logic.', confidence: 'high' as const },
+      ],
+    };
+
+    expect(() =>
+      store.writeInitialInsights(fixture.workspace.id, fixture.snapshot.revisionId, insights),
+    ).not.toThrow();
+  });
+
+  it('rejects file insights for paths not in the snapshot', () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
+    const store = createReviewStore(root);
+    const fixture = makeReviewFixture();
+    const pendingInsights = { ...fixture.insights, groups: [], items: [] };
+    store.createRevision(fixture.workspace, fixture.snapshot, pendingInsights, fixture.progress);
+
+    const insights = {
+      ...fixture.insights,
+      files: [{ path: 'nope.ts', description: 'x', confidence: 'low' as const }],
+    };
+
+    expect(() =>
+      store.writeInitialInsights(fixture.workspace.id, fixture.snapshot.revisionId, insights),
+    ).toThrow(/file insight references unknown path/);
+  });
+
+  it('rejects duplicate file insight paths', () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
+    const store = createReviewStore(root);
+    const fixture = makeReviewFixture();
+    const pendingInsights = { ...fixture.insights, groups: [], items: [] };
+    store.createRevision(fixture.workspace, fixture.snapshot, pendingInsights, fixture.progress);
+
+    const f = { path: 'src/example.ts', description: 'x', confidence: 'low' as const };
+    const insights = { ...fixture.insights, files: [f, f] };
+
+    expect(() =>
+      store.writeInitialInsights(fixture.workspace.id, fixture.snapshot.revisionId, insights),
+    ).toThrow(/duplicate file insight path/);
+  });
+
   it('rejects insights that reference review items absent from the snapshot', () => {
     const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
     const store = createReviewStore(root);

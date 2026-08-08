@@ -1,6 +1,6 @@
 {
   "name": "synergy",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "description": "Plan and execute MDX specifications, or review Git changes and code in durable, repository-aware chunks with a live browser workflow.",
   "author": {
     "name": "Sanzhar Danybayev",

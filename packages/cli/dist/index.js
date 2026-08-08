@@ -959,7 +959,7 @@ async function requestPreviewShutdown(origin, instanceId, controlToken, timeoutM
 }
 
 // src/version.ts
-var SYNERGY_VERSION = "0.13.0";
+var SYNERGY_VERSION = "0.13.1";
 
 // src/preview.ts
 var START_TIMEOUT_MS = 1e4;
@@ -1717,6 +1717,10 @@ function initialProgress(snapshot, now) {
     items: Object.fromEntries(snapshot.items.map((item) => [item.id, { status: "needs-review" }]))
   };
 }
+function reconcileProgress(previous, snapshot, now) {
+  const { insights: _carriedInsights, ...progress } = reconcileReview(previous, snapshot, now);
+  return progress;
+}
 function buildSnapshot(captured, revisionId, now, predecessorRevisionId) {
   if (captured.source.kind === "scope") {
     if (!captured.files) throw new Error("scope capture did not include eligible source files");
@@ -1787,7 +1791,7 @@ function createOrResumeReview(request, dependencies = {}) {
     now
   );
   const insights = { schemaVersion: 1, revisionId, groups: [], items: [] };
-  const progress = existingWorkspace ? reconcileReview(
+  const progress = existingWorkspace ? reconcileProgress(
     store.readBundle(workspaceId, existingWorkspace.currentRevisionId),
     snapshot,
     now
@@ -1970,7 +1974,7 @@ async function applyReviewAnalysis(request, dependencies = {}) {
     };
     const derived = measureMonotonic(monotonicNow, () => {
       const progressTimestamp = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
-      const progress = bundle.snapshot.predecessorRevisionId ? reconcileReview(
+      const progress = bundle.snapshot.predecessorRevisionId ? reconcileProgress(
         store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
         translated.snapshot,
         progressTimestamp

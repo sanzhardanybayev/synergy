@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import {
   type ProposedCodeSection,
+  type ReviewBundle,
   type ReviewGroup,
   type ReviewInsights,
   type ReviewItemInsight,
@@ -172,6 +173,21 @@ function initialProgress(snapshot: ReviewSnapshot, now: string): ReviewProgress 
   };
 }
 
+/**
+ * Reconciles progress for a new snapshot against its predecessor, discarding the carried file
+ * insights that ride alongside the progress result. Wiring carried file descriptions into the
+ * persisted `ReviewInsights` is not yet implemented here; the store's `ReviewProgress` schema
+ * rejects unknown properties, so the extra `insights` field cannot be forwarded as-is.
+ */
+function reconcileProgress(
+  previous: ReviewBundle,
+  snapshot: ReviewSnapshot,
+  now: string,
+): ReviewProgress {
+  const { insights: _carriedInsights, ...progress } = reconcileReview(previous, snapshot, now);
+  return progress;
+}
+
 function buildSnapshot(
   captured: CapturedReviewSource,
   revisionId: string,
@@ -266,7 +282,7 @@ export function createOrResumeReview(
   );
   const insights: ReviewInsights = { schemaVersion: 1, revisionId, groups: [], items: [] };
   const progress = existingWorkspace
-    ? reconcileReview(
+    ? reconcileProgress(
         store.readBundle(workspaceId, existingWorkspace.currentRevisionId),
         snapshot,
         now,
@@ -480,7 +496,7 @@ export async function applyReviewAnalysis(
     const derived = measureMonotonic(monotonicNow, () => {
       const progressTimestamp = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
       const progress = bundle.snapshot.predecessorRevisionId
-        ? reconcileReview(
+        ? reconcileProgress(
             store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
             translated.snapshot,
             progressTimestamp,

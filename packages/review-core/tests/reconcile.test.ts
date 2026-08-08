@@ -272,6 +272,62 @@ describe('review reconciliation', () => {
     });
   });
 
+  it('carries forward file insights when every item of the file is carried forward', () => {
+    const i1 = makeItem('i1', { path: 'src/a.ts' });
+    const i2 = makeItem('i2', {
+      path: 'src/a.ts',
+      contentHash: 'content-b',
+      locationHash: 'location-b',
+    });
+    const i3 = makeItem('i3', {
+      path: 'src/b.ts',
+      contentHash: 'content-c',
+      locationHash: 'location-c',
+    });
+    const previous = makePrevious([i1, i2], {
+      i1: { status: 'reviewed', reviewedAt: '2026-07-19T10:00:00.000Z' },
+      i2: { status: 'reviewed', reviewedAt: '2026-07-19T10:00:00.000Z' },
+    });
+    previous.insights = {
+      ...previous.insights,
+      files: [{ path: 'src/a.ts', description: 'Adds retry logic.', confidence: 'high' }],
+    };
+
+    const result = reconcileReview(previous, makeSnapshot('current-revision', [i1, i2, i3]), NOW);
+
+    expect(result.insights.files).toEqual([expect.objectContaining({ path: 'src/a.ts' })]);
+  });
+
+  it('drops file insight when any item in the file changed', () => {
+    const i1 = makeItem('i1', { path: 'src/a.ts' });
+    const i2 = makeItem('i2', {
+      path: 'src/a.ts',
+      contentHash: 'content-b',
+      locationHash: 'location-b',
+    });
+    const previous = makePrevious([i1, i2], {
+      i1: { status: 'reviewed', reviewedAt: '2026-07-19T10:00:00.000Z' },
+      i2: { status: 'reviewed', reviewedAt: '2026-07-19T10:00:00.000Z' },
+    });
+    previous.insights = {
+      ...previous.insights,
+      files: [{ path: 'src/a.ts', description: 'Adds retry logic.', confidence: 'high' }],
+    };
+    const i2Changed = makeItem('i2', {
+      path: 'src/a.ts',
+      contentHash: 'content-changed',
+      locationHash: 'location-b',
+    });
+
+    const result = reconcileReview(
+      previous,
+      makeSnapshot('current-revision', [i1, i2Changed]),
+      NOW,
+    );
+
+    expect(result.insights.files ?? []).toEqual([]);
+  });
+
   it('does not carry coverage when the final-newline marker moves between changed lines', () => {
     const newlineSnapshot = (revisionId: string, markerAfter: 'remove' | 'add') =>
       buildDiffSnapshot({

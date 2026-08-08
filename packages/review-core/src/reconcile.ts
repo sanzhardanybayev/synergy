@@ -1,10 +1,17 @@
 import type {
   ReviewBundle,
+  ReviewFileInsight,
+  ReviewInsights,
   ReviewItem,
   ReviewItemProgress,
   ReviewProgress,
   ReviewSnapshot,
 } from './types.js';
+
+export interface ReviewReconciliation extends ReviewProgress {
+  /** File-level insights carried into the next revision alongside the reconciled progress. */
+  insights: { files?: ReviewFileInsight[] };
+}
 
 function isCarryable(progress: ReviewItemProgress | undefined): boolean {
   return progress?.status === 'reviewed' || progress?.status === 'carried-forward';
@@ -32,13 +39,38 @@ export function reconciliationKey(item: ReviewItem): string {
 }
 
 /**
+ * Carries a previous file insight into the next revision only when every review item at that
+ * path in the new snapshot is a carried-forward match of a previous item - a partial match
+ * means the file changed underneath the insight, so it is dropped rather than left stale.
+ */
+function carryForwardFileInsights(
+  previousInsights: ReviewInsights,
+  nextSnapshot: ReviewSnapshot,
+  carriedItemIds: ReadonlySet<string>,
+): ReviewFileInsight[] | undefined {
+  const previousFiles = previousInsights.files;
+  if (!previousFiles || previousFiles.length === 0) return undefined;
+  const nextItemsByPath = new Map<string, ReviewItem[]>();
+  for (const item of nextSnapshot.items) {
+    const list = nextItemsByPath.get(item.path) ?? [];
+    list.push(item);
+    nextItemsByPath.set(item.path, list);
+  }
+  const carried = previousFiles.filter((file) => {
+    const items = nextItemsByPath.get(file.path);
+    return items?.every((item) => carriedItemIds.has(item.id)) ?? false;
+  });
+  return carried.length > 0 ? carried : undefined;
+}
+
+/**
  * Derives mutable progress for a new immutable snapshot without changing the prior revision.
  */
 export function reconcileReview(
   previous: ReviewBundle,
   currentSnapshot: ReviewSnapshot,
   now: string,
-): ReviewProgress {
+): ReviewReconciliation {
   const previousItemsById = new Map(previous.snapshot.items.map((item) => [item.id, item]));
   const exactStateIds = new Set<string>();
   const items: Record<string, ReviewItemProgress> = {};
@@ -96,5 +128,12 @@ export function reconcileReview(
       oldMatches.length > 0 ? { status: 'stale' } : { status: 'needs-review' };
   }
 
-  return { schemaVersion: 1, updatedAt: now, items };
+  const carriedItemIds = new Set(
+    Object.entries(items)
+      .filter(([, itemProgress]) => itemProgress.status === 'carried-forward')
+      .map(([id]) => id),
+  );
+  const files = carryForwardFileInsights(previous.insights, currentSnapshot, carriedItemIds);
+
+  return { schemaVersion: 1, updatedAt: now, items, insights: { files } };
 }

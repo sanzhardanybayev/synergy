@@ -32,7 +32,11 @@ export {
   type ReviewFreshnessWorkerInput,
   type ReviewSourceFreshnessAsyncOptions,
 } from './source-capture-async.js';
-export { reconciliationKey, reconcileReview } from './reconcile.js';
+export {
+  reconciliationKey,
+  reconcileReview,
+  type ReviewReconciliation,
+} from './reconcile.js';
 export { resolveReviewItemContext, resolveReviewLineSelection } from './review-lines.js';
 export { deriveReviewReadiness } from './readiness.js';
 export {
@@ -109,6 +113,7 @@ export type {
   ActiveReviewPointer,
   ReviewBundle,
   ReviewClaim,
+  ReviewFileInsight,
   ReviewGroup,
   ReviewInsightConfidence,
   ReviewInsights,

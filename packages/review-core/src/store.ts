@@ -186,6 +186,19 @@ function validateRevisionRelationships(
   if (insights.items.some((insight) => !itemIds.has(insight.reviewItemId))) {
     throw new Error('review insights reference unknown review item');
   }
+  if (insights.files !== undefined) {
+    const knownPaths = new Set(snapshot.files.map((file) => file.path));
+    const seen = new Set<string>();
+    for (const file of insights.files) {
+      if (!knownPaths.has(file.path)) {
+        throw new Error(`file insight references unknown path: ${file.path}`);
+      }
+      if (seen.has(file.path)) {
+        throw new Error(`duplicate file insight path: ${file.path}`);
+      }
+      seen.add(file.path);
+    }
+  }
 
   if (snapshot.kind === 'scope') {
     const filePaths = new Set(snapshot.files.map((file) => file.path));
