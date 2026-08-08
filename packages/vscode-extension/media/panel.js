@@ -326,7 +326,7 @@
    * `render()` rebuilds the entire tree on every message (`app.innerHTML = ''`), which destroys
    * and recreates every DOM node - including whichever `.hunk-note` textarea the user is
    * currently typing in. Two problems follow from that, and this function (paired with the
-   * scroll-position capture in `render()`) fixes both:
+   * scroll-position capture in `render()`, see `scrollContainer()`) fixes both:
    *
    * 1. A focused textarea that gets destroyed never fires `blur`, so its in-progress edit is
    *    lost - `saveNote` only posts on blur.
@@ -366,10 +366,27 @@
     restored.setSelectionRange(captured.selectionStart, captured.selectionEnd);
   }
 
+  /**
+   * The element that actually scrolls this pane.
+   *
+   * NOT `#app`: its CSS is `display:flex; flex-direction:column; min-height:100vh` with no
+   * `overflow`, so it grows past the viewport and the DOCUMENT scrolls around it. Reading or
+   * writing `app.scrollTop` is therefore a silent no-op (always 0). We deliberately keep the
+   * document as the scroll container rather than turning `#app` into a nested scroller: the
+   * webview iframe then keeps VS Code's native scrollbar look and its scroll-into-view
+   * behaviour, and no layout rule has to be rewritten.
+   *
+   * @returns {Element | null}
+   */
+  function scrollContainer() {
+    return document.scrollingElement || document.documentElement;
+  }
+
   function render() {
     if (!app) return;
     const focusedNote = captureFocusedNote();
-    const scrollTop = app.scrollTop;
+    const scroller = scrollContainer();
+    const scrollTop = scroller ? scroller.scrollTop : 0;
     app.innerHTML = '';
     app.appendChild(renderToolbar());
     if (state.error) {
@@ -380,11 +397,14 @@
     } else if (state.bundle) {
       app.appendChild(renderBundle());
     }
+    // Restore focus BEFORE scroll: `focus()` scrolls its element into view, which would clobber
+    // a scroll position restored first. Doing it in this order lets the explicit scroll restore
+    // win.
+    restoreFocusedNote(focusedNote);
     // Scroll position, like focus, is reset by rebuilding the DOM from scratch - restore it so a
     // background refresh (fs watcher, daemon SSE event, or the check-all/setStatus round trip)
     // doesn't visually jump the reviewer back to the top of a long file list.
-    app.scrollTop = scrollTop;
-    restoreFocusedNote(focusedNote);
+    if (scroller) scroller.scrollTop = scrollTop;
   }
 
   window.addEventListener('message', (event) => {
