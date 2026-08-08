@@ -185,6 +185,10 @@ Descriptions must be one or two sentences explaining the section's application r
 repository context gathered above. Do not merely paraphrase the selected syntax. Diff reviews
 keep the existing `groups` plus `items` payload and use the captured diff item IDs as-is.
 
+For every file that appears in the review, also emit a `files[]` entry:
+`{ "path": "<file path>", "description": "<one broad sentence or two on what changed in this file and why>", "confidence": "high" | "medium" | "low" }`.
+The file description summarizes the whole file's change story; per-item descriptions stay focused on their single hunk or section. Same 600-character limit and conciseness rules.
+
 Generate one temporary payload that structurally conforms to
 `<synergy-root>/packages/cli/src/review-analysis.schema.json`. Do not generate an executable
 helper and do not place the payload in the review artifact tree. Submit it only through:
