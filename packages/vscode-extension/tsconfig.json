@@ -5,5 +5,8 @@
     "rootDir": "src",
     "types": ["node", "vscode"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  // The extension-host integration suite is compiled and typechecked separately
+  // (tsconfig.test.json / esbuild.test.mjs) and must never end up in the shipped bundle.
+  "exclude": ["src/test"]
 }

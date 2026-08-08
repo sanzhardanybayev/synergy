@@ -5,37 +5,66 @@
   "version": "0.15.0",
   "publisher": "synergy",
   "private": true,
-  "engines": { "vscode": "^1.90.0" },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
   "main": "./dist/extension.js",
   "activationEvents": ["onView:synergyReview.panel"],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
-        { "id": "synergyReview", "title": "Synergy Review", "icon": "media/icon.svg" }
+        {
+          "id": "synergyReview",
+          "title": "Synergy Review",
+          "icon": "media/icon.svg"
+        }
       ]
     },
     "views": {
-      "synergyReview": [{ "type": "webview", "id": "synergyReview.panel", "name": "Review" }]
+      "synergyReview": [
+        {
+          "type": "webview",
+          "id": "synergyReview.panel",
+          "name": "Review"
+        }
+      ]
     },
     "commands": [
-      { "command": "synergy-review.refresh", "title": "Synergy: Refresh Reviews" },
-      { "command": "synergy-review.openNativeDiff", "title": "Synergy: Open Native Diff" },
-      { "command": "synergy-review.showSnapshot", "title": "Synergy: Show Captured Snapshot" }
+      {
+        "command": "synergy-review.refresh",
+        "title": "Synergy: Refresh Reviews"
+      },
+      {
+        "command": "synergy-review.openNativeDiff",
+        "title": "Synergy: Open Native Diff"
+      },
+      {
+        "command": "synergy-review.showSnapshot",
+        "title": "Synergy: Show Captured Snapshot"
+      }
     ]
   },
   "scripts": {
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.media.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.media.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
+    "build:test": "node esbuild.integration.mjs",
+    "test:integration": "pnpm build && pnpm build:test && tsx src/test/runTests.mts",
     "package": "pnpm build && vsce package --no-dependencies"
   },
-  "dependencies": { "@synergy/review-core": "workspace:*" },
+  "dependencies": {
+    "@synergy/review-core": "workspace:*"
+  },
   "devDependencies": {
+    "@types/mocha": "10.0.10",
     "@types/node": "22.10.1",
     "@types/vscode": "1.90.0",
+    "@vscode/test-electron": "2.4.1",
     "@vscode/vsce": "3.1.0",
     "esbuild": "0.24.0",
+    "mocha": "10.8.2",
+    "tsx": "4.19.2",
     "typescript": "5.6.3",
     "vitest": "2.1.5"
   }

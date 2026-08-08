@@ -46,6 +46,9 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
   /** Last session list posted to the webview; `openSession` looks up here instead of re-listing
    * every bundle on disk (the refresh path already re-lists via `postSessions`). */
   private lastSessions: SessionSummary[] | undefined;
+  /** Observers of {@link onDidPostMessage}. A plain `Set` rather than a `vscode.EventEmitter` so
+   * this file keeps its type-only `vscode` import (see the boundary note in src/host.ts). */
+  private readonly postListeners = new Set<(message: ToWebview) => void>();
 
   constructor(
     private readonly host: Host,
@@ -75,6 +78,22 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
     this.refreshActiveScreen();
   }
 
+  /**
+   * Fires for every message posted to the webview, including ones posted before any webview has
+   * been resolved. Exists as an observation seam: the extension-host integration suite (which
+   * cannot read the webview's DOM) asserts on this stream to prove the real activity-bar view
+   * completed its `ready` -> `sessions` round trip, and that a given action produced exactly one
+   * `bundle` refresh. Production code does not subscribe.
+   */
+  onDidPostMessage(listener: (message: ToWebview) => void): { dispose(): void } {
+    this.postListeners.add(listener);
+    return {
+      dispose: (): void => {
+        this.postListeners.delete(listener);
+      },
+    };
+  }
+
   dispose(): void {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.disposeDaemonLink();
@@ -83,6 +102,7 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
     for (const disposable of [...this.watchers, ...this.disposables]) disposable.dispose();
     this.watchers = [];
     this.disposables.length = 0;
+    this.postListeners.clear();
   }
 
   private disposeDaemonLink(): void {
@@ -313,5 +333,6 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
 
   private post(message: ToWebview): void {
     void this.view?.webview.postMessage(message);
+    for (const listener of this.postListeners) listener(message);
   }
 }

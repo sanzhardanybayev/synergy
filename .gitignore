@@ -30,3 +30,7 @@ dist/
 
 # Visual brainstorming companion
 .superpowers/
+
+# VS Code extension integration-test artifacts
+/packages/vscode-extension/.vscode-test/
+/packages/vscode-extension/out-test/

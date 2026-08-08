@@ -5,3 +5,8 @@ esbuild.mjs
 tsconfig.json
 tsconfig.media.json
 media/global.d.ts
+out-test/**
+.vscode-test/**
+tsconfig.test.json
+esbuild.integration.mjs
+vitest.config.ts
