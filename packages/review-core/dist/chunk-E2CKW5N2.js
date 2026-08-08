@@ -167,6 +167,8 @@ function parseUnifiedDiff(patch) {
   let currentHunk = null;
   let oldLine = 0;
   let newLine = 0;
+  let remainingOld = 0;
+  let remainingNew = 0;
   for (const line of patch.replace(/\r\n/g, "\n").split("\n")) {
     if (line.startsWith("diff --git ")) {
       const { oldPath, newPath } = parseGitHeaderPaths(line);
@@ -245,6 +247,8 @@ function parseUnifiedDiff(patch) {
       currentHunk = hunk;
       oldLine = hunk.oldStart;
       newLine = hunk.newStart;
+      remainingOld = hunk.oldLines;
+      remainingNew = hunk.newLines;
       continue;
     }
     if (!currentHunk) continue;
@@ -253,12 +257,21 @@ function parseUnifiedDiff(patch) {
       if (previousLine) previousLine.noNewlineAtEnd = true;
       continue;
     }
+    if (remainingOld <= 0 && remainingNew <= 0) continue;
     const next = appendHunkLine(currentHunk, line, oldLine, newLine);
     if (!next) continue;
     oldLine = next.oldLine;
     newLine = next.newLine;
-    if (next.addition) currentFile.additions += 1;
-    if (next.deletion) currentFile.deletions += 1;
+    if (next.addition) {
+      currentFile.additions += 1;
+      remainingNew -= 1;
+    } else if (next.deletion) {
+      currentFile.deletions += 1;
+      remainingOld -= 1;
+    } else {
+      remainingOld -= 1;
+      remainingNew -= 1;
+    }
   }
   for (const file of files) {
     if (file.binary) file.binaryPatchHash = hashText(patchLinesByFile.get(file).join("\n"));
@@ -808,4 +821,4 @@ export {
   resolveRepositoryRoot,
   repositoryName
 };
-//# sourceMappingURL=chunk-QCNH5XEH.js.map
+//# sourceMappingURL=chunk-E2CKW5N2.js.map

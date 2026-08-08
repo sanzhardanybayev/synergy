@@ -199,6 +199,11 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
   let currentHunk: DiffHunk | null = null;
   let oldLine = 0;
   let newLine = 0;
+  // Unified hunks declare their exact row budget in the header. Consuming rows
+  // beyond it would capture surrounding non-diff text (e.g. format-patch commit
+  // prose and "-- " signatures between commits) as diff lines.
+  let remainingOld = 0;
+  let remainingNew = 0;
 
   for (const line of patch.replace(/\r\n/g, '\n').split('\n')) {
     if (line.startsWith('diff --git ')) {
@@ -281,6 +286,8 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
       currentHunk = hunk;
       oldLine = hunk.oldStart;
       newLine = hunk.newStart;
+      remainingOld = hunk.oldLines;
+      remainingNew = hunk.newLines;
       continue;
     }
     if (!currentHunk) continue;
@@ -291,12 +298,22 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
       continue;
     }
 
+    if (remainingOld <= 0 && remainingNew <= 0) continue;
+
     const next = appendHunkLine(currentHunk, line, oldLine, newLine);
     if (!next) continue;
     oldLine = next.oldLine;
     newLine = next.newLine;
-    if (next.addition) currentFile.additions += 1;
-    if (next.deletion) currentFile.deletions += 1;
+    if (next.addition) {
+      currentFile.additions += 1;
+      remainingNew -= 1;
+    } else if (next.deletion) {
+      currentFile.deletions += 1;
+      remainingOld -= 1;
+    } else {
+      remainingOld -= 1;
+      remainingNew -= 1;
+    }
   }
 
   for (const file of files) {
