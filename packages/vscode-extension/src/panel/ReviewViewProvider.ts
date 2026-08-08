@@ -97,6 +97,11 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
     try {
       switch (message.kind) {
         case 'ready':
+          // The webview re-sends 'ready' on every re-init (e.g. tab hidden/shown without
+          // retainContextWhenHidden), not just first load. Dispose any daemon link left over
+          // from a prior bundle screen the same way 'backToSessions' does, or its SSE socket
+          // leaks until the next openSession.
+          this.disposeDaemonLink();
           this.screen = { kind: 'sessions' };
           this.postSessions();
           break;
