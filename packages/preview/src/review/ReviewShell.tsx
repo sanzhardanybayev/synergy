@@ -85,7 +85,12 @@ export function ReviewShell() {
         event.preventDefault();
         const offset = key === 'j' ? 1 : -1;
         const nextIndex = Math.min(Math.max(currentIndex + offset, 0), items.length - 1);
-        review.setActiveItem(items[nextIndex]!.id);
+        const nextId = items[nextIndex]!.id;
+        if (review.walkthrough.enabled) {
+          review.walkthrough.advanceTo(nextId);
+        } else {
+          review.setActiveItem(nextId);
+        }
       }
       if (key === 'r') {
         event.preventDefault();

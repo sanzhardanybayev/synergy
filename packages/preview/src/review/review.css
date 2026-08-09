@@ -13,8 +13,8 @@
 .review-header {
   min-height: 88px;
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto auto;
-  grid-template-areas: "identity facts reveal theme";
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  grid-template-areas: "identity facts theme";
   align-items: center;
   gap: var(--syn-sp-6);
   padding: var(--syn-sp-4) var(--syn-sp-6);
@@ -90,6 +90,11 @@
   grid-area: theme;
   padding-left: var(--syn-sp-4);
   border-left: 1px solid var(--syn-border);
+}
+
+.review-header--walkthrough {
+  grid-template-columns: minmax(220px, 1fr) auto auto auto;
+  grid-template-areas: "identity facts reveal theme";
 }
 
 .review-header__reveal {
@@ -570,7 +575,7 @@
 }
 
 .review-continue .review-button:focus-visible {
-  outline: 2px solid var(--syn-accent-contrast);
+  outline: 2px solid var(--syn-accent);
   outline-offset: 2px;
 }
 
@@ -1223,6 +1228,10 @@ div.review-index__card {
 
 @media (max-width: 1180px) {
   .review-header {
+    grid-template-columns: minmax(190px, 1fr) minmax(260px, auto) auto;
+  }
+
+  .review-header--walkthrough {
     grid-template-columns: minmax(190px, 1fr) minmax(260px, auto) auto auto;
   }
 
@@ -1242,12 +1251,19 @@ div.review-index__card {
 @media (max-width: 900px) {
   .review-header {
     position: sticky;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "identity theme"
+      "facts facts";
+    gap: var(--syn-sp-3);
+    padding: var(--syn-sp-3) var(--syn-sp-4);
+  }
+
+  .review-header--walkthrough {
     grid-template-columns: minmax(0, 1fr) auto auto;
     grid-template-areas:
       "identity reveal theme"
       "facts facts facts";
-    gap: var(--syn-sp-3);
-    padding: var(--syn-sp-3) var(--syn-sp-4);
   }
 
   .review-header__facts {

@@ -99,4 +99,17 @@ describe('walkthrough UI', () => {
     expect(document.querySelector('.review-chapter--locked')).toBeNull();
     expect(await screen.findByText('features/track-meal/EditBottomSheet.tsx')).toBeVisible();
   });
+
+  it('pressing J into a locked chapter unlocks it instead of leaving it self-contradictory', async () => {
+    const user = userEvent.setup();
+    renderReviewWithBundle(bundleWithNarrative());
+    await screen.findByText('The story of this change');
+    expect(document.querySelectorAll('.review-chapter--locked')).toHaveLength(1);
+    await user.keyboard('j');
+    expect(await screen.findByText('features/track-meal/EditBottomSheet.tsx')).toBeVisible();
+    expect(document.querySelector('.review-chapter--locked')).toBeNull();
+    const currentBadge = document.querySelector('.review-chapter-num.is-current');
+    expect(currentBadge).not.toBeNull();
+    expect(currentBadge).not.toHaveClass('is-locked');
+  });
 });

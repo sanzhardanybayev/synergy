@@ -25,7 +25,7 @@ export function ReviewHeader({ bundle, readiness, captureFailed, walkthrough }: 
   const total = bundle.snapshot.items.length;
   const source = sourceLabel(bundle);
   return (
-    <header className="review-header">
+    <header className={`review-header${walkthrough?.enabled ? ' review-header--walkthrough' : ''}`}>
       <div className="review-header__identity">
         <p className="review-eyebrow">{bundle.workspace.repository.name}</p>
         <h1>{source} review</h1>
