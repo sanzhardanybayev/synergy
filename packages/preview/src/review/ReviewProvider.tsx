@@ -1,10 +1,19 @@
 import type { ReviewRef } from '@synergy/review-core';
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useReducer } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+} from 'react';
 import {
   getReviewBundle,
   openReviewStream,
   patchReviewProgress,
+  patchReviewWalkthrough,
   postActiveReview,
   postReviewQuestion,
 } from '../api.js';
@@ -12,6 +21,12 @@ import { EMPTY_REVIEW_STATE, reviewReducer } from './review-state.js';
 import type { ReviewClient, ReviewContextValue } from './types.js';
 import { useReviewOperations } from './useReviewOperations.js';
 import { useReviewStream } from './useReviewStream.js';
+import {
+  buildChapters,
+  chapterOf,
+  revealedChapterCount,
+  walkthroughEnabled,
+} from './walkthrough.js';
 
 export type { ReviewClient, ReviewContextValue } from './types.js';
 export type { ReviewStreamHandlers } from '../api.js';
@@ -27,6 +42,7 @@ const DEFAULT_CLIENT: ReviewClient = {
   patchProgress: patchReviewProgress,
   postQuestion: postReviewQuestion,
   postActive: postActiveReview,
+  patchWalkthrough: patchReviewWalkthrough,
   openStream: openReviewStream,
 };
 
@@ -63,6 +79,49 @@ export function ReviewProvider({
     dispatch,
   });
 
+  // Highest chapter index (1-based count) the user has locally visited this session. Only
+  // grows; reset alongside the rest of session-local walkthrough state when the bundle
+  // identity (workspace/revision) changes.
+  const localFloorRef = useRef(0);
+  const localFloorReferenceKeyRef = useRef(currentReferenceKey);
+  useEffect(() => {
+    if (localFloorReferenceKeyRef.current !== currentReferenceKey) {
+      localFloorReferenceKeyRef.current = currentReferenceKey;
+      localFloorRef.current = 0;
+    }
+  }, [currentReferenceKey]);
+
+  const insights = state.bundle?.insights;
+  const items = state.bundle?.snapshot.items;
+  const chapters = useMemo(
+    () => (insights && items ? buildChapters(insights, items) : []),
+    [insights, items],
+  );
+  const walkthroughEnabledForBundle = insights ? walkthroughEnabled(insights) : false;
+  const activeReviewItemId = state.bundle?.progress.activeReviewItemId;
+  const revealedCount = state.walkthroughRevealAll
+    ? chapters.length
+    : Math.max(revealedChapterCount(chapters, activeReviewItemId), localFloorRef.current);
+
+  const advanceTo = useCallback(
+    (reviewItemId: string): void => {
+      operations.setActiveItem(reviewItemId);
+      const chapter = chapterOf(chapters, reviewItemId);
+      if (!chapter) return;
+      if (chapter.index + 1 > localFloorRef.current) localFloorRef.current = chapter.index + 1;
+      const item = chapter.items.find((candidate) => candidate.id === reviewItemId);
+      operations.advanceWalkthrough({
+        activeGroupId: chapter.group.id,
+        activeReviewItemId: reviewItemId,
+        ...(item ? { activeFile: item.path } : {}),
+      });
+    },
+    [chapters, operations],
+  );
+  const setRevealAll = useCallback((): void => {
+    dispatch({ type: 'walkthrough-reveal-all' });
+  }, []);
+
   const selectedLineIds = state.activeItemId ? (state.selections[state.activeItemId] ?? []) : [];
   const questionDraft = state.activeItemId ? (state.questionDrafts[state.activeItemId] ?? '') : '';
   const value = useMemo<ReviewContextValue>(
@@ -83,9 +142,27 @@ export function ReviewProvider({
       interruptionCode: state.interruptionCode,
       sourceChanged: state.bundle?.sourceChanged ?? false,
       captureFailed: state.captureFailed,
+      walkthrough: {
+        enabled: walkthroughEnabledForBundle,
+        chapters,
+        revealedCount,
+        revealAll: state.walkthroughRevealAll,
+        advanceTo,
+        setRevealAll,
+      },
       ...operations,
     }),
-    [operations, questionDraft, selectedLineIds, state],
+    [
+      advanceTo,
+      chapters,
+      operations,
+      questionDraft,
+      revealedCount,
+      selectedLineIds,
+      setRevealAll,
+      state,
+      walkthroughEnabledForBundle,
+    ],
   );
   return <ReviewContext.Provider value={value}>{children}</ReviewContext.Provider>;
 }

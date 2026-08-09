@@ -283,6 +283,11 @@ export function makeReviewClient(
         },
       ),
     postActive: vi.fn().mockResolvedValue(undefined),
+    patchWalkthrough: vi.fn().mockResolvedValue({
+      bundle: initialBundle,
+      readiness: readiness(initialBundle),
+      analysisFinalized: true,
+    }),
     openStream: vi.fn().mockReturnValue({ close: vi.fn() }),
     ...overrides,
   };

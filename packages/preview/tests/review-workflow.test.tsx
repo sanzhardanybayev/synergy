@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getReviewBundle,
   patchReviewProgress,
+  patchReviewWalkthrough,
   postActiveReview,
   postReviewQuestion,
 } from '../src/api.js';
@@ -167,6 +168,7 @@ function createHandlerClient(): ReviewClient {
     patchProgress: patchReviewProgress,
     postQuestion: postReviewQuestion,
     postActive: postActiveReview,
+    patchWalkthrough: patchReviewWalkthrough,
     openStream: (_reference, handlers) => {
       handlers.onOpen?.();
       return { close: () => undefined };

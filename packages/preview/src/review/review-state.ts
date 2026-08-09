@@ -24,6 +24,7 @@ export interface ReviewState {
   captureFailed: boolean;
   presenceOrder: number;
   sourceOrder: number;
+  walkthroughRevealAll: boolean;
 }
 
 export type ReviewAction =
@@ -47,7 +48,8 @@ export type ReviewAction =
   | { type: 'set-sending'; sending: boolean }
   | { type: 'stream-status'; status: ReviewStreamStatus }
   | { type: 'stream-open' }
-  | { type: 'stream-frame'; frame: ReviewStreamFrame; order: number };
+  | { type: 'stream-frame'; frame: ReviewStreamFrame; order: number }
+  | { type: 'walkthrough-reveal-all' };
 
 export const EMPTY_REVIEW_STATE: ReviewState = {
   status: 'loading',
@@ -67,6 +69,7 @@ export const EMPTY_REVIEW_STATE: ReviewState = {
   captureFailed: false,
   presenceOrder: 0,
   sourceOrder: 0,
+  walkthroughRevealAll: false,
 };
 
 function deriveReadiness(bundle: ReviewBundle, analysisFinalized: boolean): ReviewReadiness {
@@ -169,6 +172,8 @@ export function reviewReducer(state: ReviewState, action: ReviewAction): ReviewS
       return { ...state, error: action.error };
     case 'set-active':
       return { ...state, activeItemId: action.reviewItemId, selections: {} };
+    case 'walkthrough-reveal-all':
+      return { ...state, walkthroughRevealAll: true };
     case 'toggle-line': {
       const selected = state.selections[action.reviewItemId] ?? [];
       return {

@@ -117,6 +117,7 @@ function createClient(overrides: Partial<ReviewClient> = {}): ReviewClient {
     patchProgress: vi.fn().mockResolvedValue(response()),
     postQuestion: vi.fn().mockResolvedValue({ question: question(), ...response() }),
     postActive: vi.fn().mockResolvedValue(undefined),
+    patchWalkthrough: vi.fn().mockResolvedValue(response()),
     openStream: vi.fn().mockReturnValue({ close: vi.fn() }),
     ...overrides,
   };
