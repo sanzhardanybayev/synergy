@@ -1814,6 +1814,282 @@ function deriveReviewAnalysisGuidance(snapshot) {
   };
 }
 
+// src/review-analysis.ts
+var IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
+var GROUP_ID = /^[a-z0-9][a-z0-9_-]*$/u;
+var MAX_DESCRIPTION_LENGTH = 600;
+var FILE_INSIGHT_KEYS = ["path", "description", "confidence"];
+var MAX_SUMMARY_LENGTH = 600;
+var MAX_INTRO_LENGTH = 300;
+function propertyPath(path, key) {
+  return IDENTIFIER.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
+}
+function fail(path, expectation) {
+  throw new Error(`${path} ${expectation}`);
+}
+function assertRecord(value, path) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    fail(path, "must be an object");
+  }
+}
+function assertOnlyKeys(value, keys, path) {
+  const allowed = new Set(keys);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) fail(propertyPath(path, key), "is not allowed");
+  }
+}
+function assertArray(value, path) {
+  if (!Array.isArray(value)) fail(path, "must be an array");
+}
+function assertNonEmptyArray(value, path) {
+  assertArray(value, path);
+  if (value.length === 0) fail(path, "must not be empty");
+}
+function assertString(value, path) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    fail(path, "must be a non-empty string");
+  }
+}
+function assertGroupId(value, path) {
+  assertString(value, path);
+  if (!GROUP_ID.test(value)) {
+    fail(path, "must match ^[a-z0-9][a-z0-9_-]*$");
+  }
+}
+function assertDescription(value, path) {
+  assertString(value, path);
+  if (Array.from(value).length > MAX_DESCRIPTION_LENGTH) {
+    fail(path, `must contain at most ${MAX_DESCRIPTION_LENGTH} characters`);
+  }
+}
+function assertBoundedText(value, path, max) {
+  assertString(value, path);
+  if (Array.from(value).length > max) {
+    fail(path, `must contain at most ${max} characters`);
+  }
+}
+function assertInteger(value, path) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    fail(path, "must be a positive integer");
+  }
+}
+function parseConfidence(value, path) {
+  if (value === "high" || value === "medium" || value === "low") return value;
+  return fail(path, 'must be one of "high", "medium", or "low"');
+}
+function parseStringArray(value, path) {
+  assertNonEmptyArray(value, path);
+  const result = value.map((entry, index) => {
+    assertString(entry, `${path}[${index}]`);
+    return entry;
+  });
+  assertUniqueValues(result, path);
+  return result;
+}
+function assertUniqueValues(values, path) {
+  const indexes = /* @__PURE__ */ new Map();
+  for (const [index, value] of values.entries()) {
+    const firstIndex = indexes.get(value);
+    if (firstIndex !== void 0) {
+      fail(`${path}[${index}]`, `duplicates ${path}[${firstIndex}]`);
+    }
+    indexes.set(value, index);
+  }
+}
+function assertUniqueProperty(values, path, property, select) {
+  const indexes = /* @__PURE__ */ new Map();
+  for (const [index, value] of values.entries()) {
+    const selected = select(value);
+    const firstIndex = indexes.get(selected);
+    if (firstIndex !== void 0) {
+      fail(
+        propertyPath(`${path}[${index}]`, property),
+        `duplicates ${propertyPath(`${path}[${firstIndex}]`, property)}`
+      );
+    }
+    indexes.set(selected, index);
+  }
+}
+function parseDiffGroup(value, index) {
+  const path = `$.groups[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(value, ["id", "label", "reviewItemIds", "intro"], path);
+  assertGroupId(value.id, `${path}.id`);
+  assertString(value.label, `${path}.label`);
+  if (value.intro !== void 0) assertBoundedText(value.intro, `${path}.intro`, MAX_INTRO_LENGTH);
+  return {
+    id: value.id,
+    label: value.label,
+    reviewItemIds: parseStringArray(value.reviewItemIds, `${path}.reviewItemIds`),
+    ...value.intro === void 0 ? {} : { intro: value.intro }
+  };
+}
+function parseDiffItem(value, index) {
+  const path = `$.items[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(value, ["reviewItemId", "description", "confidence", "evidencePaths"], path);
+  assertString(value.reviewItemId, `${path}.reviewItemId`);
+  assertDescription(value.description, `${path}.description`);
+  return {
+    reviewItemId: value.reviewItemId,
+    description: value.description,
+    confidence: parseConfidence(value.confidence, `${path}.confidence`),
+    evidencePaths: parseStringArray(value.evidencePaths, `${path}.evidencePaths`)
+  };
+}
+function parseScopeGroup(value, index) {
+  const path = `$.groups[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(value, ["id", "label", "sectionKeys", "intro"], path);
+  assertGroupId(value.id, `${path}.id`);
+  assertString(value.label, `${path}.label`);
+  if (value.intro !== void 0) assertBoundedText(value.intro, `${path}.intro`, MAX_INTRO_LENGTH);
+  return {
+    id: value.id,
+    label: value.label,
+    sectionKeys: parseStringArray(value.sectionKeys, `${path}.sectionKeys`),
+    ...value.intro === void 0 ? {} : { intro: value.intro }
+  };
+}
+function parseScopeSection(value, index) {
+  const path = `$.sections[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(
+    value,
+    [
+      "key",
+      "path",
+      "label",
+      "parentLabel",
+      "start",
+      "end",
+      "description",
+      "confidence",
+      "evidencePaths"
+    ],
+    path
+  );
+  assertString(value.key, `${path}.key`);
+  assertString(value.path, `${path}.path`);
+  assertString(value.label, `${path}.label`);
+  if (value.parentLabel !== void 0) {
+    assertString(value.parentLabel, `${path}.parentLabel`);
+  }
+  assertInteger(value.start, `${path}.start`);
+  assertInteger(value.end, `${path}.end`);
+  assertDescription(value.description, `${path}.description`);
+  return {
+    key: value.key,
+    path: value.path,
+    label: value.label,
+    ...value.parentLabel === void 0 ? {} : { parentLabel: value.parentLabel },
+    start: value.start,
+    end: value.end,
+    description: value.description,
+    confidence: parseConfidence(value.confidence, `${path}.confidence`),
+    evidencePaths: parseStringArray(value.evidencePaths, `${path}.evidencePaths`)
+  };
+}
+function parseFile(value, index) {
+  const path = `$.files[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(value, FILE_INSIGHT_KEYS, path);
+  assertString(value.path, `${path}.path`);
+  assertDescription(value.description, `${path}.description`);
+  return {
+    path: value.path,
+    description: value.description,
+    confidence: parseConfidence(value.confidence, `${path}.confidence`)
+  };
+}
+function parseFiles(value) {
+  assertNonEmptyArray(value, "$.files");
+  const files = value.map(parseFile);
+  assertUniqueProperty(files, "$.files", "path", (file) => file.path);
+  return files;
+}
+function parseGroups(value, parseGroup) {
+  assertNonEmptyArray(value, "$.groups");
+  const groups = value.map(parseGroup);
+  assertUniqueProperty(groups, "$.groups", "id", (group) => group.id);
+  return groups;
+}
+function assertEveryReferenceIsOwned(definitions, definitionPath, references, referencePath) {
+  const definitionIndexes = new Map(definitions.map((key, index) => [key, index]));
+  const owners = /* @__PURE__ */ new Map();
+  for (const [groupIndex, groupReferences] of references.entries()) {
+    for (const [referenceIndex, reference] of groupReferences.entries()) {
+      const path = referencePath(groupIndex, referenceIndex);
+      if (!definitionIndexes.has(reference)) fail(path, "references an unknown item");
+      const firstPath = owners.get(reference);
+      if (firstPath !== void 0) fail(path, `duplicates ${firstPath}`);
+      owners.set(reference, path);
+    }
+  }
+  for (const [index, key] of definitions.entries()) {
+    if (!owners.has(key)) fail(definitionPath(index), "is not referenced by any group");
+  }
+}
+function parseDiffAnalysis(value) {
+  assertOnlyKeys(value, ["groups", "items", "files", "summary"], "$");
+  const groups = parseGroups(value.groups, parseDiffGroup);
+  assertNonEmptyArray(value.items, "$.items");
+  const items = value.items.map(parseDiffItem);
+  assertUniqueProperty(items, "$.items", "reviewItemId", (item) => item.reviewItemId);
+  assertEveryReferenceIsOwned(
+    items.map((item) => item.reviewItemId),
+    (index) => `$.items[${index}].reviewItemId`,
+    groups.map((group) => group.reviewItemIds),
+    (groupIndex, referenceIndex) => `$.groups[${groupIndex}].reviewItemIds[${referenceIndex}]`
+  );
+  const files = value.files === void 0 ? void 0 : parseFiles(value.files);
+  if (value.summary !== void 0)
+    assertBoundedText(value.summary, "$.summary", MAX_SUMMARY_LENGTH);
+  return {
+    kind: "diff",
+    groups,
+    items,
+    ...files ? { files } : {},
+    ...value.summary === void 0 ? {} : { summary: value.summary }
+  };
+}
+function parseScopeAnalysis(value) {
+  assertOnlyKeys(value, ["groups", "sections", "files", "summary"], "$");
+  const groups = parseGroups(value.groups, parseScopeGroup);
+  assertNonEmptyArray(value.sections, "$.sections");
+  const sections = value.sections.map(parseScopeSection);
+  assertUniqueProperty(sections, "$.sections", "key", (section) => section.key);
+  assertEveryReferenceIsOwned(
+    sections.map((section) => section.key),
+    (index) => `$.sections[${index}].key`,
+    groups.map((group) => group.sectionKeys),
+    (groupIndex, referenceIndex) => `$.groups[${groupIndex}].sectionKeys[${referenceIndex}]`
+  );
+  const files = value.files === void 0 ? void 0 : parseFiles(value.files);
+  if (value.summary !== void 0)
+    assertBoundedText(value.summary, "$.summary", MAX_SUMMARY_LENGTH);
+  return {
+    kind: "scope",
+    groups,
+    sections,
+    ...files ? { files } : {},
+    ...value.summary === void 0 ? {} : { summary: value.summary }
+  };
+}
+function parseReviewAnalysisInput(value) {
+  assertRecord(value, "$");
+  assertOnlyKeys(value, ["groups", "items", "sections", "files", "summary"], "$");
+  const hasItems = Object.hasOwn(value, "items");
+  const hasSections = Object.hasOwn(value, "sections");
+  if (hasItems && hasSections) {
+    fail("$.items", "is not allowed when $.sections is present");
+  }
+  if (!hasItems && !hasSections) {
+    fail("$", "must contain exactly one of $.items or $.sections");
+  }
+  return hasItems ? parseDiffAnalysis(value) : parseScopeAnalysis(value);
+}
+
 // src/review-capture.ts
 import {
   capturePr,
@@ -1921,8 +2197,8 @@ var PreviewNotReadyError = class extends Error {
   code = "preview_not_ready";
   suggestedCommand;
 };
-var GROUP_ID = /^[a-z0-9][a-z0-9_-]*$/u;
-var MAX_DESCRIPTION_LENGTH = 600;
+var GROUP_ID2 = /^[a-z0-9][a-z0-9_-]*$/u;
+var MAX_DESCRIPTION_LENGTH2 = 600;
 function reviewUrl(reference) {
   return `/r/${encodeURIComponent(reference.workspaceId)}/${encodeURIComponent(reference.revisionId)}`;
 }
@@ -2083,12 +2359,25 @@ function assertSafeEvidencePath(path) {
     throw new Error(`invalid evidence path: ${path}`);
   }
 }
+function assertNarrativeText(value, max, label) {
+  if (value.trim().length === 0 || Array.from(value).length > max) {
+    throw new Error(`${label} must be 1-${max} characters`);
+  }
+}
 function assertValidAnalysis(snapshot, analysis) {
+  if (analysis.summary !== void 0) {
+    assertNarrativeText(analysis.summary, MAX_SUMMARY_LENGTH, "review summary");
+  }
+  for (const group of analysis.groups) {
+    if (group.intro !== void 0) {
+      assertNarrativeText(group.intro, MAX_INTRO_LENGTH, `group intro: ${group.id}`);
+    }
+  }
   const itemIds = new Set(snapshot.items.map((item) => item.id));
   const groupIds = /* @__PURE__ */ new Set();
   const groupedItemIds = /* @__PURE__ */ new Set();
   for (const group of analysis.groups) {
-    if (!GROUP_ID.test(group.id)) throw new Error(`invalid review group id: ${group.id}`);
+    if (!GROUP_ID2.test(group.id)) throw new Error(`invalid review group id: ${group.id}`);
     if (groupIds.has(group.id)) throw new Error(`duplicate review group id: ${group.id}`);
     if (group.label.trim().length === 0) throw new Error("review group label cannot be empty");
     if (group.reviewItemIds.length === 0)
@@ -2114,8 +2403,8 @@ function assertValidAnalysis(snapshot, analysis) {
     if (insightIds.has(insight.reviewItemId)) {
       throw new Error(`duplicate review item analysis: ${insight.reviewItemId}`);
     }
-    if (insight.description.trim().length === 0 || Array.from(insight.description).length > MAX_DESCRIPTION_LENGTH) {
-      throw new Error(`review item description must be 1-${MAX_DESCRIPTION_LENGTH} characters`);
+    if (insight.description.trim().length === 0 || Array.from(insight.description).length > MAX_DESCRIPTION_LENGTH2) {
+      throw new Error(`review item description must be 1-${MAX_DESCRIPTION_LENGTH2} characters`);
     }
     if (!confidenceValues.has(insight.confidence)) {
       throw new Error(`invalid review item confidence: ${insight.confidence}`);
@@ -2159,6 +2448,7 @@ function translateScopeAnalysis(snapshot, analysis, applySections) {
     (group) => ({
       id: group.id,
       label: group.label,
+      ...group.intro === void 0 ? {} : { intro: group.intro },
       reviewItemIds: group.sectionKeys.map((sectionKey) => {
         const reviewItemId = itemIdBySectionKey.get(sectionKey);
         if (!reviewItemId) throw new Error(`unknown scope section key: ${sectionKey}`);
@@ -2174,7 +2464,14 @@ function translateScopeAnalysis(snapshot, analysis, applySections) {
       evidencePaths: section.evidencePaths
     })
   );
-  return { snapshot: translatedSnapshot, analysis: { groups, items } };
+  return {
+    snapshot: translatedSnapshot,
+    analysis: {
+      groups,
+      items,
+      ...analysis.summary === void 0 ? {} : { summary: analysis.summary }
+    }
+  };
 }
 async function applyReviewAnalysis(request, dependencies = {}) {
   const monotonicNow = dependencies.monotonicNow ?? (() => performance2.now());
@@ -2240,6 +2537,7 @@ async function applyReviewAnalysis(request, dependencies = {}) {
     const insights = {
       schemaVersion: 1,
       revisionId: request.reference.revisionId,
+      ...translated.analysis.summary === void 0 ? {} : { summary: translated.analysis.summary },
       groups: translated.analysis.groups,
       items: translated.analysis.items,
       ...scopeFiles ? { files: scopeFiles } : {}
@@ -2270,6 +2568,7 @@ async function applyReviewAnalysis(request, dependencies = {}) {
     const insights = {
       schemaVersion: 1,
       revisionId: request.reference.revisionId,
+      ...diffAnalysis.summary === void 0 ? {} : { summary: diffAnalysis.summary },
       groups: diffAnalysis.groups,
       items: diffAnalysis.items,
       ...diffFiles ? { files: diffFiles } : {}
@@ -2424,254 +2723,6 @@ function printReviewStatus(request) {
     `unanswered: ${status.readiness.unanswered}`,
     `url: ${status.url}`
   ].join("\n");
-}
-
-// src/review-analysis.ts
-var IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
-var GROUP_ID2 = /^[a-z0-9][a-z0-9_-]*$/u;
-var MAX_DESCRIPTION_LENGTH2 = 600;
-var FILE_INSIGHT_KEYS = ["path", "description", "confidence"];
-function propertyPath(path, key) {
-  return IDENTIFIER.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
-}
-function fail(path, expectation) {
-  throw new Error(`${path} ${expectation}`);
-}
-function assertRecord(value, path) {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    fail(path, "must be an object");
-  }
-}
-function assertOnlyKeys(value, keys, path) {
-  const allowed = new Set(keys);
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) fail(propertyPath(path, key), "is not allowed");
-  }
-}
-function assertArray(value, path) {
-  if (!Array.isArray(value)) fail(path, "must be an array");
-}
-function assertNonEmptyArray(value, path) {
-  assertArray(value, path);
-  if (value.length === 0) fail(path, "must not be empty");
-}
-function assertString(value, path) {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    fail(path, "must be a non-empty string");
-  }
-}
-function assertGroupId(value, path) {
-  assertString(value, path);
-  if (!GROUP_ID2.test(value)) {
-    fail(path, "must match ^[a-z0-9][a-z0-9_-]*$");
-  }
-}
-function assertDescription(value, path) {
-  assertString(value, path);
-  if (Array.from(value).length > MAX_DESCRIPTION_LENGTH2) {
-    fail(path, `must contain at most ${MAX_DESCRIPTION_LENGTH2} characters`);
-  }
-}
-function assertInteger(value, path) {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
-    fail(path, "must be a positive integer");
-  }
-}
-function parseConfidence(value, path) {
-  if (value === "high" || value === "medium" || value === "low") return value;
-  return fail(path, 'must be one of "high", "medium", or "low"');
-}
-function parseStringArray(value, path) {
-  assertNonEmptyArray(value, path);
-  const result = value.map((entry, index) => {
-    assertString(entry, `${path}[${index}]`);
-    return entry;
-  });
-  assertUniqueValues(result, path);
-  return result;
-}
-function assertUniqueValues(values, path) {
-  const indexes = /* @__PURE__ */ new Map();
-  for (const [index, value] of values.entries()) {
-    const firstIndex = indexes.get(value);
-    if (firstIndex !== void 0) {
-      fail(`${path}[${index}]`, `duplicates ${path}[${firstIndex}]`);
-    }
-    indexes.set(value, index);
-  }
-}
-function assertUniqueProperty(values, path, property, select) {
-  const indexes = /* @__PURE__ */ new Map();
-  for (const [index, value] of values.entries()) {
-    const selected = select(value);
-    const firstIndex = indexes.get(selected);
-    if (firstIndex !== void 0) {
-      fail(
-        propertyPath(`${path}[${index}]`, property),
-        `duplicates ${propertyPath(`${path}[${firstIndex}]`, property)}`
-      );
-    }
-    indexes.set(selected, index);
-  }
-}
-function parseDiffGroup(value, index) {
-  const path = `$.groups[${index}]`;
-  assertRecord(value, path);
-  assertOnlyKeys(value, ["id", "label", "reviewItemIds"], path);
-  assertGroupId(value.id, `${path}.id`);
-  assertString(value.label, `${path}.label`);
-  return {
-    id: value.id,
-    label: value.label,
-    reviewItemIds: parseStringArray(value.reviewItemIds, `${path}.reviewItemIds`)
-  };
-}
-function parseDiffItem(value, index) {
-  const path = `$.items[${index}]`;
-  assertRecord(value, path);
-  assertOnlyKeys(value, ["reviewItemId", "description", "confidence", "evidencePaths"], path);
-  assertString(value.reviewItemId, `${path}.reviewItemId`);
-  assertDescription(value.description, `${path}.description`);
-  return {
-    reviewItemId: value.reviewItemId,
-    description: value.description,
-    confidence: parseConfidence(value.confidence, `${path}.confidence`),
-    evidencePaths: parseStringArray(value.evidencePaths, `${path}.evidencePaths`)
-  };
-}
-function parseScopeGroup(value, index) {
-  const path = `$.groups[${index}]`;
-  assertRecord(value, path);
-  assertOnlyKeys(value, ["id", "label", "sectionKeys"], path);
-  assertGroupId(value.id, `${path}.id`);
-  assertString(value.label, `${path}.label`);
-  return {
-    id: value.id,
-    label: value.label,
-    sectionKeys: parseStringArray(value.sectionKeys, `${path}.sectionKeys`)
-  };
-}
-function parseScopeSection(value, index) {
-  const path = `$.sections[${index}]`;
-  assertRecord(value, path);
-  assertOnlyKeys(
-    value,
-    [
-      "key",
-      "path",
-      "label",
-      "parentLabel",
-      "start",
-      "end",
-      "description",
-      "confidence",
-      "evidencePaths"
-    ],
-    path
-  );
-  assertString(value.key, `${path}.key`);
-  assertString(value.path, `${path}.path`);
-  assertString(value.label, `${path}.label`);
-  if (value.parentLabel !== void 0) {
-    assertString(value.parentLabel, `${path}.parentLabel`);
-  }
-  assertInteger(value.start, `${path}.start`);
-  assertInteger(value.end, `${path}.end`);
-  assertDescription(value.description, `${path}.description`);
-  return {
-    key: value.key,
-    path: value.path,
-    label: value.label,
-    ...value.parentLabel === void 0 ? {} : { parentLabel: value.parentLabel },
-    start: value.start,
-    end: value.end,
-    description: value.description,
-    confidence: parseConfidence(value.confidence, `${path}.confidence`),
-    evidencePaths: parseStringArray(value.evidencePaths, `${path}.evidencePaths`)
-  };
-}
-function parseFile(value, index) {
-  const path = `$.files[${index}]`;
-  assertRecord(value, path);
-  assertOnlyKeys(value, FILE_INSIGHT_KEYS, path);
-  assertString(value.path, `${path}.path`);
-  assertDescription(value.description, `${path}.description`);
-  return {
-    path: value.path,
-    description: value.description,
-    confidence: parseConfidence(value.confidence, `${path}.confidence`)
-  };
-}
-function parseFiles(value) {
-  assertNonEmptyArray(value, "$.files");
-  const files = value.map(parseFile);
-  assertUniqueProperty(files, "$.files", "path", (file) => file.path);
-  return files;
-}
-function parseGroups(value, parseGroup) {
-  assertNonEmptyArray(value, "$.groups");
-  const groups = value.map(parseGroup);
-  assertUniqueProperty(groups, "$.groups", "id", (group) => group.id);
-  return groups;
-}
-function assertEveryReferenceIsOwned(definitions, definitionPath, references, referencePath) {
-  const definitionIndexes = new Map(definitions.map((key, index) => [key, index]));
-  const owners = /* @__PURE__ */ new Map();
-  for (const [groupIndex, groupReferences] of references.entries()) {
-    for (const [referenceIndex, reference] of groupReferences.entries()) {
-      const path = referencePath(groupIndex, referenceIndex);
-      if (!definitionIndexes.has(reference)) fail(path, "references an unknown item");
-      const firstPath = owners.get(reference);
-      if (firstPath !== void 0) fail(path, `duplicates ${firstPath}`);
-      owners.set(reference, path);
-    }
-  }
-  for (const [index, key] of definitions.entries()) {
-    if (!owners.has(key)) fail(definitionPath(index), "is not referenced by any group");
-  }
-}
-function parseDiffAnalysis(value) {
-  assertOnlyKeys(value, ["groups", "items", "files"], "$");
-  const groups = parseGroups(value.groups, parseDiffGroup);
-  assertNonEmptyArray(value.items, "$.items");
-  const items = value.items.map(parseDiffItem);
-  assertUniqueProperty(items, "$.items", "reviewItemId", (item) => item.reviewItemId);
-  assertEveryReferenceIsOwned(
-    items.map((item) => item.reviewItemId),
-    (index) => `$.items[${index}].reviewItemId`,
-    groups.map((group) => group.reviewItemIds),
-    (groupIndex, referenceIndex) => `$.groups[${groupIndex}].reviewItemIds[${referenceIndex}]`
-  );
-  const files = value.files === void 0 ? void 0 : parseFiles(value.files);
-  return { kind: "diff", groups, items, ...files ? { files } : {} };
-}
-function parseScopeAnalysis(value) {
-  assertOnlyKeys(value, ["groups", "sections", "files"], "$");
-  const groups = parseGroups(value.groups, parseScopeGroup);
-  assertNonEmptyArray(value.sections, "$.sections");
-  const sections = value.sections.map(parseScopeSection);
-  assertUniqueProperty(sections, "$.sections", "key", (section) => section.key);
-  assertEveryReferenceIsOwned(
-    sections.map((section) => section.key),
-    (index) => `$.sections[${index}].key`,
-    groups.map((group) => group.sectionKeys),
-    (groupIndex, referenceIndex) => `$.groups[${groupIndex}].sectionKeys[${referenceIndex}]`
-  );
-  const files = value.files === void 0 ? void 0 : parseFiles(value.files);
-  return { kind: "scope", groups, sections, ...files ? { files } : {} };
-}
-function parseReviewAnalysisInput(value) {
-  assertRecord(value, "$");
-  assertOnlyKeys(value, ["groups", "items", "sections", "files"], "$");
-  const hasItems = Object.hasOwn(value, "items");
-  const hasSections = Object.hasOwn(value, "sections");
-  if (hasItems && hasSections) {
-    fail("$.items", "is not allowed when $.sections is present");
-  }
-  if (!hasItems && !hasSections) {
-    fail("$", "must contain exactly one of $.items or $.sections");
-  }
-  return hasItems ? parseDiffAnalysis(value) : parseScopeAnalysis(value);
 }
 
 // src/review-wait.ts
