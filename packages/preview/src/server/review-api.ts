@@ -4,6 +4,7 @@ import {
   type ReviewBundle,
   type ReviewItem,
   type ReviewQuestionInput,
+  type WalkthroughPosition,
   compareReviewSourceFreshness,
   createQuestionQueue,
   createReviewStore,
@@ -135,14 +136,42 @@ function readFreshBundle(
   };
 }
 
-function parseProgress(
-  value: unknown,
-  bundle: ReviewBundle,
-): {
-  reviewItemId: string;
-  patch: { status?: 'reviewed' | 'needs-review'; note?: string | null };
-} {
+type ProgressPatch =
+  | {
+      kind: 'item';
+      reviewItemId: string;
+      patch: { status?: 'reviewed' | 'needs-review'; note?: string | null };
+    }
+  | { kind: 'walkthrough'; position: WalkthroughPosition };
+
+function parseProgress(value: unknown, bundle: ReviewBundle): ProgressPatch {
   if (!isRecord(value)) throw new ReviewApiError(400, 'invalid_request');
+
+  if ('walkthrough' in value) {
+    assertOnlyKeys(value, ['walkthrough']);
+    const cursor = value.walkthrough;
+    if (!isRecord(cursor)) throw new ReviewApiError(400, 'invalid_request');
+    assertOnlyKeys(cursor, ['activeGroupId', 'activeReviewItemId', 'activeFile']);
+    if (typeof cursor.activeGroupId !== 'string' || typeof cursor.activeReviewItemId !== 'string') {
+      throw new ReviewApiError(400, 'invalid_request');
+    }
+    if (cursor.activeFile !== undefined && typeof cursor.activeFile !== 'string') {
+      throw new ReviewApiError(400, 'invalid_request');
+    }
+    if (!bundle.insights.groups.some((group) => group.id === cursor.activeGroupId)) {
+      throw new ReviewApiError(400, 'invalid_walkthrough_position');
+    }
+    getItem(bundle, cursor.activeReviewItemId);
+    return {
+      kind: 'walkthrough',
+      position: {
+        activeGroupId: cursor.activeGroupId,
+        activeReviewItemId: cursor.activeReviewItemId,
+        ...(cursor.activeFile === undefined ? {} : { activeFile: cursor.activeFile }),
+      },
+    };
+  }
+
   assertOnlyKeys(value, ['reviewItemId', 'status', 'note']);
   if (typeof value.reviewItemId !== 'string') throw new ReviewApiError(400, 'invalid_request');
   getItem(bundle, value.reviewItemId);
@@ -164,6 +193,7 @@ function parseProgress(
     throw new ReviewApiError(400, 'empty_progress_patch');
   }
   return {
+    kind: 'item',
     reviewItemId: value.reviewItemId,
     patch: {
       ...(value.status === undefined ? {} : { status: value.status }),
@@ -269,12 +299,25 @@ export async function handleReviewApi(
     const bundle = store.readBundle(route.reference.workspaceId, route.reference.revisionId);
     if (route.kind === 'progress') {
       const update = parseProgress(body, bundle);
-      store.patchItemProgress(
-        route.reference.workspaceId,
-        route.reference.revisionId,
-        update.reviewItemId,
-        update.patch,
-      );
+      if (update.kind === 'walkthrough') {
+        try {
+          store.patchWalkthroughPosition(
+            route.reference.workspaceId,
+            route.reference.revisionId,
+            update.position,
+          );
+        } catch (error) {
+          if (error instanceof ReviewApiError) throw error;
+          throw new ReviewApiError(400, 'invalid_walkthrough_position');
+        }
+      } else {
+        store.patchItemProgress(
+          route.reference.workspaceId,
+          route.reference.revisionId,
+          update.reviewItemId,
+          update.patch,
+        );
+      }
       sendJson(
         res,
         200,

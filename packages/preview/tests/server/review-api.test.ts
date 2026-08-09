@@ -386,6 +386,108 @@ describe('review API', () => {
     });
   });
 
+  it('accepts a walkthrough cursor patch and returns the fresh bundle', async () => {
+    createReview();
+    const response = await callReviewApi(
+      temp.dir,
+      'PATCH',
+      `/api/reviews/${WORKSPACE}/${REVISION}/progress`,
+      { walkthrough: { activeGroupId: 'group-a', activeReviewItemId: 'hunk-a' } },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect((response.json as { bundle: ReviewBundle }).bundle.progress.activeReviewItemId).toBe(
+      'hunk-a',
+    );
+    expect((response.json as { bundle: ReviewBundle }).bundle.progress.activeGroupId).toBe(
+      'group-a',
+    );
+  });
+
+  it('rejects a patch mixing item and walkthrough keys', async () => {
+    createReview();
+    const response = await callReviewApi(
+      temp.dir,
+      'PATCH',
+      `/api/reviews/${WORKSPACE}/${REVISION}/progress`,
+      {
+        reviewItemId: 'hunk-a',
+        status: 'reviewed',
+        walkthrough: { activeGroupId: 'group-a', activeReviewItemId: 'hunk-a' },
+      },
+    );
+
+    expect(response).toMatchObject({ statusCode: 400, json: { error: 'invalid_request' } });
+  });
+
+  it('rejects a walkthrough patch with an unknown group', async () => {
+    createReview();
+    const response = await callReviewApi(
+      temp.dir,
+      'PATCH',
+      `/api/reviews/${WORKSPACE}/${REVISION}/progress`,
+      { walkthrough: { activeGroupId: 'nope', activeReviewItemId: 'hunk-a' } },
+    );
+
+    expect(response).toMatchObject({
+      statusCode: 400,
+      json: { error: 'invalid_walkthrough_position' },
+    });
+  });
+
+  it('rejects a walkthrough patch with an unknown item', async () => {
+    createReview();
+    const response = await callReviewApi(
+      temp.dir,
+      'PATCH',
+      `/api/reviews/${WORKSPACE}/${REVISION}/progress`,
+      { walkthrough: { activeGroupId: 'group-a', activeReviewItemId: 'unknown-item' } },
+    );
+
+    expect(response).toMatchObject({
+      statusCode: 400,
+      json: { error: 'unknown_review_item' },
+    });
+  });
+
+  it('wraps a store-level walkthrough error when the item is outside the group', async () => {
+    const base = fixture();
+    const bundle: ReviewBundle = {
+      ...base,
+      snapshot: {
+        ...base.snapshot,
+        items: [
+          ...base.snapshot.items,
+          { ...base.snapshot.items[0]!, id: 'hunk-b', label: 'example-b' },
+        ],
+      },
+      insights: {
+        ...base.insights,
+        groups: [
+          { id: 'group-a', label: 'Example', reviewItemIds: ['hunk-a'] },
+          { id: 'group-b', label: 'Example B', reviewItemIds: ['hunk-b'] },
+        ],
+        items: [...base.insights.items, { ...base.insights.items[0]!, reviewItemId: 'hunk-b' }],
+      },
+      progress: {
+        ...base.progress,
+        items: { ...base.progress.items, 'hunk-b': { status: 'needs-review' } },
+      },
+    };
+    createReview(bundle);
+    const response = await callReviewApi(
+      temp.dir,
+      'PATCH',
+      `/api/reviews/${WORKSPACE}/${REVISION}/progress`,
+      { walkthrough: { activeGroupId: 'group-a', activeReviewItemId: 'hunk-b' } },
+    );
+
+    expect(response).toMatchObject({
+      statusCode: 400,
+      json: { error: 'invalid_walkthrough_position' },
+    });
+  });
+
   it('rejects mutation requests without JSON content type before persistence', async () => {
     createReview();
     const req = makeMockReq({
