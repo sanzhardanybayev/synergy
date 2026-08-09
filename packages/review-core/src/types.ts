@@ -187,6 +187,7 @@ export interface ReviewItemInsight {
 export interface ReviewGroup {
   id: string;
   label: string;
+  intro?: string;
   reviewItemIds: string[];
 }
 
@@ -199,6 +200,7 @@ export interface ReviewFileInsight {
 export interface ReviewInsights {
   schemaVersion: 1;
   revisionId: string;
+  summary?: string;
   groups: ReviewGroup[];
   items: ReviewItemInsight[];
   files?: ReviewFileInsight[];
