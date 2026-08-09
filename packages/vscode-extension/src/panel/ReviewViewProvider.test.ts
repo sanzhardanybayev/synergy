@@ -390,6 +390,55 @@ describe('ReviewViewProvider', () => {
     expect(bundle?.bundle.bundle.progress.items['item-1']?.note).toBe('Check the edge case.');
   });
 
+  it('advanceWalkthrough patches the walkthrough cursor and triggers exactly one refresh', () => {
+    // Seed a second workspace whose insights carry two groups, so patchWalkthroughPosition has
+    // somewhere valid to move the cursor.
+    const fixture = makeFixture({
+      workspaceId: 'workspace-story',
+      revisionId: 'rev-1',
+      source: { kind: 'staged', headSha: 'a' },
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    fixture.insights.groups = [
+      { id: 'group-1', label: 'Chapter one', reviewItemIds: ['item-1'] },
+      { id: 'group-2', label: 'Chapter two', reviewItemIds: ['item-2'] },
+    ];
+    fixture.insights.summary = 'The story of this change.';
+    seedWorkspace(root, fixture);
+    const storyRef = { workspaceId: 'workspace-story', revisionId: 'rev-1' };
+
+    webview.send({ kind: 'ready' });
+    webview.send({
+      kind: 'openSession',
+      workspaceId: storyRef.workspaceId,
+      revisionId: storyRef.revisionId,
+    });
+    const bundlePostsBefore = countOfKind(webview.posted, 'bundle');
+
+    webview.send({ kind: 'advanceWalkthrough', groupId: 'group-2', reviewItemId: 'item-2' });
+
+    expect(countOfKind(webview.posted, 'bundle')).toBe(bundlePostsBefore + 1);
+    const bundle = lastOfKind(webview.posted, 'bundle');
+    expect(bundle?.bundle.bundle.progress.activeGroupId).toBe('group-2');
+    expect(bundle?.bundle.bundle.progress.activeReviewItemId).toBe('item-2');
+    expect(bundle?.bundle.bundle.progress.activeFile).toBe('src/example.ts');
+  });
+
+  it('advanceWalkthrough for an unknown group is caught and posted as an error, not a crash', () => {
+    webview.send({ kind: 'ready' });
+    webview.send({ kind: 'openSession', workspaceId: ref.workspaceId, revisionId: ref.revisionId });
+
+    expect(() =>
+      webview.send({
+        kind: 'advanceWalkthrough',
+        groupId: 'no-such-group',
+        reviewItemId: 'item-1',
+      }),
+    ).not.toThrow();
+
+    expect(lastOfKind(webview.posted, 'error')).toBeDefined();
+  });
+
   it('backToSessions disposes the daemon link and returns to the session list', () => {
     webview.send({ kind: 'ready' });
     webview.send({ kind: 'openSession', workspaceId: ref.workspaceId, revisionId: ref.revisionId });

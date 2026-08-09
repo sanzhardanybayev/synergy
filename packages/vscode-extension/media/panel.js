@@ -22,7 +22,12 @@
    * the editor). It survives webview disposal via `vscode.setState` and is mirrored to the host
    * with a `setDiffVisible` message (on toggle AND on startup, since the host resets to `true`).
    *
-   * @type {{screen: 'sessions'|'bundle', sessions: any[], bundle: SerializedBundle|null, error: string|null, expanded: Set<string>, diffVisible: boolean}}
+   * `revealFloor` and `revealAll` are the pane's local walkthrough reveal state - mirrors the web
+   * preview's `localFloorRef` / `walkthroughRevealAll` (see packages/preview/src/review/
+   * ReviewProvider.tsx). Neither persists across `vscode.setState` or a bundle refresh; both
+   * reset when the open session (workspace + revision) changes - see `walkthroughSessionKey`.
+   *
+   * @type {{screen: 'sessions'|'bundle', sessions: any[], bundle: SerializedBundle|null, error: string|null, expanded: Set<string>, diffVisible: boolean, revealFloor: number, revealAll: boolean, walkthroughSessionKey: string|null}}
    */
   const state = {
     screen: 'sessions',
@@ -31,6 +36,9 @@
     error: null,
     expanded: new Set(),
     diffVisible: vscode.getState()?.diffVisible !== false,
+    revealFloor: 0,
+    revealAll: false,
+    walkthroughSessionKey: null,
   };
 
   function setDiffVisible(value) {
@@ -83,6 +91,41 @@
   function isReviewed(bundle, reviewItemId) {
     const status = itemStatus(bundle, reviewItemId);
     return status === 'reviewed' || status === 'carried-forward';
+  }
+
+  // ---- Walkthrough (storytelling) helpers ----
+  //
+  // Mirrors packages/preview/src/review/walkthrough.ts's `revealedChapterCount`, reimplemented
+  // here because the webview has no module imports (see the file banner above).
+
+  /**
+   * The count of chapters (groups, in story order) that should be revealed given where the
+   * cursor currently sits. 1-based: a cursor inside the Nth group reveals N chapters. No cursor
+   * (a fresh walkthrough) reveals just the first chapter.
+   *
+   * @param {any[]} groups
+   * @param {string|undefined} cursorReviewItemId
+   */
+  function revealedChapterCount(groups, cursorReviewItemId) {
+    if (cursorReviewItemId === undefined) return 1;
+    for (let index = 0; index < groups.length; index += 1) {
+      if (groups[index].reviewItemIds.includes(cursorReviewItemId)) return index + 1;
+    }
+    return 1;
+  }
+
+  /**
+   * Sends `advanceWalkthrough` to the extension host and bumps the local reveal floor
+   * immediately, so a locked chapter's header or a Continue button expands the pane right away
+   * instead of waiting on the bundle round trip. The floor only grows (monotonic), matching the
+   * store's own monotonic cursor.
+   */
+  function sendAdvanceWalkthrough(groupId, reviewItemId) {
+    const groups = state.bundle ? state.bundle.bundle.insights.groups || [] : [];
+    const chapterIndex = groups.findIndex((group) => group.id === groupId);
+    if (chapterIndex + 1 > state.revealFloor) state.revealFloor = chapterIndex + 1;
+    post({ kind: 'advanceWalkthrough', groupId, reviewItemId });
+    render();
   }
 
   // ---- Session list screen ----
@@ -331,14 +374,91 @@
     return el('div', {}, children);
   }
 
-  /** @param {SerializedBundle} bundle */
-  function renderGroup(bundle, group) {
+  /**
+   * @param {SerializedBundle} bundle
+   * @param {any} group
+   * @param {{index: number, isLastGroup: boolean, nextGroup: any|undefined}} [chapter] Walkthrough
+   *   context. Undefined when the revision carries no narrative (`insights.summary` absent) - in
+   *   that case rendering is byte-for-byte the same as before storytelling existed.
+   */
+  function renderGroup(bundle, group, chapter) {
     const byPath = groupItemsByFile(bundle, group.reviewItemIds);
     const fileRows = [];
     for (const [path, items] of byPath) fileRows.push(renderFileRow(bundle, path, items));
-    return el('div', { className: 'group' }, [
-      el('div', { className: 'group-label' }, [group.label]),
-      ...fileRows,
+    const label = chapter
+      ? el('div', { className: 'group-label group-label-chapter' }, [
+          el('span', { className: 'chapter-num' }, [String(chapter.index + 1)]),
+          el('span', { className: 'chapter-title' }, [group.label]),
+        ])
+      : el('div', { className: 'group-label' }, [group.label]);
+    const intro =
+      chapter && group.intro ? el('p', { className: 'chapter-intro' }, [group.intro]) : null;
+    const children = [label, intro, ...fileRows];
+    if (chapter && !chapter.isLastGroup) {
+      const nextGroup = chapter.nextGroup;
+      const nextFirstItemId = nextGroup?.reviewItemIds[0];
+      children.push(
+        el(
+          'button',
+          {
+            className: 'chapter-continue',
+            onClick: () => {
+              if (nextGroup && nextFirstItemId) {
+                sendAdvanceWalkthrough(nextGroup.id, nextFirstItemId);
+              }
+            },
+          },
+          [nextGroup ? `Continue to ${nextGroup.label}` : 'Continue'],
+        ),
+      );
+    }
+    return el('div', { className: 'group' }, children);
+  }
+
+  /** A chapter past the reveal cursor: collapsed, dimmed, title-only. Clicking it advances the
+   * walkthrough to the chapter's first item and (via the reveal-floor bump) expands it. */
+  function renderLockedChapter(group, index) {
+    return el('div', { className: 'group group-locked' }, [
+      el(
+        'button',
+        {
+          className: 'group-label group-label-chapter chapter-head-locked',
+          onClick: () => {
+            const firstItemId = group.reviewItemIds[0];
+            if (firstItemId) sendAdvanceWalkthrough(group.id, firstItemId);
+          },
+        },
+        [
+          el('span', { className: 'chapter-num' }, [String(index + 1)]),
+          el('span', { className: 'chapter-title' }, [group.label]),
+        ],
+      ),
+    ]);
+  }
+
+  function renderSummaryCard(summary, chapterCount) {
+    const revealAllButton = state.revealAll
+      ? null
+      : el(
+          'button',
+          {
+            className: 'walkthrough-reveal-all',
+            onClick: () => {
+              state.revealAll = true;
+              render();
+            },
+          },
+          ['Reveal all'],
+        );
+    return el('div', { className: 'walkthrough-summary' }, [
+      el('div', { className: 'walkthrough-summary-header' }, [
+        el('span', { className: 'walkthrough-summary-title' }, ['The story of this change']),
+        revealAllButton,
+      ]),
+      el('p', { className: 'walkthrough-summary-text' }, [summary]),
+      el('p', { className: 'walkthrough-summary-meta' }, [
+        `${chapterCount} chapter${chapterCount === 1 ? '' : 's'}`,
+      ]),
     ]);
   }
 
@@ -351,11 +471,32 @@
         'No review items yet - analysis may still be running.',
       ]);
     }
-    return el(
-      'div',
-      { className: 'review-groups' },
-      groups.map((group) => renderGroup(bundle, group)),
+    const summary = bundle.bundle.insights.summary;
+    // No summary -> current flat rendering, byte-for-byte: no chapter context, no summary card.
+    if (summary === undefined) {
+      return el(
+        'div',
+        { className: 'review-groups' },
+        groups.map((group) => renderGroup(bundle, group)),
+      );
+    }
+    const activeReviewItemId = bundle.bundle.progress.activeReviewItemId;
+    const revealedCount = state.revealAll
+      ? groups.length
+      : Math.max(revealedChapterCount(groups, activeReviewItemId), state.revealFloor);
+    const groupNodes = groups.map((group, index) =>
+      index < revealedCount
+        ? renderGroup(bundle, group, {
+            index,
+            isLastGroup: index === groups.length - 1,
+            nextGroup: groups[index + 1],
+          })
+        : renderLockedChapter(group, index),
     );
+    return el('div', { className: 'review-groups' }, [
+      renderSummaryCard(summary, groups.length),
+      ...groupNodes,
+    ]);
   }
 
   // ---- Shell ----
@@ -501,12 +642,25 @@
         state.error = null;
         render();
         break;
-      case 'bundle':
+      case 'bundle': {
+        // Reset the local reveal state only when the open session (workspace + revision)
+        // actually changes - a bundle refresh for the SAME session (e.g. after setStatus, or
+        // this pane's own advanceWalkthrough round trip) must not re-lock chapters the reviewer
+        // already unlocked.
+        const workspaceId = message.bundle.bundle.workspace.id;
+        const revisionId = message.bundle.bundle.snapshot.revisionId;
+        const sessionKey = `${workspaceId} ${revisionId}`;
+        if (state.walkthroughSessionKey !== sessionKey) {
+          state.walkthroughSessionKey = sessionKey;
+          state.revealFloor = 0;
+          state.revealAll = false;
+        }
         state.screen = 'bundle';
         state.bundle = message.bundle;
         state.error = null;
         render();
         break;
+      }
       case 'error':
         state.error = message.message;
         render();

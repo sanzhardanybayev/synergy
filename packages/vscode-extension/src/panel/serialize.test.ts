@@ -121,6 +121,20 @@ describe('serializeBundle', () => {
     expect(serialized.drift['src/example.ts']).toBe('drifted');
   });
 
+  it('carries insights summary and group intro through unchanged', () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-vscode-serialize-'));
+    const bundle = makeBundle();
+    bundle.insights.summary = 'This change reworks the storytelling walkthrough.';
+    bundle.insights.groups[0].intro = 'Start here: the core cursor logic.';
+
+    const serialized = serializeBundle(root, bundle);
+
+    expect(serialized.bundle.insights.summary).toBe(
+      'This change reworks the storytelling walkthrough.',
+    );
+    expect(serialized.bundle.insights.groups[0].intro).toBe('Start here: the core cursor logic.');
+  });
+
   it('computes drift for every distinct path across files and items', () => {
     const root = mkdtempSync(join(tmpdir(), 'synergy-vscode-serialize-'));
     const bundle = makeBundle();

@@ -28,7 +28,8 @@ export type FromWebview =
   | { kind: 'openNativeDiff'; path: string; reviewItemId?: string }
   | { kind: 'showSnapshot'; path: string }
   | { kind: 'openFile'; path: string }
-  | { kind: 'setDiffVisible'; value: boolean };
+  | { kind: 'setDiffVisible'; value: boolean }
+  | { kind: 'advanceWalkthrough'; groupId: string; reviewItemId: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -127,6 +128,16 @@ export function parseFromWebview(value: unknown): FromWebview | undefined {
     case 'showSnapshot':
       if (isString(value.path)) {
         return { kind: 'showSnapshot', path: value.path };
+      }
+      return undefined;
+
+    case 'advanceWalkthrough':
+      if (isString(value.groupId) && isString(value.reviewItemId)) {
+        return {
+          kind: 'advanceWalkthrough',
+          groupId: value.groupId,
+          reviewItemId: value.reviewItemId,
+        };
       }
       return undefined;
 

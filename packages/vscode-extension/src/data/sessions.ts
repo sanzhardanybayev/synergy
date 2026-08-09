@@ -3,6 +3,7 @@ import {
   type ReviewBundle,
   type ReviewRef,
   type ReviewSource,
+  type WalkthroughPosition,
   createReviewStore,
   reviewsDir,
 } from '@synergy/review-core';
@@ -134,4 +135,19 @@ export function saveNote(
   createReviewStore(projectRoot).patchItemProgress(ref.workspaceId, ref.revisionId, reviewItemId, {
     note,
   });
+}
+
+/** Moves the walkthrough cursor. Throws (uncaught, matching `setItemStatus`'s pattern) when the
+ * store rejects an unknown group or an item that is not a member of it - the caller's outer
+ * try/catch turns that into a `{kind:'error'}` message instead of crashing the extension host. */
+export function advanceWalkthrough(
+  projectRoot: string,
+  ref: ReviewRef,
+  position: WalkthroughPosition,
+): void {
+  createReviewStore(projectRoot).patchWalkthroughPosition(
+    ref.workspaceId,
+    ref.revisionId,
+    position,
+  );
 }

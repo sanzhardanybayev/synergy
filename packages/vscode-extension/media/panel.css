@@ -494,6 +494,136 @@ input[type="checkbox"] {
   flex: none;
 }
 
+/* ---- Storytelling walkthrough ---- */
+
+.walkthrough-summary {
+  margin: 8px 10px 4px;
+  padding: 10px 12px;
+  background: var(--syn-accent-soft);
+  border: 1px solid var(--syn-accent-border);
+  border-radius: var(--syn-radius-md);
+}
+
+.walkthrough-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.walkthrough-summary-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--syn-accent-fg);
+}
+
+.walkthrough-reveal-all {
+  flex: none;
+  border: 1px solid var(--syn-border-strong);
+  background: var(--syn-bg-raised);
+  color: var(--syn-fg-muted);
+  border-radius: var(--syn-radius-sm);
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.walkthrough-reveal-all:hover {
+  border-color: var(--syn-accent-border);
+  color: var(--syn-accent-fg);
+}
+
+.walkthrough-summary-text {
+  margin: 6px 0 4px;
+  color: var(--syn-fg);
+  font-size: 12px;
+}
+
+.walkthrough-summary-meta {
+  margin: 0;
+  color: var(--syn-fg-subtle);
+  font-size: 11px;
+}
+
+.group-label-chapter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chapter-num {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--syn-radius-full);
+  background: var(--syn-accent-soft);
+  color: var(--syn-accent-fg);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.chapter-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-intro {
+  margin: 0 10px 6px;
+  padding: 0 0 0 22px;
+  color: var(--syn-fg-muted);
+  font-size: 12px;
+}
+
+.chapter-continue {
+  display: block;
+  margin: 4px 10px 12px 32px;
+  border: 1px solid var(--syn-accent-border);
+  background: var(--syn-accent-soft);
+  color: var(--syn-accent-fg);
+  border-radius: var(--syn-radius-sm);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chapter-continue:hover {
+  background: var(--syn-accent-soft-strong);
+}
+
+.group-locked {
+  opacity: 0.55;
+}
+
+.chapter-head-locked {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 8px 10px 4px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.chapter-head-locked:hover {
+  opacity: 0.85;
+}
+
+.chapter-head-locked .chapter-title {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  color: var(--syn-fg-subtle);
+}
+
 .drift-badge-drifted {
   background: var(--syn-warn-soft);
   color: var(--syn-warn);
