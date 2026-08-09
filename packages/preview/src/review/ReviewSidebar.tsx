@@ -5,6 +5,15 @@ import type {
   ReviewItemStatus,
 } from '@synergy/review-core';
 import { useMemo, useState } from 'react';
+import type { Chapter } from './walkthrough.js';
+
+interface SidebarWalkthrough {
+  enabled: boolean;
+  chapters: Chapter[];
+  revealedCount: number;
+  currentChapterIndex: number;
+  advanceTo(reviewItemId: string): void;
+}
 
 interface ReviewSidebarProps {
   groups: ReviewGroup[];
@@ -13,6 +22,7 @@ interface ReviewSidebarProps {
   activeItemId: string;
   onSelectItem(reviewItemId: string): void;
   onSetProgress(reviewItemId: string, status: 'reviewed' | 'needs-review'): Promise<void>;
+  walkthrough?: SidebarWalkthrough;
 }
 
 function isComplete(status: ReviewItemStatus | undefined): boolean {
@@ -27,9 +37,14 @@ export function ReviewSidebar({
   activeItemId,
   onSelectItem,
   onSetProgress,
+  walkthrough,
 }: ReviewSidebarProps) {
   const [query, setQuery] = useState('');
   const itemById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+  const chapterByGroupId = useMemo(
+    () => new Map((walkthrough?.chapters ?? []).map((chapter) => [chapter.group.id, chapter])),
+    [walkthrough],
+  );
   const normalizedQuery = query.trim().toLowerCase();
   const completed = items.filter((item) => isComplete(progress[item.id]?.status)).length;
   const hasMatches = groups.some((group) =>
@@ -71,9 +86,43 @@ export function ReviewSidebar({
             );
           const paths = [...new Set(groupItems.map((item) => item.path))];
           if (paths.length === 0) return null;
+          const chapter = walkthrough?.enabled ? chapterByGroupId.get(group.id) : undefined;
+          const locked =
+            chapter !== undefined && chapter.index >= (walkthrough?.revealedCount ?? 0);
+          const isCurrent =
+            chapter !== undefined && chapter.index === walkthrough?.currentChapterIndex;
+          const isDone =
+            chapter !== undefined &&
+            chapter.items.length > 0 &&
+            chapter.items.every((i) => isComplete(progress[i.id]?.status));
+          const sectionClassName = `review-group${locked ? ' review-chapter--locked' : ''}`;
           return (
-            <section className="review-group" key={group.id}>
-              <h2>{group.label}</h2>
+            <section className={sectionClassName} key={group.id}>
+              {chapter ? (
+                <button
+                  type="button"
+                  className="review-chapter-head"
+                  onClick={() => {
+                    const firstItem = chapter.items[0];
+                    if (firstItem) walkthrough?.advanceTo(firstItem.id);
+                  }}
+                >
+                  <span
+                    className={`review-chapter-num${isCurrent ? ' is-current' : ''}${
+                      isDone ? ' is-done' : ''
+                    }${locked ? ' is-locked' : ''}`}
+                    aria-hidden="true"
+                  >
+                    {isDone ? '✓' : chapter.index + 1}
+                  </span>
+                  <span className="review-chapter-title">{group.label}</span>
+                  <span className="review-chapter-meta">
+                    {locked ? '· · ·' : `${paths.length} file${paths.length === 1 ? '' : 's'}`}
+                  </span>
+                </button>
+              ) : (
+                <h2>{group.label}</h2>
+              )}
               {paths.map((path) => {
                 const fileItems = groupItems.filter((item) => item.path === path);
                 const fileCompleted = fileItems.filter((item) =>

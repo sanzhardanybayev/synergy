@@ -43,6 +43,32 @@ const validScopeInput = {
   ],
 };
 
+interface MutableDiffPayload {
+  groups: Array<{ id: string; label: string; reviewItemIds: string[]; intro?: string }>;
+  items: typeof validDiffInput.items;
+  summary?: string;
+}
+
+function validDiffPayload(): MutableDiffPayload {
+  return {
+    groups: validDiffInput.groups.map((group) => ({ ...group })),
+    items: validDiffInput.items.map((item) => ({ ...item })),
+  };
+}
+
+interface MutableScopePayload {
+  groups: Array<{ id: string; label: string; sectionKeys: string[]; intro?: string }>;
+  sections: typeof validScopeInput.sections;
+  summary?: string;
+}
+
+function validScopePayload(): MutableScopePayload {
+  return {
+    groups: validScopeInput.groups.map((group) => ({ ...group })),
+    sections: validScopeInput.sections.map((section) => ({ ...section })),
+  };
+}
+
 describe('parseReviewAnalysisInput', () => {
   it('accepts the existing durable-item diff contract and constructs fresh values', () => {
     const parsed = parseReviewAnalysisInput(validDiffInput);
@@ -311,5 +337,49 @@ describe('parseReviewAnalysisInput', () => {
     const fileInsightSchema = reviewAnalysisSchema.$defs.fileInsight;
     expect(fileInsightSchema.properties.description.maxLength).toBe(MAX_DESCRIPTION_LENGTH);
     expect(new Set(fileInsightSchema.required)).toEqual(new Set(FILE_INSIGHT_KEYS));
+  });
+
+  describe('narrative fields', () => {
+    it('accepts a diff payload with summary and group intro', () => {
+      const payload = validDiffPayload();
+      payload.summary = 'Adds rate limiting. First the middleware, then the engine.';
+      payload.groups[0].intro = 'Start here: every request passes through this middleware.';
+      const parsed = parseReviewAnalysisInput(payload);
+      expect(parsed.summary).toBe(payload.summary);
+      expect(parsed.groups[0].intro).toBe(payload.groups[0].intro);
+    });
+
+    it('accepts a scope payload with summary and group intro', () => {
+      const payload = validScopePayload();
+      payload.summary = 'Maps the subscription lifecycle.';
+      payload.groups[0].intro = 'The capture path frames everything else.';
+      const parsed = parseReviewAnalysisInput(payload);
+      expect(parsed.summary).toBe(payload.summary);
+      expect(parsed.groups[0].intro).toBe(payload.groups[0].intro);
+    });
+
+    it('omits narrative fields when absent', () => {
+      const parsed = parseReviewAnalysisInput(validDiffPayload());
+      expect('summary' in parsed).toBe(false);
+      expect('intro' in parsed.groups[0]).toBe(false);
+    });
+
+    it('rejects blank and over-length narrative fields', () => {
+      const blank = validDiffPayload();
+      blank.summary = '   ';
+      expect(() => parseReviewAnalysisInput(blank)).toThrow('$.summary must be a non-empty string');
+
+      const longSummary = validDiffPayload();
+      longSummary.summary = 'x'.repeat(601);
+      expect(() => parseReviewAnalysisInput(longSummary)).toThrow(
+        '$.summary must contain at most 600 characters',
+      );
+
+      const longIntro = validDiffPayload();
+      longIntro.groups[0].intro = 'x'.repeat(301);
+      expect(() => parseReviewAnalysisInput(longIntro)).toThrow(
+        '$.groups[0].intro must contain at most 300 characters',
+      );
+    });
   });
 });

@@ -56,10 +56,12 @@ async function applyCompleteDiffAnalysis(root: string, reference: ReviewRef): Pr
     reference,
     analysis: {
       kind: 'diff',
+      summary: 'Adjusts two staged lines in the example module.',
       groups: [
         {
           id: 'staged-changes',
           label: 'Staged changes',
+          intro: 'Both hunks land in the same file.',
           reviewItemIds: bundle.snapshot.items.map((item) => item.id),
         },
       ],
@@ -136,6 +138,8 @@ describe('integrated review workflow', () => {
     const store = createReviewStore(root);
     const initial = store.readBundle(reference.workspaceId, reference.revisionId);
     expect(initial.snapshot.items).toHaveLength(2);
+    expect(initial.insights.summary).toBe('Adjusts two staged lines in the example module.');
+    expect(initial.insights.groups[0]?.intro).toBe('Both hunks land in the same file.');
 
     for (const item of initial.snapshot.items) {
       store.patchItemProgress(reference.workspaceId, reference.revisionId, item.id, {

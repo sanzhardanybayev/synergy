@@ -3,7 +3,7 @@ name: review
 description: Use when the user wants a guided human review of a GitHub PR, staged changes, unstaged changes, or a bounded current-code scope, or wants to resume an exact Synergy review and answer browser questions. Captures immutable revisions, creates repository-aware review groups and concise item descriptions, opens the local portal, and runs the durable question loop.
 ---
 
-<!-- synergy-version: 0.16.0 -->
+<!-- synergy-version: 0.17.0 -->
 
 ## Step 0 — Freshness check
 
@@ -11,7 +11,7 @@ This skill may remain loaded after Synergy is updated. Set `MINE` from the marke
 run the installed-version check used by the other Synergy skills:
 
 ```bash
-MINE="0.16.0"
+MINE="0.17.0"
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -140,14 +140,43 @@ tests, prefer a coherent behavior over one section per declaration or test case.
 
 Give every proposed scope section a short local `key`, then reference those keys from exactly one
 group. Keys only need to be unique within this payload; the CLI derives stable review identities.
+
+### Narrative ordering
+
+Plan the story before writing the payload. Order by consumer-first call-chain descent: start at
+the entry points a user or caller actually touches (screens, routes, hooks, public API), then
+descend the call chain one level at a time so every file is motivated by a consumer the reviewer
+has just read. Implementation cores, stores, types, and plumbing appear only after the code that
+needs them. Never types-first, never alphabetical. Find the order by tracing imports/callers
+downward from user-visible surfaces.
+
+Array order IS the walkthrough order: `groups[]` is chapter order; `reviewItemIds[]` /
+`sectionKeys[]` is page order (files by first appearance, hunks by position). Order them
+deliberately.
+
+Always provide `summary` (2-4 sentences, max 600 chars): what the change does, why, and the route
+the review takes.
+
+Give each group an `intro` (1-2 sentences, max 300 chars) written as a hand-off: why this chapter
+now, what to check.
+
+Exception: when one large unit genuinely is the right starting point, lead with it and say so in
+its intro; the default is gradual buildup.
+
+Worked example: wrong order starts at `authTransitionStore.ts`; right order starts at the auth
+entry hooks (`useAppleAuth` / `useGoogleAuth` / `useEmailAuth`) which call `usePostAuthFlow`, which
+calls `beginAuthTransition` - only then the store, whose necessity is by then self-evident.
+
 Write the scoped payload in this shape:
 
 ```json
 {
+  "summary": "Adds a scoped confirmation step before subscription events apply their projection, so a webhook is durably recorded before any state changes and a projection failure cannot lose the event.",
   "groups": [
     {
       "id": "subscription-lifecycle",
       "label": "Subscription lifecycle",
+      "intro": "Start where the webhook lands and follow it through to projection - the durable-capture-before-apply order is the whole point of this change.",
       "sectionKeys": ["event-capture", "projection-dispatch"]
     }
   ],

@@ -71,6 +71,12 @@ export interface ReviewItemProgressPatch {
   note?: string | null;
 }
 
+export interface WalkthroughPosition {
+  activeGroupId: string;
+  activeReviewItemId: string;
+  activeFile?: string;
+}
+
 export type DiffLineKind = 'context' | 'add' | 'remove';
 export type DiffFileStatus = 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'binary';
 
@@ -187,6 +193,7 @@ export interface ReviewItemInsight {
 export interface ReviewGroup {
   id: string;
   label: string;
+  intro?: string;
   reviewItemIds: string[];
 }
 
@@ -199,6 +206,7 @@ export interface ReviewFileInsight {
 export interface ReviewInsights {
   schemaVersion: 1;
   revisionId: string;
+  summary?: string;
   groups: ReviewGroup[];
   items: ReviewItemInsight[];
   files?: ReviewFileInsight[];

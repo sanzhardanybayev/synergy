@@ -24,6 +24,7 @@ import type {
   ReviewQuestion,
   ReviewReadiness,
   ReviewRef,
+  WalkthroughPosition,
 } from '@synergy/review-core';
 import {
   deriveReviewReadiness,
@@ -715,6 +716,21 @@ export async function patchReviewProgress(
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reviewItemId, ...patch }),
+    signal,
+  });
+  if (!response.ok) throw await reviewError(response);
+  return decodeBundle(await readReviewJson(response), reference);
+}
+
+export async function patchReviewWalkthrough(
+  reference: ReviewRef,
+  position: WalkthroughPosition,
+  signal?: AbortSignal,
+): Promise<ReviewBundleResponse> {
+  const response = await fetch(reviewPath(reference, 'progress'), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ walkthrough: position }),
     signal,
   });
   if (!response.ok) throw await reviewError(response);

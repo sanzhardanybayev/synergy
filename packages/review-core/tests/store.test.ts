@@ -145,6 +145,65 @@ function makeSuccessorFixture(predecessorRevisionId: string): ReviewBundle {
   };
 }
 
+function makeWalkthroughFixture(): ReviewBundle {
+  const base = makeReviewFixture();
+  const itemDef = {
+    id: 'hunk-def',
+    kind: 'code-section' as const,
+    path: 'src/example.ts',
+    label: '@@ -1 +1 @@',
+    range: { start: 1, end: 1 },
+    contentHash: hashText('export const example = true;'),
+    locationHash: 'location-hash-def',
+  };
+  const itemGhi = {
+    id: 'hunk-ghi',
+    kind: 'code-section' as const,
+    path: 'src/example.ts',
+    label: '@@ -1 +1 @@',
+    range: { start: 1, end: 1 },
+    contentHash: hashText('export const example = true;'),
+    locationHash: 'location-hash-ghi',
+  };
+  return {
+    ...base,
+    snapshot: {
+      ...base.snapshot,
+      items: [...base.snapshot.items, itemDef, itemGhi],
+    },
+    insights: {
+      ...base.insights,
+      groups: [
+        { id: 'group-1', label: 'Group 1', reviewItemIds: ['hunk-abc', 'hunk-def'] },
+        { id: 'group-2', label: 'Group 2', reviewItemIds: ['hunk-ghi'] },
+      ],
+      items: [
+        ...base.insights.items,
+        {
+          reviewItemId: 'hunk-def',
+          description: 'Second item.',
+          confidence: 'high' as const,
+          evidencePaths: ['src/example.ts'],
+        },
+        {
+          reviewItemId: 'hunk-ghi',
+          description: 'Third item.',
+          confidence: 'high' as const,
+          evidencePaths: ['src/example.ts'],
+        },
+      ],
+    },
+    progress: {
+      ...base.progress,
+      items: {
+        'hunk-abc': { status: 'needs-review' as const },
+        'hunk-def': { status: 'needs-review' as const },
+        'hunk-ghi': { status: 'needs-review' as const },
+      },
+    },
+  };
+}
+
 describe('review storage', () => {
   it('rejects outward symlinks in existing review ancestors and final artifacts', () => {
     const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
@@ -1356,5 +1415,70 @@ describe('review storage', () => {
     expect(() => store.readBundle('mobile-app-staged', 'patch-a82c19f')).toThrow(
       /does not match pending answer bytes/,
     );
+  });
+});
+
+describe('patchWalkthroughPosition', () => {
+  it('persists the cursor and returns updated progress', () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
+    const store = createReviewStore(root);
+    const fixture = makeWalkthroughFixture();
+    store.createRevision(fixture.workspace, fixture.snapshot, fixture.insights, fixture.progress);
+
+    const progress = store.patchWalkthroughPosition(
+      fixture.workspace.id,
+      fixture.snapshot.revisionId,
+      { activeGroupId: 'group-1', activeReviewItemId: 'hunk-def' },
+    );
+
+    expect(progress.activeGroupId).toBe('group-1');
+    expect(progress.activeReviewItemId).toBe('hunk-def');
+  });
+
+  it('ignores a position earlier than the stored cursor', () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
+    const store = createReviewStore(root);
+    const fixture = makeWalkthroughFixture();
+    store.createRevision(fixture.workspace, fixture.snapshot, fixture.insights, fixture.progress);
+
+    store.patchWalkthroughPosition(fixture.workspace.id, fixture.snapshot.revisionId, {
+      activeGroupId: 'group-2',
+      activeReviewItemId: 'hunk-ghi',
+    });
+    const progress = store.patchWalkthroughPosition(
+      fixture.workspace.id,
+      fixture.snapshot.revisionId,
+      { activeGroupId: 'group-1', activeReviewItemId: 'hunk-abc' },
+    );
+
+    expect(progress.activeReviewItemId).toBe('hunk-ghi');
+  });
+
+  it('rejects an item outside the named group', () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
+    const store = createReviewStore(root);
+    const fixture = makeWalkthroughFixture();
+    store.createRevision(fixture.workspace, fixture.snapshot, fixture.insights, fixture.progress);
+
+    expect(() =>
+      store.patchWalkthroughPosition(fixture.workspace.id, fixture.snapshot.revisionId, {
+        activeGroupId: 'group-1',
+        activeReviewItemId: 'hunk-ghi',
+      }),
+    ).toThrow();
+  });
+
+  it('rejects an unknown group id', () => {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-'));
+    const store = createReviewStore(root);
+    const fixture = makeWalkthroughFixture();
+    store.createRevision(fixture.workspace, fixture.snapshot, fixture.insights, fixture.progress);
+
+    expect(() =>
+      store.patchWalkthroughPosition(fixture.workspace.id, fixture.snapshot.revisionId, {
+        activeGroupId: 'group-missing',
+        activeReviewItemId: 'hunk-abc',
+      }),
+    ).toThrow();
   });
 });

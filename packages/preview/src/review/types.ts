@@ -4,6 +4,7 @@ import type {
   ReviewItemProgressPatch,
   ReviewReadiness,
   ReviewRef,
+  WalkthroughPosition,
 } from '@synergy/review-core';
 import type {
   ReviewBundleResponse,
@@ -11,6 +12,7 @@ import type {
   ReviewStreamConnection,
   ReviewStreamHandlers,
 } from '../api.js';
+import type { Chapter } from './walkthrough.js';
 
 export interface ReviewClient {
   getBundle(reference: ReviewRef, signal?: AbortSignal): Promise<ReviewBundleResponse>;
@@ -28,6 +30,11 @@ export interface ReviewClient {
     signal?: AbortSignal,
   ): Promise<ReviewQuestionResponse>;
   postActive(reference: ReviewRef, signal?: AbortSignal): Promise<void>;
+  patchWalkthrough(
+    reference: ReviewRef,
+    position: WalkthroughPosition,
+    signal?: AbortSignal,
+  ): Promise<ReviewBundleResponse>;
   openStream(reference: ReviewRef, handlers: ReviewStreamHandlers): ReviewStreamConnection;
 }
 
@@ -55,6 +62,14 @@ export interface ReviewContextValue {
   interruptionCode: string | null;
   sourceChanged: boolean;
   captureFailed: boolean;
+  walkthrough: {
+    enabled: boolean;
+    chapters: Chapter[];
+    revealedCount: number;
+    revealAll: boolean;
+    advanceTo(reviewItemId: string): void;
+    setRevealAll(): void;
+  };
   retry(): Promise<void>;
   setActiveItem(reviewItemId: string): void;
   toggleSelectedLine(lineId: string): void;

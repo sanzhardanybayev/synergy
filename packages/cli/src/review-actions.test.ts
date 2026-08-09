@@ -284,6 +284,53 @@ describe('review lifecycle actions', () => {
     }
   });
 
+  it('persists summary and group intro for a diff analysis', async () => {
+    const root = join(tmpdir(), `synergy-review-diff-narrative-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const reviewItemId = createReviewStore(root).readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot.items[0]?.id;
+      if (!reviewItemId) throw new Error('fixture capture must create one review item');
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          summary: 'This PR adds rate limiting; middleware first, then the engine.',
+          groups: [
+            {
+              id: 'core',
+              label: 'Core change',
+              intro: 'Every request passes through here first.',
+              reviewItemIds: [reviewItemId],
+            },
+          ],
+          items: [
+            {
+              reviewItemId,
+              description: 'Updates the example value used by the staged module.',
+              confidence: 'high',
+              evidencePaths: ['src/example.ts'],
+            },
+          ],
+        },
+      });
+      const finalized = createReviewStore(root).readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.summary).toBe(
+        'This PR adds rate limiting; middleware first, then the engine.',
+      );
+      expect(finalized.insights.groups[0]?.intro).toBe('Every request passes through here first.');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('persists per-file descriptions supplied by analysis-set', async () => {
     const root = join(tmpdir(), `synergy-review-file-insights-${Date.now()}`);
     mkdirSync(root, { recursive: true });
@@ -1211,6 +1258,69 @@ describe('review lifecycle actions', () => {
       expect(finalized.insights.files).toEqual([
         { path: 'src/example.ts', description: 'Exports two constants.', confidence: 'high' },
       ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('persists summary and group intro for a scope analysis', async () => {
+    const root = join(tmpdir(), `synergy-review-scope-narrative-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const runner: CommandRunner = {
+      run(command, args, options): CommandResult {
+        const key = [command, ...args].join(' ');
+        if (key === 'git rev-parse --show-toplevel') {
+          return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+        }
+        if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+        if (key === 'git ls-files --cached --others --exclude-standard -z -- src') {
+          return { exitCode: 0, stdout: 'src/example.ts\0', stderr: '' };
+        }
+        throw new Error(`missing fixture for ${key}`);
+      },
+    };
+    try {
+      const source = 'export const first = 1;\nexport const second = 2;\n';
+      const created = createOrResumeReview({
+        root,
+        runner,
+        readFile: () => source,
+        source: { kind: 'scope', patterns: ['src'] },
+      });
+      const section = {
+        key: 'local-key',
+        path: 'src/example.ts',
+        label: 'Module exports',
+        start: 1,
+        end: 3,
+        description: 'Defines the scoped exports consumed by the module.',
+        confidence: 'high' as const,
+        evidencePaths: ['src/example.ts'],
+      };
+
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'scope',
+          summary: 'Walks the subscription lifecycle.',
+          sections: [section],
+          groups: [
+            {
+              id: 'exports',
+              label: 'Exports',
+              intro: 'Capture comes before projection.',
+              sectionKeys: [section.key],
+            },
+          ],
+        },
+      });
+      const finalized = createReviewStore(root).readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.summary).toBe('Walks the subscription lifecycle.');
+      expect(finalized.insights.groups[0]?.intro).toBe('Capture comes before projection.');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

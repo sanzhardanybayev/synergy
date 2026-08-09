@@ -1,4 +1,4 @@
-import type { ReviewRef } from '@synergy/review-core';
+import type { ReviewRef, WalkthroughPosition } from '@synergy/review-core';
 import { resolveBrowserReviewItemContext } from '@synergy/review-core/browser';
 import { useCallback, useEffect, useRef } from 'react';
 import type { Dispatch } from 'react';
@@ -23,6 +23,7 @@ export interface ReviewOperations {
   markProgress(reviewItemId: string, status: 'reviewed' | 'needs-review'): Promise<void>;
   setQuestionDraft(value: string): void;
   sendQuestion(): Promise<void>;
+  advanceWalkthrough(position: WalkthroughPosition): void;
 }
 
 function errorMessage(prefix: string, error: unknown): string {
@@ -309,6 +310,33 @@ export function useReviewOperations({
     state.selections,
     track,
   ]);
+  const advanceWalkthrough = useCallback(
+    (position: WalkthroughPosition): void => {
+      const requestKey = referenceKey;
+      const requestEpoch = epochRef.current;
+      const controller = new AbortController();
+      const signal = track(controller);
+      client
+        .patchWalkthrough(requestReference, position, signal)
+        .then((response) => {
+          if (
+            !mountedRef.current ||
+            epochRef.current !== requestEpoch ||
+            referenceKeyRef.current !== requestKey ||
+            signal.aborted
+          )
+            return;
+          dispatch({ type: 'loaded', payload: response });
+        })
+        .catch((error: unknown) => {
+          // Cursor persistence is a convenience; navigation must never block on it.
+          console.error('Could not persist walkthrough cursor', error);
+        })
+        .finally(() => release(controller));
+    },
+    [client, dispatch, referenceKey, release, requestReference, track],
+  );
+
   return {
     retry,
     setActiveItem,
@@ -319,5 +347,6 @@ export function useReviewOperations({
     markProgress,
     setQuestionDraft,
     sendQuestion,
+    advanceWalkthrough,
   };
 }

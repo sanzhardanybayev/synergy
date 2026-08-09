@@ -5,6 +5,10 @@ interface ReviewHeaderProps {
   bundle: ReviewBundle;
   readiness: ReviewReadiness;
   captureFailed: boolean;
+  walkthrough?: {
+    enabled: boolean;
+    setRevealAll(): void;
+  };
 }
 
 function sourceLabel(bundle: ReviewBundle): string {
@@ -16,12 +20,12 @@ function sourceLabel(bundle: ReviewBundle): string {
 }
 
 /** Keeps source identity, freshness, and durable review coverage visible. */
-export function ReviewHeader({ bundle, readiness, captureFailed }: ReviewHeaderProps) {
+export function ReviewHeader({ bundle, readiness, captureFailed, walkthrough }: ReviewHeaderProps) {
   const completed = bundle.snapshot.items.length - readiness.pending - readiness.stale;
   const total = bundle.snapshot.items.length;
   const source = sourceLabel(bundle);
   return (
-    <header className="review-header">
+    <header className={`review-header${walkthrough?.enabled ? ' review-header--walkthrough' : ''}`}>
       <div className="review-header__identity">
         <p className="review-eyebrow">{bundle.workspace.repository.name}</p>
         <h1>{source} review</h1>
@@ -56,6 +60,17 @@ export function ReviewHeader({ bundle, readiness, captureFailed }: ReviewHeaderP
           </dd>
         </div>
       </dl>
+      {walkthrough?.enabled ? (
+        <div className="review-header__reveal">
+          <button
+            type="button"
+            className="review-reveal-all"
+            onClick={() => walkthrough.setRevealAll()}
+          >
+            Reveal all
+          </button>
+        </div>
+      ) : null}
       <div className="review-header__theme" aria-label="Theme">
         <ThemeToggle />
       </div>

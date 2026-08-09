@@ -4,6 +4,7 @@ import type * as vscode from 'vscode';
 import { type DaemonLink, tryConnectDaemon } from '../data/daemon.js';
 import {
   type SessionSummary,
+  advanceWalkthrough,
   listSessions,
   loadBundle,
   saveNote,
@@ -197,6 +198,20 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
 
         case 'showSnapshot':
           await this.showSnapshotFor(message.path);
+          break;
+
+        case 'advanceWalkthrough':
+          this.withActiveRef((projectRoot, ref) => {
+            const item = this.currentBundle?.snapshot.items.find(
+              (candidate) => candidate.id === message.reviewItemId,
+            );
+            advanceWalkthrough(projectRoot, ref, {
+              activeGroupId: message.groupId,
+              activeReviewItemId: message.reviewItemId,
+              ...(item ? { activeFile: item.path } : {}),
+            });
+          });
+          this.refreshActiveScreen();
           break;
       }
     } catch (error) {

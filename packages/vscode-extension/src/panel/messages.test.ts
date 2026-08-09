@@ -46,6 +46,20 @@ describe('parseFromWebview', () => {
     expect(parseFromWebview({ kind: 'setDiffVisible', value: 'yes' })).toBeUndefined();
   });
 
+  it('parses advanceWalkthrough', () => {
+    expect(
+      parseFromWebview({ kind: 'advanceWalkthrough', groupId: 'group-1', reviewItemId: 'item-1' }),
+    ).toEqual({ kind: 'advanceWalkthrough', groupId: 'group-1', reviewItemId: 'item-1' });
+  });
+
+  it('rejects advanceWalkthrough without string groupId/reviewItemId', () => {
+    expect(parseFromWebview({ kind: 'advanceWalkthrough' })).toBeUndefined();
+    expect(parseFromWebview({ kind: 'advanceWalkthrough', groupId: 'group-1' })).toBeUndefined();
+    expect(
+      parseFromWebview({ kind: 'advanceWalkthrough', groupId: 1, reviewItemId: 'item-1' }),
+    ).toBeUndefined();
+  });
+
   it('rejects unknown kinds and malformed payloads', () => {
     expect(parseFromWebview({ kind: 'nope' })).toBeUndefined();
     expect(parseFromWebview(null)).toBeUndefined();
