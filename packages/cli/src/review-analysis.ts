@@ -16,6 +16,7 @@ export interface ScopeAnalysisGroupInput {
   id: string;
   label: string;
   sectionKeys: string[];
+  intro?: string;
 }
 
 export interface FileAnalysisInput {
@@ -30,12 +31,14 @@ export type ReviewAnalysisInput =
       groups: ScopeAnalysisGroupInput[];
       sections: ScopeAnalysisSectionInput[];
       files?: FileAnalysisInput[];
+      summary?: string;
     }
   | {
       kind: 'diff';
-      groups: ReviewGroup[];
+      groups: (ReviewGroup & { intro?: string })[];
       items: ReviewItemInsight[];
       files?: FileAnalysisInput[];
+      summary?: string;
     };
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
@@ -50,6 +53,16 @@ export const MAX_DESCRIPTION_LENGTH = 600;
  * agreement test in review-analysis.test.ts.
  */
 export const FILE_INSIGHT_KEYS = ['path', 'description', 'confidence'] as const;
+/**
+ * Kept in lockstep with `$defs.diffAnalysis.properties.summary.maxLength` and
+ * `$defs.scopeAnalysis.properties.summary.maxLength` in review-analysis.schema.json.
+ */
+export const MAX_SUMMARY_LENGTH = 600;
+/**
+ * Kept in lockstep with `$defs.diffGroup.properties.intro.maxLength` and
+ * `$defs.scopeGroup.properties.intro.maxLength` in review-analysis.schema.json.
+ */
+export const MAX_INTRO_LENGTH = 300;
 
 function propertyPath(path: string, key: string): string {
   return IDENTIFIER.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
@@ -105,6 +118,13 @@ function assertDescription(value: unknown, path: string): asserts value is strin
   }
 }
 
+function assertBoundedText(value: unknown, path: string, max: number): asserts value is string {
+  assertString(value, path);
+  if (Array.from(value).length > max) {
+    fail(path, `must contain at most ${max} characters`);
+  }
+}
+
 function assertInteger(value: unknown, path: string): asserts value is number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
     fail(path, 'must be a positive integer');
@@ -157,16 +177,18 @@ function assertUniqueProperty<T>(
   }
 }
 
-function parseDiffGroup(value: unknown, index: number): ReviewGroup {
+function parseDiffGroup(value: unknown, index: number): ReviewGroup & { intro?: string } {
   const path = `$.groups[${index}]`;
   assertRecord(value, path);
-  assertOnlyKeys(value, ['id', 'label', 'reviewItemIds'], path);
+  assertOnlyKeys(value, ['id', 'label', 'reviewItemIds', 'intro'], path);
   assertGroupId(value.id, `${path}.id`);
   assertString(value.label, `${path}.label`);
+  if (value.intro !== undefined) assertBoundedText(value.intro, `${path}.intro`, MAX_INTRO_LENGTH);
   return {
     id: value.id,
     label: value.label,
     reviewItemIds: parseStringArray(value.reviewItemIds, `${path}.reviewItemIds`),
+    ...(value.intro === undefined ? {} : { intro: value.intro }),
   };
 }
 
@@ -187,13 +209,15 @@ function parseDiffItem(value: unknown, index: number): ReviewItemInsight {
 function parseScopeGroup(value: unknown, index: number): ScopeAnalysisGroupInput {
   const path = `$.groups[${index}]`;
   assertRecord(value, path);
-  assertOnlyKeys(value, ['id', 'label', 'sectionKeys'], path);
+  assertOnlyKeys(value, ['id', 'label', 'sectionKeys', 'intro'], path);
   assertGroupId(value.id, `${path}.id`);
   assertString(value.label, `${path}.label`);
+  if (value.intro !== undefined) assertBoundedText(value.intro, `${path}.intro`, MAX_INTRO_LENGTH);
   return {
     id: value.id,
     label: value.label,
     sectionKeys: parseStringArray(value.sectionKeys, `${path}.sectionKeys`),
+    ...(value.intro === undefined ? {} : { intro: value.intro }),
   };
 }
 
@@ -290,7 +314,7 @@ function assertEveryReferenceIsOwned(
 }
 
 function parseDiffAnalysis(value: Record<string, unknown>): ReviewAnalysisInput {
-  assertOnlyKeys(value, ['groups', 'items', 'files'], '$');
+  assertOnlyKeys(value, ['groups', 'items', 'files', 'summary'], '$');
   const groups = parseGroups(value.groups, parseDiffGroup);
   assertNonEmptyArray(value.items, '$.items');
   const items = value.items.map(parseDiffItem);
@@ -302,11 +326,19 @@ function parseDiffAnalysis(value: Record<string, unknown>): ReviewAnalysisInput 
     (groupIndex, referenceIndex) => `$.groups[${groupIndex}].reviewItemIds[${referenceIndex}]`,
   );
   const files = value.files === undefined ? undefined : parseFiles(value.files);
-  return { kind: 'diff', groups, items, ...(files ? { files } : {}) };
+  if (value.summary !== undefined)
+    assertBoundedText(value.summary, '$.summary', MAX_SUMMARY_LENGTH);
+  return {
+    kind: 'diff',
+    groups,
+    items,
+    ...(files ? { files } : {}),
+    ...(value.summary === undefined ? {} : { summary: value.summary }),
+  };
 }
 
 function parseScopeAnalysis(value: Record<string, unknown>): ReviewAnalysisInput {
-  assertOnlyKeys(value, ['groups', 'sections', 'files'], '$');
+  assertOnlyKeys(value, ['groups', 'sections', 'files', 'summary'], '$');
   const groups = parseGroups(value.groups, parseScopeGroup);
   assertNonEmptyArray(value.sections, '$.sections');
   const sections = value.sections.map(parseScopeSection);
@@ -318,12 +350,20 @@ function parseScopeAnalysis(value: Record<string, unknown>): ReviewAnalysisInput
     (groupIndex, referenceIndex) => `$.groups[${groupIndex}].sectionKeys[${referenceIndex}]`,
   );
   const files = value.files === undefined ? undefined : parseFiles(value.files);
-  return { kind: 'scope', groups, sections, ...(files ? { files } : {}) };
+  if (value.summary !== undefined)
+    assertBoundedText(value.summary, '$.summary', MAX_SUMMARY_LENGTH);
+  return {
+    kind: 'scope',
+    groups,
+    sections,
+    ...(files ? { files } : {}),
+    ...(value.summary === undefined ? {} : { summary: value.summary }),
+  };
 }
 
 export function parseReviewAnalysisInput(value: unknown): ReviewAnalysisInput {
   assertRecord(value, '$');
-  assertOnlyKeys(value, ['groups', 'items', 'sections', 'files'], '$');
+  assertOnlyKeys(value, ['groups', 'items', 'sections', 'files', 'summary'], '$');
   const hasItems = Object.hasOwn(value, 'items');
   const hasSections = Object.hasOwn(value, 'sections');
   if (hasItems && hasSections) {
