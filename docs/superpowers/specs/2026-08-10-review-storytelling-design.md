@@ -131,6 +131,10 @@ stamps.
   (`patchWalkthroughPosition`, alongside `setItemStatus`). The existing fs watcher and
   daemon SSE link re-post the bundle, keeping both surfaces in sync.
 - No narrative fields means the current flat rendering, unchanged.
+- Parity requirement: the pane's walkthrough experience must match the web preview in
+  structure and quality - same summary bar, chapter outline with locked/dimmed
+  states, chapter intro, story-ordered hunks, and Continue pacing - adapted to the
+  pane's narrower layout, not a stripped-down variant.
 
 ## 5. API and store plumbing
 
@@ -144,7 +148,25 @@ stamps.
   one (compared via the story order derived from the insights arrays) is ignored.
   Both UIs stay simple and cannot regress each other's cursor.
 
-## 6. Error handling
+## 6. UX quality bar
+
+The walkthrough is a reviewer-facing surface; polish is a requirement, not a
+nice-to-have. Approved prototype: `.lavish/review-storytelling-mock.html` (summary
+bar with chapter progress dots, numbered chapter outline with locked/dimmed future
+chapters, chapter intro card, file card with hunk tabs labeled by line range,
+Continue bar with a teaser of the next chapter). Implementation follows it plus:
+
+- All styling through Ember & Graphite tokens; no hardcoded palette values.
+- Clear focus states and full keyboard path: J/K pages, R marks reviewed, Continue
+  reachable by keyboard; reveal transitions respect `prefers-reduced-motion`.
+- Progressive disclosure never hides orientation: chapter titles and counts stay
+  visible even when locked, so the reviewer always sees the shape of the whole
+  review.
+- Continue advances with smooth scroll to the next chapter and preserves reading
+  position on reload (cursor persistence).
+- Empty, loading, and no-narrative states are designed, not incidental.
+
+## 7. Error handling
 
 - Parser rejects blank or over-length `summary` / `intro` with the same corrective
   error style as existing fields; unknown keys remain rejected.
@@ -153,7 +175,7 @@ stamps.
 - Preview and pane treat missing narrative fields as "no walkthrough" rather than an
   error state.
 
-## 7. Testing
+## 8. Testing
 
 - CLI: parser accept/reject cases for `summary` and `intro` (length, blank, unknown
   keys still rejected); the schema-agreement test extends automatically; persistence
