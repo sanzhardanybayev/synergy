@@ -5,6 +5,7 @@ import { ReviewHeader } from './ReviewHeader.js';
 import { useReview } from './ReviewProvider.js';
 import { ReviewSidebar } from './ReviewSidebar.js';
 import { ReviewStage } from './ReviewStage.js';
+import { chapterOf } from './walkthrough.js';
 
 function orderedItems(items: ReviewItem[], groupItemIds: string[][]): ReviewItem[] {
   const byId = new Map(items.map((item) => [item.id, item]));
@@ -45,6 +46,10 @@ export function ReviewShell() {
     [review.bundle],
   );
   const activeItem = items.find((item) => item.id === review.activeItemId) ?? items[0] ?? null;
+  const currentChapter =
+    review.walkthrough.enabled && activeItem
+      ? chapterOf(review.walkthrough.chapters, activeItem.id)
+      : undefined;
   // Filters by path across ALL groups, not just the active item's group, whereas ReviewSidebar
   // keys its per-file rows as `${group.id}:${path}`. This only matches the sidebar's grouping
   // when every review item for a given path lives in a single group. The analysis validator
@@ -52,13 +57,17 @@ export function ReviewShell() {
   // group, but it does not forbid two distinct items at the same path from landing in different
   // groups - that split just isn't something agent-authored analyses produce today. If it ever
   // does happen, this filter would silently merge items from another group into the file view.
-  const fileItems = useMemo(
-    () => (activeItem ? items.filter((item) => item.path === activeItem.path) : []),
-    [items, activeItem],
-  );
+  // When the walkthrough is enabled, the active chapter's own item order (not the flattened
+  // `items` list) drives the tab order so it always matches the authored story.
+  const fileItems = useMemo(() => {
+    if (!activeItem) return [];
+    if (currentChapter) return currentChapter.items.filter((item) => item.path === activeItem.path);
+    return items.filter((item) => item.path === activeItem.path);
+  }, [items, activeItem, currentChapter]);
   const fileInsight = review.bundle?.insights.files?.find(
     (candidate) => candidate.path === activeItem?.path,
   );
+  const currentChapterIndex = currentChapter?.index ?? 0;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -155,7 +164,36 @@ export function ReviewShell() {
         bundle={review.bundle}
         readiness={review.readiness}
         captureFailed={review.captureFailed}
+        walkthrough={review.walkthrough}
       />
+      {review.walkthrough.enabled && review.bundle.insights.summary ? (
+        <section className="review-summary">
+          <span className="review-summary__rail" aria-hidden="true" />
+          <div>
+            <p className="review-eyebrow">The story of this change</p>
+            <p className="review-summary__text">{review.bundle.insights.summary}</p>
+          </div>
+          <div className="review-summary__progress">
+            <span>
+              Chapter {currentChapterIndex + 1} of {review.walkthrough.chapters.length}
+            </span>
+            <div className="review-summary__dots">
+              {review.walkthrough.chapters.map((chapter) => (
+                <i
+                  key={chapter.group.id}
+                  className={
+                    chapter.index < currentChapterIndex
+                      ? 'is-done'
+                      : chapter.index === currentChapterIndex
+                        ? 'is-current'
+                        : ''
+                  }
+                />
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
       {review.error ? (
         <div className="review-global-alert" role="alert">
           {review.error}
@@ -169,6 +207,17 @@ export function ReviewShell() {
           activeItemId={activeItem.id}
           onSelectItem={review.setActiveItem}
           onSetProgress={review.markProgress}
+          walkthrough={
+            review.walkthrough.enabled
+              ? {
+                  enabled: review.walkthrough.enabled,
+                  chapters: review.walkthrough.chapters,
+                  revealedCount: review.walkthrough.revealedCount,
+                  currentChapterIndex,
+                  advanceTo: review.walkthrough.advanceTo,
+                }
+              : undefined
+          }
         />
         <ReviewStage
           bundle={review.bundle}
@@ -178,6 +227,7 @@ export function ReviewShell() {
           selectedLineIds={review.selectedLineIds}
           noteDraft={review.noteDrafts[activeItem.id]}
           saving={review.savingItemIds.has(activeItem.id)}
+          walkthrough={review.walkthrough}
           onToggleLine={review.toggleSelectedLine}
           onNoteChange={(value) => review.setNoteDraft(activeItem.id, value)}
           onSaveNote={() => review.saveNote(activeItem.id)}

@@ -5,14 +5,27 @@ export interface HunkTabsProps {
   activeItemId: string;
   progress: Record<string, ReviewItemProgress>;
   onSelect(reviewItemId: string): void;
+  /** When true, labels use the story order line-range form `H<n> · L<start>-<end>`. */
+  storyMode?: boolean;
 }
 
 function isComplete(status: string | undefined): boolean {
   return status === 'reviewed' || status === 'carried-forward';
 }
 
+function tabLabel(item: ReviewItem, index: number, storyMode: boolean): string {
+  if (storyMode) return `H${index + 1} · L${item.range.start}-${item.range.end}`;
+  return item.kind === 'hunk' ? `Hunk ${index + 1}` : item.label;
+}
+
 /** Tab strip for the active file's review items. */
-export function HunkTabs({ items, activeItemId, progress, onSelect }: HunkTabsProps) {
+export function HunkTabs({
+  items,
+  activeItemId,
+  progress,
+  onSelect,
+  storyMode = false,
+}: HunkTabsProps) {
   return (
     <div className="review-hunk-tabs" role="tablist" aria-label="Review items in this file">
       {items.map((item, index) => {
@@ -31,7 +44,7 @@ export function HunkTabs({ items, activeItemId, progress, onSelect }: HunkTabsPr
             <span className="review-hunk-tab__check" aria-hidden="true">
               {reviewed ? '✓' : ''}
             </span>
-            {item.kind === 'hunk' ? `Hunk ${index + 1}` : item.label}
+            {tabLabel(item, index, storyMode)}
           </button>
         );
       })}

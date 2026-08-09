@@ -77,6 +77,14 @@ describe('ReviewStage', () => {
         fileItems={[item]}
         saving={false}
         selectedLineIds={[]}
+        walkthrough={{
+          enabled: false,
+          chapters: [],
+          revealedCount: 0,
+          revealAll: false,
+          advanceTo: vi.fn(),
+          setRevealAll: vi.fn(),
+        }}
         onToggleLine={vi.fn()}
         onNoteChange={vi.fn()}
         onSaveNote={vi.fn()}
