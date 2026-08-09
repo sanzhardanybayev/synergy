@@ -68,10 +68,18 @@ group ownership and uniqueness of item references are already enforced.
 
 Step 3 gains a narrative-ordering contract:
 
-- Plan the story before writing the payload. Start with the entry point that frames
-  the change (behavior, API, user-visible surface), not types or plumbing first, not
-  alphabetical order. Each chapter builds on the previous ones; dependencies and types
-  appear when the reader first needs them.
+- Plan the story before writing the payload. Order by consumer-first call-chain
+  descent: start at the entry points a user or caller actually touches (screens,
+  routes, hooks, public API), then descend the call chain one level at a time, so
+  every file is already motivated by a consumer the reviewer has just read.
+  Implementation cores, stores, types, and plumbing appear only after the code that
+  needs them. Never types-first, never alphabetical.
+- Worked example (from a real auth-transition PR): the wrong order starts at
+  `authTransitionStore.ts` (the implementation core). The right order starts at the
+  auth entry hooks (`useAppleAuth` / `useGoogleAuth` / `useEmailAuth`), which call
+  `usePostAuthFlow`, which calls `beginAuthTransition` - and only then presents
+  `authTransitionStore.ts`, whose necessity is by now self-evident. To find this
+  order, the agent traces imports/callers from user-visible surfaces downward.
 - `summary`: 2-4 sentences covering what the change does, why, and the route the
   review will take ("first X, then Y, finally tests"). Hard cap 600 chars.
 - Per-group `intro`: 1-2 sentences written as a hand-off from the previous chapter:
