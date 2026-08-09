@@ -38,7 +38,7 @@ describe('reviewReducer walkthrough state', () => {
   });
 
   it('does not regress the revealed chapter count when the bundle cursor is behind', () => {
-    // revealedCount derivation lives in walkthrough.ts (revealedChapterCount) — assert
+    // revealedCount derivation lives in walkthrough.ts (revealedChapterCount) - assert
     // the provider selector picks max(local, server): simulate bundle cursor at chapter 1
     // after a local advance to chapter 2.
     const chapters = buildChapters(insights, items);

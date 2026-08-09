@@ -1,4 +1,4 @@
-import type { ReviewBundle } from '@synergy/review-core';
+import type { ReviewBundle, ReviewItemProgress } from '@synergy/review-core';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
@@ -34,6 +34,17 @@ function bundleWithNarrative(): ReviewBundle {
 
 function bundleWithoutNarrative(): ReviewBundle {
   return makeDiffBundle();
+}
+
+function bundleWithNarrativeProgress(items: Record<string, ReviewItemProgress>): ReviewBundle {
+  const narrative = bundleWithNarrative();
+  return {
+    ...narrative,
+    progress: {
+      ...narrative.progress,
+      items: { ...narrative.progress.items, ...items },
+    },
+  };
 }
 
 function renderReviewWithBundle(bundle: ReviewBundle) {
@@ -111,5 +122,25 @@ describe('walkthrough UI', () => {
     const currentBadge = document.querySelector('.review-chapter-num.is-current');
     expect(currentBadge).not.toBeNull();
     expect(currentBadge).not.toHaveClass('is-locked');
+  });
+
+  it('shows the chapter done checkmark only once every item in the chapter is reviewed', async () => {
+    renderReviewWithBundle(bundleWithNarrativeProgress({ 'hunk-theme': { status: 'reviewed' } }));
+    await screen.findByText('The story of this change');
+    const themeChapterButton = screen.getByRole('button', { name: /theme and surfaces/i });
+    const themeBadge = themeChapterButton.querySelector('.review-chapter-num');
+    expect(themeBadge).toHaveClass('is-done');
+    expect(themeBadge).toHaveTextContent('✓');
+  });
+
+  it('does not show the done checkmark merely because the cursor advanced past the chapter', async () => {
+    const user = userEvent.setup();
+    renderReviewWithBundle(bundleWithNarrative());
+    await screen.findByText('The story of this change');
+    await user.click(screen.getByRole('button', { name: /continue/i }));
+    const themeChapterButton = screen.getByRole('button', { name: /theme and surfaces/i });
+    const themeBadge = themeChapterButton.querySelector('.review-chapter-num');
+    expect(themeBadge).not.toHaveClass('is-done');
+    expect(themeBadge).toHaveTextContent('1');
   });
 });

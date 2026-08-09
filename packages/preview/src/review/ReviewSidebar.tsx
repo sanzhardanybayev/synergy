@@ -92,7 +92,9 @@ export function ReviewSidebar({
           const isCurrent =
             chapter !== undefined && chapter.index === walkthrough?.currentChapterIndex;
           const isDone =
-            chapter !== undefined && chapter.index < (walkthrough?.currentChapterIndex ?? 0);
+            chapter !== undefined &&
+            chapter.items.length > 0 &&
+            chapter.items.every((i) => isComplete(progress[i.id]?.status));
           const sectionClassName = `review-group${locked ? ' review-chapter--locked' : ''}`;
           return (
             <section className={sectionClassName} key={group.id}>

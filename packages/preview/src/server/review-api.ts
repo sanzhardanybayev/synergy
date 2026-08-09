@@ -166,6 +166,12 @@ function parseProgress(value: unknown, bundle: ReviewBundle): ProgressPatch {
     if (!group.reviewItemIds.includes(cursor.activeReviewItemId)) {
       throw new ReviewApiError(400, 'invalid_walkthrough_position');
     }
+    if (
+      cursor.activeFile !== undefined &&
+      !bundle.snapshot.files.some((file) => file.path === cursor.activeFile)
+    ) {
+      throw new ReviewApiError(400, 'invalid_walkthrough_position');
+    }
     return {
       kind: 'walkthrough',
       position: {

@@ -450,6 +450,27 @@ describe('review API', () => {
     });
   });
 
+  it('rejects a walkthrough patch with an unknown activeFile', async () => {
+    createReview();
+    const response = await callReviewApi(
+      temp.dir,
+      'PATCH',
+      `/api/reviews/${WORKSPACE}/${REVISION}/progress`,
+      {
+        walkthrough: {
+          activeGroupId: 'group-a',
+          activeReviewItemId: 'hunk-a',
+          activeFile: 'src/not-captured.ts',
+        },
+      },
+    );
+
+    expect(response).toMatchObject({
+      statusCode: 400,
+      json: { error: 'invalid_walkthrough_position' },
+    });
+  });
+
   function twoGroupBundle(): ReviewBundle {
     const base = fixture();
     return {
