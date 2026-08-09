@@ -450,9 +450,9 @@ describe('review API', () => {
     });
   });
 
-  it('wraps a store-level walkthrough error when the item is outside the group', async () => {
+  function twoGroupBundle(): ReviewBundle {
     const base = fixture();
-    const bundle: ReviewBundle = {
+    return {
       ...base,
       snapshot: {
         ...base.snapshot,
@@ -474,7 +474,10 @@ describe('review API', () => {
         items: { ...base.progress.items, 'hunk-b': { status: 'needs-review' } },
       },
     };
-    createReview(bundle);
+  }
+
+  it('rejects a walkthrough patch whose item is outside the named group, at parse time', async () => {
+    createReview(twoGroupBundle());
     const response = await callReviewApi(
       temp.dir,
       'PATCH',
@@ -486,6 +489,29 @@ describe('review API', () => {
       statusCode: 400,
       json: { error: 'invalid_walkthrough_position' },
     });
+  });
+
+  it('treats an earlier/equal walkthrough cursor patch as a monotonic no-op returning 200', async () => {
+    const store = createReview(twoGroupBundle());
+    const advanced = await callReviewApi(
+      temp.dir,
+      'PATCH',
+      `/api/reviews/${WORKSPACE}/${REVISION}/progress`,
+      { walkthrough: { activeGroupId: 'group-b', activeReviewItemId: 'hunk-b' } },
+    );
+    expect(advanced.statusCode).toBe(200);
+
+    const noop = await callReviewApi(
+      temp.dir,
+      'PATCH',
+      `/api/reviews/${WORKSPACE}/${REVISION}/progress`,
+      { walkthrough: { activeGroupId: 'group-a', activeReviewItemId: 'hunk-a' } },
+    );
+
+    expect(noop.statusCode).toBe(200);
+    expect((noop.json as { bundle: ReviewBundle }).bundle).toBeDefined();
+    expect(store.readBundle(WORKSPACE, REVISION).progress.activeReviewItemId).toBe('hunk-b');
+    expect(store.readBundle(WORKSPACE, REVISION).progress.activeGroupId).toBe('group-b');
   });
 
   it('rejects mutation requests without JSON content type before persistence', async () => {

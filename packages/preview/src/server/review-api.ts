@@ -158,10 +158,14 @@ function parseProgress(value: unknown, bundle: ReviewBundle): ProgressPatch {
     if (cursor.activeFile !== undefined && typeof cursor.activeFile !== 'string') {
       throw new ReviewApiError(400, 'invalid_request');
     }
-    if (!bundle.insights.groups.some((group) => group.id === cursor.activeGroupId)) {
+    const group = bundle.insights.groups.find((candidate) => candidate.id === cursor.activeGroupId);
+    if (!group) {
       throw new ReviewApiError(400, 'invalid_walkthrough_position');
     }
     getItem(bundle, cursor.activeReviewItemId);
+    if (!group.reviewItemIds.includes(cursor.activeReviewItemId)) {
+      throw new ReviewApiError(400, 'invalid_walkthrough_position');
+    }
     return {
       kind: 'walkthrough',
       position: {
@@ -300,16 +304,11 @@ export async function handleReviewApi(
     if (route.kind === 'progress') {
       const update = parseProgress(body, bundle);
       if (update.kind === 'walkthrough') {
-        try {
-          store.patchWalkthroughPosition(
-            route.reference.workspaceId,
-            route.reference.revisionId,
-            update.position,
-          );
-        } catch (error) {
-          if (error instanceof ReviewApiError) throw error;
-          throw new ReviewApiError(400, 'invalid_walkthrough_position');
-        }
+        store.patchWalkthroughPosition(
+          route.reference.workspaceId,
+          route.reference.revisionId,
+          update.position,
+        );
       } else {
         store.patchItemProgress(
           route.reference.workspaceId,
