@@ -35,7 +35,7 @@ export type ReviewAnalysisInput =
     }
   | {
       kind: 'diff';
-      groups: (ReviewGroup & { intro?: string })[];
+      groups: ReviewGroup[];
       items: ReviewItemInsight[];
       files?: FileAnalysisInput[];
       summary?: string;
@@ -177,7 +177,7 @@ function assertUniqueProperty<T>(
   }
 }
 
-function parseDiffGroup(value: unknown, index: number): ReviewGroup & { intro?: string } {
+function parseDiffGroup(value: unknown, index: number): ReviewGroup {
   const path = `$.groups[${index}]`;
   assertRecord(value, path);
   assertOnlyKeys(value, ['id', 'label', 'reviewItemIds', 'intro'], path);

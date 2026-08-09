@@ -805,6 +805,7 @@ var reviewInsightsSchema = {
   properties: {
     schemaVersion: { const: 1 },
     revisionId: nonEmptyString,
+    summary: nonEmptyString,
     groups: {
       type: "array",
       items: {
@@ -814,6 +815,7 @@ var reviewInsightsSchema = {
         properties: {
           id: nonEmptyString,
           label: nonEmptyString,
+          intro: nonEmptyString,
           reviewItemIds: { type: "array", items: nonEmptyString }
         }
       }

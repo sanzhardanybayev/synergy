@@ -1,5 +1,5 @@
-import { N as ReviewSource, P as SourceFile, g as ReviewBundle, M as ReviewSnapshot, w as ReviewProgress, j as ReviewFileInsight, n as ReviewItem, o as ReviewItemContext, v as ReviewLineSelection, e as DiffReviewSnapshot, b as DiffHunk, D as DiffFile, S as ScopeReviewSnapshot, J as ReviewRef, R as ReviewAnswer, m as ReviewInsights, y as ReviewQuestion, z as ReviewQuestionEnvelope, B as ReviewQuestionGeneration, O as ReviewWorkspace, K as ReviewRepository, x as ReviewProgressUpdate, s as ReviewItemProgressPatch, A as ActiveReviewPointer, E as ReviewQuestionGenerationState, C as ClaimResult, Q as QuestionQueue, F as ReviewQuestionInput } from './readiness-CHNg2V_A.js';
-export { a as DiffFileStatus, c as DiffLine, d as DiffLineKind, f as ReviewAnswerReference, h as ReviewClaim, i as ReviewDiffLineRow, k as ReviewGroup, l as ReviewInsightConfidence, p as ReviewItemInsight, q as ReviewItemKind, r as ReviewItemProgress, t as ReviewItemStatus, u as ReviewLineRow, G as ReviewQuestionStatus, H as ReviewRange, I as ReviewReadiness, L as ReviewScopeLineRow, T as SourceLine, U as deriveReviewReadiness } from './readiness-CHNg2V_A.js';
+import { N as ReviewSource, P as SourceFile, g as ReviewBundle, M as ReviewSnapshot, w as ReviewProgress, j as ReviewFileInsight, n as ReviewItem, o as ReviewItemContext, v as ReviewLineSelection, e as DiffReviewSnapshot, b as DiffHunk, D as DiffFile, S as ScopeReviewSnapshot, J as ReviewRef, R as ReviewAnswer, m as ReviewInsights, y as ReviewQuestion, z as ReviewQuestionEnvelope, B as ReviewQuestionGeneration, O as ReviewWorkspace, K as ReviewRepository, x as ReviewProgressUpdate, s as ReviewItemProgressPatch, A as ActiveReviewPointer, E as ReviewQuestionGenerationState, C as ClaimResult, Q as QuestionQueue, F as ReviewQuestionInput } from './readiness-BGmVdMsA.js';
+export { a as DiffFileStatus, c as DiffLine, d as DiffLineKind, f as ReviewAnswerReference, h as ReviewClaim, i as ReviewDiffLineRow, k as ReviewGroup, l as ReviewInsightConfidence, p as ReviewItemInsight, q as ReviewItemKind, r as ReviewItemProgress, t as ReviewItemStatus, u as ReviewLineRow, G as ReviewQuestionStatus, H as ReviewRange, I as ReviewReadiness, L as ReviewScopeLineRow, T as SourceLine, U as deriveReviewReadiness } from './readiness-BGmVdMsA.js';
 
 declare function atomicWriteJson(path: string, value: unknown): void;
 
@@ -765,6 +765,10 @@ declare const reviewInsightsSchema: {
             readonly type: "string";
             readonly minLength: 1;
         };
+        readonly summary: {
+            readonly type: "string";
+            readonly minLength: 1;
+        };
         readonly groups: {
             readonly type: "array";
             readonly items: {
@@ -777,6 +781,10 @@ declare const reviewInsightsSchema: {
                         readonly minLength: 1;
                     };
                     readonly label: {
+                        readonly type: "string";
+                        readonly minLength: 1;
+                    };
+                    readonly intro: {
                         readonly type: "string";
                         readonly minLength: 1;
                     };

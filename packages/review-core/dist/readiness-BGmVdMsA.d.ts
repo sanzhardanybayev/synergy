@@ -178,6 +178,7 @@ interface ReviewItemInsight {
 interface ReviewGroup {
     id: string;
     label: string;
+    intro?: string;
     reviewItemIds: string[];
 }
 interface ReviewFileInsight {
@@ -188,6 +189,7 @@ interface ReviewFileInsight {
 interface ReviewInsights {
     schemaVersion: 1;
     revisionId: string;
+    summary?: string;
     groups: ReviewGroup[];
     items: ReviewItemInsight[];
     files?: ReviewFileInsight[];

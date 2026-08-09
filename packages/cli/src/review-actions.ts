@@ -27,7 +27,12 @@ import {
   type ReviewAnalysisGuidance,
   deriveReviewAnalysisGuidance,
 } from './review-analysis-guidance.js';
-import type { ReviewAnalysisInput, ScopeAnalysisSectionInput } from './review-analysis.js';
+import {
+  MAX_INTRO_LENGTH,
+  MAX_SUMMARY_LENGTH,
+  type ReviewAnalysisInput,
+  type ScopeAnalysisSectionInput,
+} from './review-analysis.js';
 import {
   type CaptureReviewSourceRequest,
   type CapturedReviewSource,
@@ -92,6 +97,7 @@ export interface RefreshReviewRequest {
 interface CanonicalReviewAnalysis {
   groups: ReviewGroup[];
   items: ReviewItemInsight[];
+  summary?: string;
 }
 
 export interface ApplyReviewAnalysisRequest {
@@ -365,7 +371,21 @@ function assertSafeEvidencePath(path: string): void {
   }
 }
 
+function assertNarrativeText(value: string, max: number, label: string): void {
+  if (value.trim().length === 0 || Array.from(value).length > max) {
+    throw new Error(`${label} must be 1-${max} characters`);
+  }
+}
+
 function assertValidAnalysis(snapshot: ReviewSnapshot, analysis: CanonicalReviewAnalysis): void {
+  if (analysis.summary !== undefined) {
+    assertNarrativeText(analysis.summary, MAX_SUMMARY_LENGTH, 'review summary');
+  }
+  for (const group of analysis.groups) {
+    if (group.intro !== undefined) {
+      assertNarrativeText(group.intro, MAX_INTRO_LENGTH, `group intro: ${group.id}`);
+    }
+  }
   const itemIds = new Set(snapshot.items.map((item) => item.id));
   const groupIds = new Set<string>();
   const groupedItemIds = new Set<string>();
@@ -455,6 +475,7 @@ function translateScopeAnalysis(
     (group): ReviewGroup => ({
       id: group.id,
       label: group.label,
+      ...(group.intro === undefined ? {} : { intro: group.intro }),
       reviewItemIds: group.sectionKeys.map((sectionKey) => {
         const reviewItemId = itemIdBySectionKey.get(sectionKey);
         if (!reviewItemId) throw new Error(`unknown scope section key: ${sectionKey}`);
@@ -470,7 +491,14 @@ function translateScopeAnalysis(
       evidencePaths: section.evidencePaths,
     }),
   );
-  return { snapshot: translatedSnapshot, analysis: { groups, items } };
+  return {
+    snapshot: translatedSnapshot,
+    analysis: {
+      groups,
+      items,
+      ...(analysis.summary === undefined ? {} : { summary: analysis.summary }),
+    },
+  };
 }
 
 export async function applyReviewAnalysis(
@@ -539,6 +567,9 @@ export async function applyReviewAnalysis(
     const insights: ReviewInsights = {
       schemaVersion: 1,
       revisionId: request.reference.revisionId,
+      ...(translated.analysis.summary === undefined
+        ? {}
+        : { summary: translated.analysis.summary }),
       groups: translated.analysis.groups,
       items: translated.analysis.items,
       ...(scopeFiles ? { files: scopeFiles } : {}),
@@ -571,6 +602,7 @@ export async function applyReviewAnalysis(
     const insights: ReviewInsights = {
       schemaVersion: 1,
       revisionId: request.reference.revisionId,
+      ...(diffAnalysis.summary === undefined ? {} : { summary: diffAnalysis.summary }),
       groups: diffAnalysis.groups,
       items: diffAnalysis.items,
       ...(diffFiles ? { files: diffFiles } : {}),
