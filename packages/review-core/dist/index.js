@@ -2907,6 +2907,45 @@ function createReviewStore(projectRoot, options = {}) {
         return next;
       });
     },
+    patchWalkthroughPosition(workspaceId, revisionId, position) {
+      return withLock(workspaceId, () => {
+        const finalized = readFinalizedBundle(projectRoot, workspaceId, revisionId);
+        const snapshot = finalized?.snapshot ?? readValidated(snapshotFile(projectRoot, workspaceId, revisionId), assertReviewSnapshot);
+        const insights = finalized?.insights ?? readValidated(insightsFile(projectRoot, workspaceId, revisionId), assertReviewInsights);
+        const current = finalized?.progress ?? readValidated(progressFile(projectRoot, workspaceId, revisionId), assertReviewProgress);
+        const group = insights.groups.find((candidate) => candidate.id === position.activeGroupId);
+        if (!group) {
+          throw new Error(`unknown walkthrough group: ${position.activeGroupId}`);
+        }
+        if (!group.reviewItemIds.includes(position.activeReviewItemId)) {
+          throw new Error(
+            `walkthrough item ${position.activeReviewItemId} is not in group ${position.activeGroupId}`
+          );
+        }
+        const storyOrder = insights.groups.flatMap((candidate) => candidate.reviewItemIds);
+        const nextIndex = storyOrder.indexOf(position.activeReviewItemId);
+        const currentIndex = current.activeReviewItemId ? storyOrder.indexOf(current.activeReviewItemId) : -1;
+        if (nextIndex <= currentIndex) return current;
+        const next = {
+          ...current,
+          activeGroupId: position.activeGroupId,
+          activeReviewItemId: position.activeReviewItemId,
+          ...position.activeFile === void 0 ? {} : { activeFile: position.activeFile },
+          updatedAt: nextProgressUpdatedAt(current.updatedAt, options.now?.() ?? Date.now())
+        };
+        assertReviewProgress(next);
+        const workspace = this.readWorkspace(workspaceId);
+        validateRevisionRelationships(
+          { ...workspace, source: snapshot.source, currentRevisionId: revisionId },
+          snapshot,
+          insights,
+          next,
+          finalized !== void 0
+        );
+        publishProgress(projectRoot, workspaceId, revisionId, finalized, next, options);
+        return next;
+      });
+    },
     setActiveReview(workspaceId, revisionId) {
       return withLock(workspaceId, () => {
         this.readBundle(workspaceId, revisionId);

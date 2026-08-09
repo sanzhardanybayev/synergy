@@ -75,6 +75,11 @@ interface ReviewItemProgressPatch {
     status?: 'reviewed' | 'needs-review';
     note?: string | null;
 }
+interface WalkthroughPosition {
+    activeGroupId: string;
+    activeReviewItemId: string;
+    activeFile?: string;
+}
 type DiffLineKind = 'context' | 'add' | 'remove';
 type DiffFileStatus = 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'binary';
 interface DiffLine {
@@ -310,4 +315,4 @@ interface ActiveReviewPointer {
 /** Calculates readiness solely from the current snapshot, review progress, questions, and freshness. */
 declare function deriveReviewReadiness(bundle: ReviewBundle, analysisFinalized?: boolean): ReviewReadiness;
 
-export { type ActiveReviewPointer as A, type ReviewQuestionGeneration as B, type ClaimResult as C, type DiffFile as D, type ReviewQuestionGenerationState as E, type ReviewQuestionInput as F, type ReviewQuestionStatus as G, type ReviewRange as H, type ReviewReadiness as I, type ReviewRef as J, type ReviewRepository as K, type ReviewScopeLineRow as L, type ReviewSnapshot as M, type ReviewSource as N, type ReviewWorkspace as O, type SourceFile as P, type QuestionQueue as Q, type ReviewAnswer as R, type ScopeReviewSnapshot as S, type SourceLine as T, deriveReviewReadiness as U, type DiffFileStatus as a, type DiffHunk as b, type DiffLine as c, type DiffLineKind as d, type DiffReviewSnapshot as e, type ReviewAnswerReference as f, type ReviewBundle as g, type ReviewClaim as h, type ReviewDiffLineRow as i, type ReviewFileInsight as j, type ReviewGroup as k, type ReviewInsightConfidence as l, type ReviewInsights as m, type ReviewItem as n, type ReviewItemContext as o, type ReviewItemInsight as p, type ReviewItemKind as q, type ReviewItemProgress as r, type ReviewItemProgressPatch as s, type ReviewItemStatus as t, type ReviewLineRow as u, type ReviewLineSelection as v, type ReviewProgress as w, type ReviewProgressUpdate as x, type ReviewQuestion as y, type ReviewQuestionEnvelope as z };
+export { type ActiveReviewPointer as A, type ReviewQuestionGeneration as B, type ClaimResult as C, type DiffFile as D, type ReviewQuestionGenerationState as E, type ReviewQuestionInput as F, type ReviewQuestionStatus as G, type ReviewRange as H, type ReviewReadiness as I, type ReviewRef as J, type ReviewRepository as K, type ReviewScopeLineRow as L, type ReviewSnapshot as M, type ReviewSource as N, type ReviewWorkspace as O, type SourceFile as P, type QuestionQueue as Q, type ReviewAnswer as R, type ScopeReviewSnapshot as S, type SourceLine as T, deriveReviewReadiness as U, type WalkthroughPosition as W, type DiffFileStatus as a, type DiffHunk as b, type DiffLine as c, type DiffLineKind as d, type DiffReviewSnapshot as e, type ReviewAnswerReference as f, type ReviewBundle as g, type ReviewClaim as h, type ReviewDiffLineRow as i, type ReviewFileInsight as j, type ReviewGroup as k, type ReviewInsightConfidence as l, type ReviewInsights as m, type ReviewItem as n, type ReviewItemContext as o, type ReviewItemInsight as p, type ReviewItemKind as q, type ReviewItemProgress as r, type ReviewItemProgressPatch as s, type ReviewItemStatus as t, type ReviewLineRow as u, type ReviewLineSelection as v, type ReviewProgress as w, type ReviewProgressUpdate as x, type ReviewQuestion as y, type ReviewQuestionEnvelope as z };

@@ -71,6 +71,12 @@ export interface ReviewItemProgressPatch {
   note?: string | null;
 }
 
+export interface WalkthroughPosition {
+  activeGroupId: string;
+  activeReviewItemId: string;
+  activeFile?: string;
+}
+
 export type DiffLineKind = 'context' | 'add' | 'remove';
 export type DiffFileStatus = 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'binary';
 

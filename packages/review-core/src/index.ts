@@ -142,4 +142,5 @@ export type {
   ScopeReviewSnapshot,
   SourceFile,
   SourceLine,
+  WalkthroughPosition,
 } from './types.js';
