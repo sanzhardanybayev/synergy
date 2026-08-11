@@ -9,7 +9,9 @@
       "**/schemas/**",
       "**/*.mdx",
       "**/.vscode-test/**",
-      "**/out-test/**"
+      "**/out-test/**",
+      "packages/vscode-extension/media/panel.js",
+      "packages/vscode-extension/media/panel.js.map"
     ]
   },
   "formatter": {

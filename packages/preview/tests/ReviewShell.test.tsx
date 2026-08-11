@@ -9,6 +9,7 @@ import { ReviewShell } from '../src/review/ReviewShell.js';
 import {
   REVIEW_REFERENCE,
   addedDiffRowId,
+  codeLineText,
   makeDiffBundle,
   makeReviewClient,
   makeScopeBundle,
@@ -167,9 +168,9 @@ describe('ReviewShell', () => {
     const user = userEvent.setup();
     renderShell(makeScopeBundle());
     expect(
-      await screen.findByText("import { useQuery } from '@tanstack/react-query';"),
+      await screen.findByText(codeLineText("import { useQuery } from '@tanstack/react-query';")),
     ).toBeVisible();
-    expect(screen.getByText('export const plan = true;')).toBeVisible();
+    expect(screen.getByText(codeLineText('export const plan = true;'))).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Select source line 4' }));
     expect(screen.getByText('1 line selected')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Select source line 1' })).not.toBeInTheDocument();

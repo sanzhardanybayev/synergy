@@ -313,6 +313,16 @@ describe('Synergy Review extension (extension host)', () => {
       assert.ok(removed.count >= 1, 'expected removed lines to be visible in the inline diff');
     });
 
+    it('syntax-highlights the inline hunk bodies under the CSP', async () => {
+      // `.diff-marker` only exists once paintTokens() has replaced the plain line, and a token's
+      // color is written through CSSOM - the CSP blocks inline style ATTRIBUTES, so this asserts
+      // the highlighter both ran and was allowed to color what it produced.
+      const markers = await pollQuery(harness, '.hunk-diff .diff-marker', 1);
+      assert.ok(markers.count >= 1, 'expected highlighted lines in the inline diff');
+      const colored = await harness.query('.hunk-diff .diff-text span[style*="color"]');
+      assert.ok(colored.count >= 1, 'expected at least one colored syntax token');
+    });
+
     it('the diff toggle hides inline hunk bodies and comes back on', async () => {
       await harness.click('.diff-toggle', 0);
       await pollQuery(harness, '.hunk-diff', 0);

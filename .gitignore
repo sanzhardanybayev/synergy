@@ -39,3 +39,7 @@ dist/
 .synergy/active-review.json
 .synergy/preview.runtime.json
 .synergy/reviews/
+
+# vscode-extension webview bundle (built by esbuild.mjs from src/webview/panel.js)
+/packages/vscode-extension/media/panel.js
+/packages/vscode-extension/media/panel.js.map

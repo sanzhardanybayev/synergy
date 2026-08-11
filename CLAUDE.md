@@ -170,6 +170,14 @@ PR, staged changes, unstaged changes, and a bounded current-code scope.
 - Browser questions are durable. The agent runs `review wait` in the foreground, answers the
   exact revision through `review answer`, then waits again. It never changes application code
   merely because a question was asked.
+- **Syntax highlighting** for both review panes lives in `@synergy/review-core/highlight` (Shiki,
+  JS raw engine + precompiled grammars — no WASM, so the VS Code webview CSP stays strict). Add a
+  language there, never per-host. The "Ember & Graphite" theme pair is a projection of the
+  `--syn-*` tokens in `packages/preview/src/theme.css`; keep it that way rather than introducing
+  syntax colors. Highlighting is presentation only — every failure path falls back to the exact
+  captured text.
+- `packages/vscode-extension/media/panel.js` is a **build artifact**. The source is
+  `src/webview/panel.js`; `esbuild.mjs` bundles it. Never edit the file in `media/`.
 
 Claude Code slash commands: `/synergy-spec` (skill), `/synergy-review` (skill), `/synergy-preview-start`, `/synergy-preview-stop`, `/synergy-preview-status`, `/synergy-validate`, `/synergy-feedback` (skill), `/synergy-execute` (skill), `/synergy-continue` (skill), `/synergy-handoff` (skill).
 
