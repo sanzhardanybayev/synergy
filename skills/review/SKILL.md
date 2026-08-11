@@ -3,7 +3,7 @@ name: review
 description: Use when the user wants a guided human review of a GitHub PR, staged changes, unstaged changes, or a bounded current-code scope, or wants to resume an exact Synergy review and answer browser questions. Captures immutable revisions, creates repository-aware review groups and concise item descriptions, opens the local portal, and runs the durable question loop.
 ---
 
-<!-- synergy-version: 0.17.0 -->
+<!-- synergy-version: 0.18.0 -->
 
 ## Step 0 — Freshness check
 
@@ -11,7 +11,7 @@ This skill may remain loaded after Synergy is updated. Set `MINE` from the marke
 run the installed-version check used by the other Synergy skills:
 
 ```bash
-MINE="0.17.0"
+MINE="0.18.0"
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \

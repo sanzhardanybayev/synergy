@@ -31,6 +31,7 @@ import {
   type ReviewStreamWatcher,
   handleReviewStream,
 } from '../src/server/review-stream.js';
+import { codeLineText } from './review-ui-fixtures.js';
 import { makeMockReq, makeMockRes } from './server/helpers.js';
 
 const temporaryRoots = new Set<string>();
@@ -332,7 +333,7 @@ describe('persisted review UI workflow', () => {
       );
 
       expect(await screen.findByText('Subscription access')).toBeVisible();
-      expect(screen.getByText('export const subscriptionVersion = 2;')).toBeVisible();
+      expect(screen.getByText(codeLineText('export const subscriptionVersion = 2;'))).toBeVisible();
       expect(screen.queryByText('ignored dependency output')).not.toBeInTheDocument();
       expect(bundle.snapshot.files.map((file) => file.path)).toEqual([
         'features/subscriptions/useSubscription.ts',

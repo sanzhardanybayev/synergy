@@ -3,6 +3,9 @@
 // protocol (see src/panel/messages.ts) is small enough that hand-written DOM updates stay
 // readable, and skipping React/Vue keeps the extension bundle tiny.
 //
+// This file is the SOURCE. esbuild.mjs bundles it (with its syntax-highlighting import) to
+// `media/panel.js`, which is what the webview actually loads - see src/panel/webview-html.ts.
+//
 // Type-checked (loosely - see tsconfig.media.json) against the JSDoc typedef below so a
 // mistake like reading `serializedBundle.bundle.drift` (drift is a SIBLING of `bundle`, not
 // nested under it - see src/panel/messages.ts) is a compile error, not a silently-dead badge.
@@ -13,6 +16,8 @@
  * @property {Record<string, 'clean'|'drifted'|'missing'>} drift
  * @property {string} projectRoot
  */
+import { highlightHunk, resolveLanguage } from '@synergy/review-core/highlight';
+
 (() => {
   const vscode = acquireVsCodeApi();
   const app = document.getElementById('app');
@@ -216,11 +221,44 @@
     return file.hunks.find((hunk) => hunk.reviewItemId === item.id);
   }
 
-  function renderDiffLines(hunk) {
+  /** VS Code stamps `vscode-light` / `vscode-dark` / `vscode-high-contrast` on <body>. */
+  function themeMode() {
+    return document.body.classList.contains('vscode-light') ? 'light' : 'dark';
+  }
+
+  /**
+   * Replaces a line's plain text with syntax token spans.
+   *
+   * The CSP forbids inline `style` ATTRIBUTES, so each token color is written through CSSOM. The
+   * `+`/`-` marker keeps no inline color, so it still inherits the add/remove color from panel.css
+   * while the code itself takes the syntax palette; the row background carries add/remove either way.
+   */
+  function paintTokens(textEl, marker, tokens) {
+    if (!textEl.isConnected || !tokens || tokens.length === 0) return;
+    const markerEl = el('span', { className: 'diff-marker' }, [marker]);
+    const spans = tokens.map((token) => {
+      const span = el('span', {}, [token.text]);
+      if (token.color) span.style.color = token.color;
+      if (token.italic) span.style.fontStyle = 'italic';
+      if (token.bold) span.style.fontWeight = '600';
+      return span;
+    });
+    textEl.replaceChildren(markerEl, ...spans);
+  }
+
+  /**
+   * Renders the hunk body with its captured text, then upgrades it to syntax-highlighted spans
+   * once the grammar resolves. Highlighting is asynchronous and best-effort: if it never resolves,
+   * or the language is unsupported, the reviewer keeps looking at the exact captured lines.
+   */
+  function renderDiffLines(hunk, path) {
+    const textEls = [];
     const rows = hunk.lines.map((line) => {
       const kindClass =
         line.kind === 'add' ? 'diff-line-add' : line.kind === 'remove' ? 'diff-line-remove' : '';
       const marker = line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' ';
+      const textEl = el('span', { className: 'diff-text' }, [`${marker}${line.text}`]);
+      textEls.push({ textEl, marker });
       return el('div', { className: `diff-line ${kindClass}` }, [
         el('span', { className: 'diff-gutter' }, [
           line.oldLine === null ? '' : String(line.oldLine),
@@ -228,9 +266,25 @@
         el('span', { className: 'diff-gutter' }, [
           line.newLine === null ? '' : String(line.newLine),
         ]),
-        el('span', { className: 'diff-text' }, [`${marker}${line.text}`]),
+        textEl,
       ]);
     });
+
+    const lang = resolveLanguage(path);
+    if (lang) {
+      const rowsForHighlight = hunk.lines.map((line) => ({ kind: line.kind, text: line.text }));
+      highlightHunk(rowsForHighlight, lang, themeMode())
+        .then((lines) => {
+          lines.forEach((tokens, index) => {
+            const target = textEls[index];
+            if (target) paintTokens(target.textEl, target.marker, tokens);
+          });
+        })
+        .catch(() => {
+          // Presentation only - the captured text is already on screen.
+        });
+    }
+
     return el('div', { className: 'hunk-diff' }, rows);
   }
 
@@ -291,7 +345,7 @@
           diffButton,
         ]),
         insight ? el('div', { className: 'hunk-description' }, [insight.description]) : null,
-        hunk ? renderDiffLines(hunk) : null,
+        hunk ? renderDiffLines(hunk, item.path) : null,
         note,
       ],
     );
@@ -649,7 +703,7 @@
         // already unlocked.
         const workspaceId = message.bundle.bundle.workspace.id;
         const revisionId = message.bundle.bundle.snapshot.revisionId;
-        const sessionKey = `${workspaceId} ${revisionId}`;
+        const sessionKey = `${workspaceId}\0${revisionId}`;
         if (state.walkthroughSessionKey !== sessionKey) {
           state.walkthroughSessionKey = sessionKey;
           state.revealFloor = 0;
@@ -666,6 +720,13 @@
         render();
         break;
     }
+  });
+
+  // A VS Code theme switch re-stamps <body class="vscode-light|vscode-dark">; re-render so the
+  // syntax palette follows it.
+  new MutationObserver(() => render()).observe(document.body, {
+    attributes: true,
+    attributeFilter: ['class'],
   });
 
   render();

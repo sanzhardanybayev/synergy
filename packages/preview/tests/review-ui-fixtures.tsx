@@ -300,3 +300,15 @@ export function firstDiffRowId(bundle: ReviewBundle = makeDiffBundle()): string 
 export function addedDiffRowId(bundle: ReviewBundle = makeDiffBundle()): string {
   return resolveBrowserReviewItemContext(bundle.snapshot, 'hunk-theme').rows[1]!.id;
 }
+
+/**
+ * Matches a rendered code line by its full text.
+ *
+ * Highlighted lines split into token spans, so Testing Library's default matcher - which reads only
+ * an element's direct text-node children - no longer sees the line on the `<code>` element. This
+ * matcher compares `textContent` and rejects ancestors so exactly one element matches.
+ */
+export function codeLineText(expected: string) {
+  return (_content: string, element: Element | null): boolean =>
+    element?.tagName === 'CODE' && element.textContent === expected;
+}

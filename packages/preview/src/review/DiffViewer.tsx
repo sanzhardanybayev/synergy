@@ -1,9 +1,17 @@
 import type { ReviewDiffLineRow } from '@synergy/review-core';
+import type { HighlightHunkRow } from '@synergy/review-core/highlight';
+import { CodeLine, useHighlightedHunk } from './HighlightedCode.js';
 
 interface DiffViewerProps {
+  path: string;
   rows: ReviewDiffLineRow[];
   selectedLineIds: string[];
   onToggleLine(lineId: string): void;
+}
+
+/** Diff rows carry `add`/`remove`/`context` already; the highlighter needs only kind and text. */
+function toHunkRows(rows: ReviewDiffLineRow[]): HighlightHunkRow[] {
+  return rows.map((row) => ({ kind: row.kind, text: row.text }));
 }
 
 function selectionLabel(row: ReviewDiffLineRow, selected: boolean): string {
@@ -14,11 +22,12 @@ function selectionLabel(row: ReviewDiffLineRow, selected: boolean): string {
 }
 
 /** Renders the immutable hunk with canonical, independently selectable rows. */
-export function DiffViewer({ rows, selectedLineIds, onToggleLine }: DiffViewerProps) {
+export function DiffViewer({ path, rows, selectedLineIds, onToggleLine }: DiffViewerProps) {
+  const highlighted = useHighlightedHunk(path, toHunkRows(rows));
   return (
     <section className="review-code-scroll" aria-label="Diff lines">
       <div className="review-diff">
-        {rows.map((row) => {
+        {rows.map((row, index) => {
           const selected = selectedLineIds.includes(row.id);
           const marker = row.kind === 'add' ? '+' : row.kind === 'remove' ? '−' : ' ';
           return (
@@ -52,7 +61,7 @@ export function DiffViewer({ rows, selectedLineIds, onToggleLine }: DiffViewerPr
               <span className="review-code-row__marker" aria-hidden="true">
                 {marker}
               </span>
-              <code>{row.text || ' '}</code>
+              <CodeLine text={row.text} tokens={highlighted?.[index]} />
             </div>
           );
         })}

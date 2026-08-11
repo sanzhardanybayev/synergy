@@ -1,4 +1,6 @@
 import type { ReviewItem, ReviewScopeLineRow, SourceFile } from '@synergy/review-core';
+import { useMemo } from 'react';
+import { CodeLine, useHighlightedFile } from './HighlightedCode.js';
 
 interface SourceViewerProps {
   file: SourceFile;
@@ -17,10 +19,13 @@ export function SourceViewer({
   onToggleLine,
 }: SourceViewerProps) {
   const rowByLine = new Map(rows.map((row) => [row.line, row]));
+  // The captured file is immutable, so its joined text only changes when the file itself does.
+  const text = useMemo(() => file.lines.map((line) => line.text).join('\n'), [file]);
+  const highlighted = useHighlightedFile(file.path, text);
   return (
     <section className="review-code-scroll" aria-label="Source code">
       <div className="review-source">
-        {file.lines.map((line) => {
+        {file.lines.map((line, index) => {
           const row = rowByLine.get(line.number);
           const selected = row ? selectedLineIds.includes(row.id) : false;
           const inSection = line.number >= item.range.start && line.number <= item.range.end;
@@ -45,7 +50,7 @@ export function SourceViewer({
                 <span className="review-code-row__select-placeholder" aria-hidden="true" />
               )}
               <span className="review-code-row__number">{line.number}</span>
-              <code>{line.text || ' '}</code>
+              <CodeLine text={line.text} tokens={highlighted?.[index]} />
             </div>
           );
         })}

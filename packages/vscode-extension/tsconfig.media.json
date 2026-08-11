@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": []
   },
-  "include": ["media/panel.js", "media/global.d.ts"]
+  "include": ["src/webview/panel.js", "media/global.d.ts"]
 }

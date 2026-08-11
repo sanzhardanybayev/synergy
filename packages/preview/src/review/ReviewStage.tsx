@@ -114,6 +114,7 @@ export function ReviewStage({
       </p>
       {bundle.snapshot.kind === 'diff' && context.item.kind === 'hunk' ? (
         <DiffViewer
+          path={item.path}
           rows={context.rows.filter((row) => row.kind !== 'scope')}
           selectedLineIds={selectedLineIds}
           onToggleLine={onToggleLine}
