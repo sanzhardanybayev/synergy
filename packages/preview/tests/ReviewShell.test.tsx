@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildDiffSnapshot } from '@synergy/review-core';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { ReviewProvider } from '../src/review/ReviewProvider.js';
@@ -134,19 +134,19 @@ describe('ReviewShell', () => {
     };
     renderShell(bundle, makeReviewClient(bundle));
 
-    expect(await screen.findByText(`File · ${itemA1.path}`)).toBeVisible();
+    expect(await screen.findByRole('region', { name: `File ${itemA1.path}` })).toBeVisible();
     expect(
       screen.getByText(`Diff hunk · lines ${itemA1.range.start}–${itemA1.range.end}`),
     ).toBeVisible();
 
     await user.keyboard('j');
-    expect(screen.getByText(`File · ${itemA2.path}`)).toBeVisible();
+    expect(screen.getByRole('region', { name: `File ${itemA2.path}` })).toBeVisible();
     expect(
       screen.getByText(`Diff hunk · lines ${itemA2.range.start}–${itemA2.range.end}`),
     ).toBeVisible();
 
     await user.keyboard('j');
-    expect(screen.getByText(`File · ${itemB1.path}`)).toBeVisible();
+    expect(screen.getByRole('region', { name: `File ${itemB1.path}` })).toBeVisible();
     expect(
       screen.getByText(`Diff hunk · lines ${itemB1.range.start}–${itemB1.range.end}`),
     ).toBeVisible();
@@ -277,6 +277,32 @@ describe('ReviewShell', () => {
     renderShell();
     await user.type(await screen.findByRole('searchbox', { name: 'Find a file' }), 'missing-file');
     expect(screen.getByRole('status')).toHaveTextContent('No files match this filter.');
+  });
+
+  it('pins the file identity above the diff and copies its path', async () => {
+    const user = userEvent.setup();
+    const reviewCss = readFileSync(resolve(process.cwd(), 'src/review/review.css'), 'utf8');
+    renderShell();
+    const bar = await screen.findByRole('region', {
+      name: 'File features/plan/PlanCardToggle.tsx',
+    });
+    expect(bar).toHaveTextContent('features/plan/PlanCardToggle.tsx');
+    expect(reviewCss).toContain('.review-stage__filebar {\n  position: sticky;');
+    await user.click(within(bar).getByRole('button', { name: /Copy path/ }));
+    await expect(navigator.clipboard.readText()).resolves.toBe('features/plan/PlanCardToggle.tsx');
+  });
+
+  it('links a pull-request source to its origin in a new tab', async () => {
+    renderShell();
+    const link = await screen.findByRole('link', { name: /PR #317/ });
+    expect(link).toHaveAttribute('href', 'https://github.com/foody-ai/mobile-app/pull/317');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noreferrer');
+  });
+
+  it('wraps long unbreakable answer text inside the question rail', () => {
+    const reviewCss = readFileSync(resolve(process.cwd(), 'src/review/review.css'), 'utf8');
+    expect(reviewCss).toContain('.review-question-list blockquote {\n  overflow-wrap: anywhere;');
   });
 
   it('keeps revision, freshness, and progress facts in every responsive header', async () => {

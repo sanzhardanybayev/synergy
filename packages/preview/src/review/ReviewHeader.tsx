@@ -28,7 +28,23 @@ export function ReviewHeader({ bundle, readiness, captureFailed, walkthrough }: 
     <header className={`review-header${walkthrough?.enabled ? ' review-header--walkthrough' : ''}`}>
       <div className="review-header__identity">
         <p className="review-eyebrow">{bundle.workspace.repository.name}</p>
-        <h1>{source} review</h1>
+        <h1>
+          {bundle.snapshot.source.kind === 'pr' ? (
+            <a
+              className="review-source-link"
+              href={bundle.snapshot.source.url}
+              target="_blank"
+              rel="noreferrer"
+              title="Open the pull request in a new tab"
+            >
+              {source}
+              <span aria-hidden="true"> ↗</span>
+            </a>
+          ) : (
+            source
+          )}{' '}
+          review
+        </h1>
       </div>
       <dl className="review-header__facts">
         <div className="review-header__fact--revision">
