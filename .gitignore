@@ -28,6 +28,9 @@ dist/
 # Playwright MCP artifacts
 .playwright-mcp/
 
+# Lavish Editor review artifacts (local HTML scratch surfaces)
+.lavish/
+
 # Visual brainstorming companion
 .superpowers/
 
