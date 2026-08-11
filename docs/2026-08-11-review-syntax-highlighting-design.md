@@ -104,13 +104,25 @@ inline `color` and nothing else.
 unchanged: no WASM, one nonce-tagged script, and token colors written through CSSOM because the CSP
 blocks inline `style` attributes.
 
-**Bundle size.** The webview cannot load code-split chunks under that CSP, so every grammar is inlined:
-~3 MB minified, of which the grammars are essentially all of it (C++ alone is 671 KB). This is accepted
-rather than mitigated by cutting languages - a review tool that cannot highlight C++ is the worse
-outcome, the file is local to an installed extension, and grammar bodies are lazily compiled by the JS
-engine so the cost is a one-time parse. The `.vsix` grows by ~3 MB; the sourcemap is excluded by
-`.vscodeignore`. The browser preview is unaffected: Vite code-splits the same dynamic imports, so it
-fetches only the grammar a file actually needs.
+**Bundle size.** The webview cannot load code-split chunks under that CSP, so every grammar is inlined.
+`media/panel.js` goes from 26 KB to 3.15 MB minified on disk, of which roughly 2.5 MB is grammars (C++
+alone is 671 KB) and the rest is Shiki's runtime.
+
+The shipped cost is far smaller than that number suggests, because grammars are repetitive JSON-shaped
+data that deflates about 8.6x. Measured across the two packaged artifacts:
+
+| | 0.17.0 | 0.18.0 |
+| --- | --- | --- |
+| `media/panel.js` (compressed in the `.vsix`) | 7.9 KB | 365 KB |
+| `dist/extension.js` (compressed) | 72.5 KB | 72.5 KB - byte-identical |
+| `.vsix` total | 86.6 KB | 433.7 KB |
+
+So the extension grows by **~347 KB**, all of it `panel.js`; nothing else in the package changes. That is
+accepted rather than mitigated by cutting languages - a review tool that cannot highlight C++ is the
+worse outcome, the file is local to an installed extension, and grammar bodies are lazily compiled by the
+JS engine so the runtime cost is a one-time parse. The sourcemap is excluded by `.vscodeignore`. The
+browser preview is unaffected: Vite code-splits the same dynamic imports, so it fetches only the grammar
+a file actually needs.
 
 `hunkForItem`'s `.diff-text` span gains the same token children the preview renders.
 
