@@ -35,6 +35,21 @@
   letter-spacing: var(--syn-tracking-tight);
 }
 
+.review-source-link {
+  color: var(--syn-accent-fg);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.review-source-link:hover {
+  border-bottom-color: var(--syn-accent);
+}
+
+.review-source-link:focus-visible {
+  outline: 2px solid var(--syn-accent);
+  outline-offset: 2px;
+}
+
 .review-header__identity h1 {
   font-size: var(--syn-text-xl);
   line-height: var(--syn-leading-tight);
@@ -583,12 +598,46 @@
   margin-bottom: var(--syn-sp-4);
 }
 
-.review-stage__heading p {
+/* Pins the file identity under the page header so the reviewer never loses the file. */
+.review-stage__filebar {
+  position: sticky;
+  top: 88px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--syn-sp-3);
+  margin: calc(var(--syn-sp-6) * -1) calc(var(--syn-sp-6) * -1) var(--syn-sp-4);
+  padding: var(--syn-sp-3) var(--syn-sp-6);
+  border-bottom: 1px solid var(--syn-border);
+  background: var(--syn-bg);
+}
+
+.review-stage__filepath {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
   margin: 0;
-  color: var(--syn-fg-muted);
   font-family: var(--syn-font-mono);
   font-size: var(--syn-text-sm);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+}
+
+/* Directory prefix absorbs the truncation so the file name itself stays readable. */
+.review-stage__filedir {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--syn-fg-subtle);
+  text-overflow: ellipsis;
+}
+
+.review-stage__filename {
+  flex: 0 0 auto;
+  color: var(--syn-fg);
+  font-weight: 600;
+}
+
+.review-stage__filecopy {
+  flex: 0 0 auto;
 }
 
 .review-stage__heading h2 {
@@ -1031,6 +1080,14 @@
   line-height: var(--syn-leading-snug);
 }
 
+/* Identifiers and revision ids have no break opportunities; force them to wrap in the rail. */
+.review-question-list article > p,
+.review-question-list small,
+.review-question-list blockquote {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .review-question-list small {
   color: var(--syn-warn);
 }
@@ -1309,6 +1366,13 @@ div.review-index__card {
     padding: var(--syn-sp-4);
   }
 
+  /* The stacked header is taller and variable here, so a fixed sticky offset would overlap. */
+  .review-stage__filebar {
+    position: static;
+    margin: calc(var(--syn-sp-4) * -1) calc(var(--syn-sp-4) * -1) var(--syn-sp-4);
+    padding: var(--syn-sp-3) var(--syn-sp-4);
+  }
+
   .review-item-panel {
     grid-template-columns: 1fr;
   }
@@ -1337,6 +1401,11 @@ div.review-index__card {
 
   .review-stage {
     padding: var(--syn-sp-3);
+  }
+
+  .review-stage__filebar {
+    margin: calc(var(--syn-sp-3) * -1) calc(var(--syn-sp-3) * -1) var(--syn-sp-3);
+    padding: var(--syn-sp-2) var(--syn-sp-3);
   }
 
   .review-item-panel__actions {

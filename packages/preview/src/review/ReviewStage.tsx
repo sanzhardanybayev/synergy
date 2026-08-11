@@ -1,6 +1,7 @@
 import type { ReviewBundle, ReviewFileInsight, ReviewItem } from '@synergy/review-core';
 import { resolveBrowserReviewItemContext } from '@synergy/review-core/browser';
 import { useRef } from 'react';
+import { CopyButton } from '../CopyButton.js';
 import { DiffViewer } from './DiffViewer.js';
 import { FileChangeViewer } from './FileChangeViewer.js';
 import { HunkTabs } from './HunkTabs.js';
@@ -27,6 +28,12 @@ interface ReviewStageProps {
 
 function fileName(path: string): string {
   return path.split('/').pop() ?? path;
+}
+
+/** Directory prefix (with trailing slash) so the file name can stay visible when the bar truncates. */
+function directoryPrefix(path: string): string {
+  const cut = path.lastIndexOf('/');
+  return cut === -1 ? '' : path.slice(0, cut + 1);
 }
 
 /** Presents the exact immutable diff hunk or scoped source section under review. */
@@ -91,15 +98,21 @@ export function ReviewStage({
           </div>
         </div>
       ) : null}
-      <header className="review-stage__heading">
-        <p title={item.path}>File · {item.path}</p>
-        {fileInsight ? (
+      <section className="review-stage__filebar" aria-label={`File ${item.path}`}>
+        <p className="review-stage__filepath" title={item.path}>
+          <span className="review-stage__filedir">{directoryPrefix(item.path)}</span>
+          <span className="review-stage__filename">{fileName(item.path)}</span>
+        </p>
+        <CopyButton label="Copy path" value={item.path} className="review-stage__filecopy" />
+      </section>
+      {fileInsight ? (
+        <header className="review-stage__heading">
           <div className="review-file-summary">
             <p className="review-eyebrow">What changed in this file</p>
             <p>{fileInsight.description}</p>
           </div>
-        ) : null}
-      </header>
+        </header>
+      ) : null}
       <HunkTabs
         items={fileItems}
         activeItemId={item.id}
