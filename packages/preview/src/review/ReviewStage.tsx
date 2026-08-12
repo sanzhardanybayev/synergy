@@ -1,6 +1,10 @@
 import type { ReviewBundle, ReviewFileInsight, ReviewItem } from '@synergy/review-core';
-import { resolveBrowserReviewItemContext } from '@synergy/review-core/browser';
-import { useRef } from 'react';
+import {
+  type ResolvedRemovalTarget,
+  buildRemovalStrips,
+  resolveBrowserReviewItemContext,
+} from '@synergy/review-core/browser';
+import { useEffect, useRef, useState } from 'react';
 import { CopyButton } from '../CopyButton.js';
 import { DiffViewer } from './DiffViewer.js';
 import { FileChangeViewer } from './FileChangeViewer.js';
@@ -28,6 +32,32 @@ interface ReviewStageProps {
 
 function fileName(path: string): string {
   return path.split('/').pop() ?? path;
+}
+
+function removalStorageKey(revisionId: string): string {
+  return `synergy.review.removals.${revisionId}`;
+}
+
+/** View-only expansion preference for removal strips; a private-mode storage failure must never break the pane. */
+function readExpandedRuns(revisionId: string): string[] {
+  try {
+    const raw = localStorage.getItem(removalStorageKey(revisionId));
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeExpandedRuns(revisionId: string, runs: string[]): void {
+  try {
+    localStorage.setItem(removalStorageKey(revisionId), JSON.stringify(runs));
+  } catch {
+    // Private-mode or quota failures are non-fatal - expansion state is a view preference only.
+  }
 }
 
 /** Directory prefix (with trailing slash) so the file name can stay visible when the bar truncates. */
@@ -63,6 +93,30 @@ export function ReviewStage({
       ? bundle.snapshot.files.find((file) => file.path === item.path)
       : undefined;
   const stageRef = useRef<HTMLElement>(null);
+  const diffRows =
+    bundle.snapshot.kind === 'diff' && context.item.kind === 'hunk'
+      ? context.rows.filter((row) => row.kind !== 'scope')
+      : undefined;
+  const strips = diffRows
+    ? buildRemovalStrips(diffRows, item.id, bundle.snapshot, bundle.insights)
+    : [];
+  const revisionId = bundle.snapshot.revisionId;
+  const [expandedRuns, setExpandedRuns] = useState<string[]>(() => readExpandedRuns(revisionId));
+  useEffect(() => {
+    setExpandedRuns(readExpandedRuns(revisionId));
+  }, [revisionId]);
+  function handleToggleRun(key: string): void {
+    setExpandedRuns((current) => {
+      const next = current.includes(key)
+        ? current.filter((candidate) => candidate !== key)
+        : [...current, key];
+      writeExpandedRuns(revisionId, next);
+      return next;
+    });
+  }
+  function handleJump(_target: ResolvedRemovalTarget): void {
+    // Jump navigation, flash, and the back chip land in Task 8; this pane only surfaces the strip.
+  }
   const currentChapter = walkthrough.enabled ? chapterOf(walkthrough.chapters, item.id) : undefined;
   const next = walkthrough.enabled ? nextPosition(walkthrough.chapters, item.id) : undefined;
   const nextChapter = next ? chapterOf(walkthrough.chapters, next.reviewItemId) : undefined;
@@ -125,12 +179,16 @@ export function ReviewStage({
           ? 'File-level change'
           : `${item.kind === 'hunk' ? 'Diff hunk' : 'Code section'} · lines ${item.range.start}–${item.range.end}`}
       </p>
-      {bundle.snapshot.kind === 'diff' && context.item.kind === 'hunk' ? (
+      {bundle.snapshot.kind === 'diff' && context.item.kind === 'hunk' && diffRows ? (
         <DiffViewer
           path={item.path}
-          rows={context.rows.filter((row) => row.kind !== 'scope')}
+          rows={diffRows}
           selectedLineIds={selectedLineIds}
           onToggleLine={onToggleLine}
+          strips={strips}
+          expandedRuns={expandedRuns}
+          onToggleRun={handleToggleRun}
+          onJump={handleJump}
         />
       ) : bundle.snapshot.kind === 'diff' && context.item.kind === 'file' && diffFile ? (
         <FileChangeViewer file={diffFile} />

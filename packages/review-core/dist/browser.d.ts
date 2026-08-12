@@ -1,5 +1,5 @@
 import { W as ReviewSnapshot, w as ReviewItemContext } from './removals-DYtdU87S.js';
-export { a2 as buildRemovalStrips, a3 as deriveRemovalRuns, a4 as deriveReviewReadiness } from './removals-DYtdU87S.js';
+export { h as RemovalRun, j as RemovalStrip, l as ResolvedRemovalTarget, a2 as buildRemovalStrips, a3 as deriveRemovalRuns, a4 as deriveReviewReadiness } from './removals-DYtdU87S.js';
 
 /**
  * Browser-safe canonical row contexts for immutable review items.

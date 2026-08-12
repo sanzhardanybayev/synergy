@@ -1440,6 +1440,103 @@ div.review-index__card {
   }
 }
 
+.review-removal {
+  display: grid;
+  gap: var(--syn-sp-1);
+  padding: 2px var(--syn-sp-3);
+  background: linear-gradient(to right, var(--syn-diff-del-bg), transparent 60%);
+  border-top: 1px solid var(--syn-border);
+  font-family: var(--syn-font-ui);
+  font-size: var(--syn-text-sm);
+  color: var(--syn-fg-muted);
+}
+
+.review-removal__strip {
+  display: flex;
+  align-items: center;
+  gap: var(--syn-sp-2);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.review-removal__caret {
+  width: 1em;
+  text-align: center;
+  color: var(--syn-fg-muted);
+}
+
+.review-removal__cat {
+  border-radius: var(--syn-radius-full);
+  border: 1px solid var(--syn-border-strong);
+  padding: 1px 8px;
+  font-size: var(--syn-text-xs);
+  letter-spacing: var(--syn-tracking-wide);
+  text-transform: uppercase;
+}
+
+.review-removal__cat--moved,
+.review-removal__cat--merged {
+  color: var(--syn-status-shipped);
+  border-color: var(--syn-status-shipped);
+}
+
+.review-removal__cat--replaced {
+  color: var(--syn-warn);
+  border-color: var(--syn-warn);
+}
+
+.review-removal__count {
+  color: var(--syn-fg-muted);
+}
+
+.review-removal__jump {
+  justify-self: start;
+  border: 0;
+  border-bottom: 1px dashed var(--syn-accent-border);
+  background: transparent;
+  padding: 0;
+  color: var(--syn-accent-fg);
+  font-family: var(--syn-font-mono);
+  font-size: var(--syn-text-sm);
+  cursor: pointer;
+}
+
+.review-removal__detail {
+  padding-left: calc(1em + var(--syn-sp-2));
+  color: var(--syn-fg);
+}
+
+.review-removal__detail p {
+  margin: 0 0 var(--syn-sp-1);
+}
+
+.review-removal__peek {
+  border: 1px solid var(--syn-border-strong);
+  border-radius: var(--syn-radius-sm);
+  background: var(--syn-bg-sunken);
+  overflow-x: auto;
+  font-family: var(--syn-font-mono);
+  font-size: var(--syn-text-sm);
+}
+
+.review-removal__peek-head {
+  padding: var(--syn-sp-1) var(--syn-sp-2);
+  border-bottom: 1px solid var(--syn-border-strong);
+  color: var(--syn-fg-muted);
+  font-family: var(--syn-font-ui);
+  font-size: var(--syn-text-xs);
+}
+
+.review-removal__peek pre {
+  margin: 0;
+  padding: var(--syn-sp-2);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .review-route-state__pulse {
     animation: none;

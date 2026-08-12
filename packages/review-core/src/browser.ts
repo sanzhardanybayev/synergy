@@ -14,4 +14,10 @@ export function stableReviewJson(value: unknown): string {
   return JSON.stringify(value) ?? 'undefined';
 }
 
-export { buildRemovalStrips, deriveRemovalRuns } from './removals.js';
+export {
+  buildRemovalStrips,
+  deriveRemovalRuns,
+  type RemovalRun,
+  type RemovalStrip,
+  type ResolvedRemovalTarget,
+} from './removals.js';
