@@ -219,7 +219,9 @@ keep the existing `groups` plus `items` payload and use the captured diff item I
 `review create --json` and `review status --json` list every captured removal run as
 `removals: [{reviewItemId, path, start, end, covered}]`. A run with `covered: true` already has a
 rationale - either freshly submitted or carried forward from the predecessor revision - and needs
-no resubmission; submitting a fresh entry for that same run replaces the carried one. Submit an
+no resubmission; submitting a fresh entry for that same run replaces the carried one. When the
+diff has no removal runs at all, omit `removals` from the payload entirely - do not submit
+`"removals": []`; the schema requires at least one entry when the key is present. Submit an
 entry under `removals` for every `covered: false` run, matching its `reviewItemId`, `path`,
 `start`, and `end` exactly - `reviewItemId` is checked separately from the run coordinates, so a
 mismatched item ID is rejected even when the range is right:
@@ -236,8 +238,14 @@ mismatched item ID is rejected even when the range is right:
 
 Use `moved`, `merged`, or `replaced` only after inspecting the destination at the captured
 source (`git show <headSha>:<path>` for a PR, `git show :<path>` for staged, the worktree file
-for unstaged and scope) and confirming the logic is actually there. If you cannot confirm it,
-use `dead-code`, `obsolete`, or `extracted-to-dep`, which take no `movedTo`. `analysis-set`
+for unstaged and scope) and confirming the logic is actually there. `dead-code`, `obsolete`, and
+`extracted-to-dep` are STRONGER claims than a relocation - each asserts the removed code went
+nowhere - so they are never a fallback for "I couldn't verify where it went." If inspection does
+not confirm a destination, re-investigate (search the diff, the destination file, the commit
+history) before concluding anything. If you still cannot verify it after re-investigating, do not
+assert a terminal reason at all: pick the reason that best fits what you did observe and say
+plainly in the `description` that the destination could not be confirmed, so a human reviewer
+knows to check it themselves rather than trusting a manufactured label. `analysis-set`
 rejects the whole payload when a run is uncovered, when a run has two rationales, when a claimed
 target does not resolve, or when the reason and `movedTo` disagree. `movedTo` may span at most 40
 lines. Never author `movedToExcerpt` - it is derived and persisted by the CLI at `analysis-set`
