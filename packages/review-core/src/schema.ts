@@ -298,6 +298,40 @@ const fileInsightSchema = {
   },
 } as const;
 
+const removalRunRefSchema = {
+  type: 'object',
+  required: ['path', 'start', 'end'],
+  additionalProperties: false,
+  properties: {
+    path: nonEmptyString,
+    start: { type: 'integer', minimum: 1 },
+    end: { type: 'integer', minimum: 1 },
+  },
+} as const;
+
+const removalRationaleSchema = {
+  type: 'object',
+  required: ['reviewItemId', 'run', 'reason', 'description'],
+  additionalProperties: false,
+  properties: {
+    reviewItemId: nonEmptyString,
+    run: removalRunRefSchema,
+    reason: { enum: ['moved', 'merged', 'replaced', 'dead-code', 'obsolete', 'extracted-to-dep'] },
+    description: nonEmptyString,
+    movedTo: removalRunRefSchema,
+    movedToExcerpt: {
+      type: 'object',
+      required: ['path', 'start', 'lines'],
+      additionalProperties: false,
+      properties: {
+        path: nonEmptyString,
+        start: { type: 'integer', minimum: 1 },
+        lines: { type: 'array', items: string },
+      },
+    },
+  },
+} as const;
+
 export const reviewInsightsSchema = {
   type: 'object',
   required: ['schemaVersion', 'revisionId', 'groups', 'items'],
@@ -335,6 +369,7 @@ export const reviewInsightsSchema = {
       },
     },
     files: { type: 'array', items: fileInsightSchema },
+    removals: { type: 'array', items: removalRationaleSchema },
   },
 } as const;
 

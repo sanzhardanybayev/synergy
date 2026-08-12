@@ -55,3 +55,66 @@ describe('assertReviewInsights narrative fields', () => {
     expect(() => assertReviewInsights(insights)).toThrow();
   });
 });
+
+const baseInsights = {
+  schemaVersion: 1 as const,
+  revisionId: 'rev-1',
+  groups: [{ id: 'g1', label: 'Group', reviewItemIds: ['item-1'] }],
+  items: [
+    { reviewItemId: 'item-1', description: 'd', confidence: 'high', evidencePaths: ['a.ts'] },
+  ],
+};
+
+describe('removal rationale schema', () => {
+  it('accepts a moved rationale with a target', () => {
+    const value = {
+      ...baseInsights,
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'a.ts', start: 41, end: 43 },
+          reason: 'moved',
+          description: 'Refresh converged into the interceptor.',
+          movedTo: { path: 'b.ts', start: 88, end: 91 },
+          movedToExcerpt: { path: 'b.ts', start: 88, lines: ['if (x) {', '}'] },
+        },
+      ],
+    };
+    expect(() => assertReviewInsights(value)).not.toThrow();
+  });
+
+  it('accepts insights with no removals field', () => {
+    expect(() => assertReviewInsights(baseInsights)).not.toThrow();
+  });
+
+  it('rejects an unknown reason', () => {
+    const value = {
+      ...baseInsights,
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'a.ts', start: 41, end: 43 },
+          reason: 'because',
+          description: 'd',
+        },
+      ],
+    };
+    expect(() => assertReviewInsights(value)).toThrow();
+  });
+
+  it('rejects an unknown property on a rationale', () => {
+    const value = {
+      ...baseInsights,
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'a.ts', start: 41, end: 43 },
+          reason: 'dead-code',
+          description: 'd',
+          extra: true,
+        },
+      ],
+    };
+    expect(() => assertReviewInsights(value)).toThrow();
+  });
+});

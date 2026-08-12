@@ -77,6 +77,7 @@ export {
   reviewSnapshotSchema,
   reviewWorkspaceSchema,
 } from './schema.js';
+export { RELOCATING_REMOVAL_REASONS } from './types.js';
 export { createReviewStore, type ReviewStore, type ReviewStoreOptions } from './store.js';
 export {
   claimQuestion,
@@ -120,6 +121,10 @@ export type {
   ReviewItemProgress,
   ReviewItemProgressPatch,
   ReviewItemStatus,
+  RemovalRationale,
+  RemovalReason,
+  RemovalRunRef,
+  RemovalTargetExcerpt,
   ReviewDiffLineRow,
   ReviewLineRow,
   ReviewLineSelection,
