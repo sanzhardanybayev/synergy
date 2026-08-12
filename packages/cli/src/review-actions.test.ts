@@ -2,9 +2,12 @@ import { mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  type RemovalRationale,
   ReviewCoreError,
+  type ReviewSnapshot,
   applyCodeSections as applyCoreCodeSections,
   createReviewStore,
+  deriveSnapshotRemovalRuns,
   repositoryName,
 } from '@synergy/review-core';
 import { describe, expect, it } from 'vitest';
@@ -53,6 +56,17 @@ function createRequest(root: string): CreateReviewRequest {
   return { root, source: { kind: 'staged' }, runner: createRunner() };
 }
 
+/** Blanket "dead-code" rationale for every derived removal run, sufficient to satisfy the
+ * removal-coverage gate in tests that are not themselves exercising removal semantics. */
+function removalsForSnapshot(snapshot: ReviewSnapshot): RemovalRationale[] {
+  return deriveSnapshotRemovalRuns(snapshot).map((run) => ({
+    reviewItemId: run.reviewItemId,
+    run: { path: run.path, start: run.start, end: run.end },
+    reason: 'dead-code',
+    description: 'Removed as part of this change.',
+  }));
+}
+
 describe('review lifecycle actions', () => {
   it('uses canonical shared freshness for text and JSON readiness, failing capture closed', async () => {
     const root = join(tmpdir(), `synergy-review-status-${Date.now()}`);
@@ -70,8 +84,11 @@ describe('review lifecycle actions', () => {
     try {
       const created = createOrResumeReview(createRequest(root));
       const store = createReviewStore(root);
-      const item = store.readBundle(created.reference.workspaceId, created.reference.revisionId)
-        .snapshot.items[0]!;
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
       await applyReviewAnalysis({
         root,
         reference: created.reference,
@@ -86,6 +103,7 @@ describe('review lifecycle actions', () => {
               evidencePaths: [item.path],
             },
           ],
+          removals: removalsForSnapshot(snapshot),
         },
       });
       store.patchItemProgress(
@@ -244,10 +262,11 @@ describe('review lifecycle actions', () => {
     mkdirSync(root, { recursive: true });
     try {
       const created = createOrResumeReview(createRequest(root));
-      const reviewItemId = createReviewStore(root).readBundle(
+      const snapshot = createReviewStore(root).readBundle(
         created.reference.workspaceId,
         created.reference.revisionId,
-      ).snapshot.items[0]?.id;
+      ).snapshot;
+      const reviewItemId = snapshot.items[0]?.id;
       if (!reviewItemId) throw new Error('fixture capture must create one review item');
       const analysis = {
         kind: 'diff' as const,
@@ -260,6 +279,7 @@ describe('review lifecycle actions', () => {
             evidencePaths: ['src/example.ts'],
           },
         ],
+        removals: removalsForSnapshot(snapshot),
       };
       const result = await applyReviewAnalysis({
         root,
@@ -289,10 +309,11 @@ describe('review lifecycle actions', () => {
     mkdirSync(root, { recursive: true });
     try {
       const created = createOrResumeReview(createRequest(root));
-      const reviewItemId = createReviewStore(root).readBundle(
+      const snapshot = createReviewStore(root).readBundle(
         created.reference.workspaceId,
         created.reference.revisionId,
-      ).snapshot.items[0]?.id;
+      ).snapshot;
+      const reviewItemId = snapshot.items[0]?.id;
       if (!reviewItemId) throw new Error('fixture capture must create one review item');
       await applyReviewAnalysis({
         root,
@@ -316,6 +337,7 @@ describe('review lifecycle actions', () => {
               evidencePaths: ['src/example.ts'],
             },
           ],
+          removals: removalsForSnapshot(snapshot),
         },
       });
       const finalized = createReviewStore(root).readBundle(
@@ -336,10 +358,11 @@ describe('review lifecycle actions', () => {
     mkdirSync(root, { recursive: true });
     try {
       const created = createOrResumeReview(createRequest(root));
-      const reviewItemId = createReviewStore(root).readBundle(
+      const snapshot = createReviewStore(root).readBundle(
         created.reference.workspaceId,
         created.reference.revisionId,
-      ).snapshot.items[0]?.id;
+      ).snapshot;
+      const reviewItemId = snapshot.items[0]?.id;
       if (!reviewItemId) throw new Error('fixture capture must create one review item');
       await applyReviewAnalysis({
         root,
@@ -362,6 +385,7 @@ describe('review lifecycle actions', () => {
               confidence: 'high',
             },
           ],
+          removals: removalsForSnapshot(snapshot),
         },
       });
       const finalized = createReviewStore(root).readBundle(
@@ -450,6 +474,7 @@ describe('review lifecycle actions', () => {
             },
           ],
           files: [{ path: 'src/b.ts', description: 'File b summary.', confidence: 'high' }],
+          removals: removalsForSnapshot(firstSnapshot),
         },
       });
       store.patchItemProgress(first.reference.workspaceId, first.reference.revisionId, itemB.id, {
@@ -503,6 +528,7 @@ describe('review lifecycle actions', () => {
               evidencePaths: ['src/b.ts'],
             },
           ],
+          removals: removalsForSnapshot(refreshedBundle.snapshot),
         },
       });
       const finalizedRefreshed = store.readBundle(
@@ -552,6 +578,7 @@ describe('review lifecycle actions', () => {
                 evidencePaths: [reviewItem.path],
               },
             ],
+            removals: removalsForSnapshot(snapshot),
           },
           parsingInMs: 7,
         },
@@ -627,6 +654,7 @@ describe('review lifecycle actions', () => {
                 evidencePaths: [reviewItem.path],
               },
             ],
+            removals: removalsForSnapshot(snapshot),
           },
         },
         {
@@ -724,10 +752,11 @@ describe('review lifecycle actions', () => {
     for (const root of roots) mkdirSync(root, { recursive: true });
     try {
       const accepted = createOrResumeReview(createRequest(roots[0]!));
-      const acceptedItem = createReviewStore(roots[0]!).readBundle(
+      const acceptedSnapshot = createReviewStore(roots[0]!).readBundle(
         accepted.reference.workspaceId,
         accepted.reference.revisionId,
-      ).snapshot.items[0]!;
+      ).snapshot;
+      const acceptedItem = acceptedSnapshot.items[0]!;
       await expect(
         applyReviewAnalysis({
           root: roots[0]!,
@@ -743,6 +772,7 @@ describe('review lifecycle actions', () => {
                 evidencePaths: [acceptedItem.path],
               },
             ],
+            removals: removalsForSnapshot(acceptedSnapshot),
           },
         }),
       ).resolves.toMatchObject({ analysisFinalized: true });
@@ -1450,6 +1480,84 @@ describe('review lifecycle actions', () => {
       expect(thirdBundle.insights.files).toEqual([
         { path: 'src/b.ts', description: 'Updated file b summary.', confidence: 'high' },
       ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('persists removal rationales onto the finalized diff insights', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-persist-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = removalsForSnapshot(snapshot);
+      expect(removals).toHaveLength(1);
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+          items: [
+            {
+              reviewItemId: item.id,
+              description: 'Updates the staged fixture value.',
+              confidence: 'high',
+              evidencePaths: [item.path],
+            },
+          ],
+          removals,
+        },
+      });
+      const finalized = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.removals).toEqual(removals);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a diff analysis that omits a rationale for a captured removal', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-incomplete-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      await expect(
+        applyReviewAnalysis({
+          root,
+          reference: created.reference,
+          analysis: {
+            kind: 'diff',
+            groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+            items: [
+              {
+                reviewItemId: item.id,
+                description: 'Updates the staged fixture value.',
+                confidence: 'high',
+                evidencePaths: [item.path],
+              },
+            ],
+            // Missing `removals` entirely - the captured hunk includes a one-line removal run.
+          },
+        }),
+      ).rejects.toThrow(/removal runs are missing a rationale/);
+      expect(
+        store.isAnalysisFinalized(created.reference.workspaceId, created.reference.revisionId),
+      ).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

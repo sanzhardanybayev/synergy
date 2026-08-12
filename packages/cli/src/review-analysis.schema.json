@@ -28,6 +28,11 @@
           "minItems": 1,
           "items": { "$ref": "#/$defs/diffItem" }
         },
+        "removals": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/removalRationale" }
+        },
         "files": {
           "type": "array",
           "minItems": 1,
@@ -135,6 +140,30 @@
         },
         "confidence": { "$ref": "#/$defs/confidence" },
         "evidencePaths": { "$ref": "#/$defs/evidencePaths" }
+      }
+    },
+    "removalRunRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "start", "end"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "start": { "type": "integer", "minimum": 1 },
+        "end": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "removalRationale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewItemId", "run", "reason", "description"],
+      "properties": {
+        "reviewItemId": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "run": { "$ref": "#/$defs/removalRunRef" },
+        "reason": {
+          "enum": ["moved", "merged", "replaced", "dead-code", "obsolete", "extracted-to-dep"]
+        },
+        "description": { "type": "string", "minLength": 1, "maxLength": 600, "pattern": "\\S" },
+        "movedTo": { "$ref": "#/$defs/removalRunRef" }
       }
     },
     "fileInsight": {

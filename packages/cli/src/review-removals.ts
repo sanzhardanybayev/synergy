@@ -5,7 +5,10 @@ import {
   deriveSnapshotRemovalRuns,
 } from '@synergy/review-core';
 
-/** Kept in lockstep with `$defs.removalRationale` in review-analysis.schema.json. */
+/**
+ * Not expressible in review-analysis.schema.json (a JSON Schema cannot compute `end - start`), so
+ * this cap is enforced only here, semantically, by `assertCompleteRemovalCoverage` below.
+ */
 export const MAX_MOVED_TO_LINES = 40;
 
 function runKey(path: string, start: number, end: number): string {

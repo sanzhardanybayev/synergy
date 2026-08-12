@@ -1,4 +1,11 @@
-import type { ReviewGroup, ReviewInsightConfidence, ReviewItemInsight } from '@synergy/review-core';
+import type {
+  RemovalRationale,
+  RemovalReason,
+  RemovalRunRef,
+  ReviewGroup,
+  ReviewInsightConfidence,
+  ReviewItemInsight,
+} from '@synergy/review-core';
 
 export interface ScopeAnalysisSectionInput {
   key: string;
@@ -37,6 +44,7 @@ export type ReviewAnalysisInput =
       kind: 'diff';
       groups: ReviewGroup[];
       items: ReviewItemInsight[];
+      removals?: RemovalRationale[];
       files?: FileAnalysisInput[];
       summary?: string;
     };
@@ -313,8 +321,51 @@ function assertEveryReferenceIsOwned(
   }
 }
 
+const REMOVAL_REASONS = new Set<RemovalReason>([
+  'moved',
+  'merged',
+  'replaced',
+  'dead-code',
+  'obsolete',
+  'extracted-to-dep',
+]);
+
+function parseRemovalRunRef(value: unknown, path: string): RemovalRunRef {
+  assertRecord(value, path);
+  assertOnlyKeys(value, ['path', 'start', 'end'], path);
+  assertString(value.path, `${path}.path`);
+  assertInteger(value.start, `${path}.start`);
+  assertInteger(value.end, `${path}.end`);
+  return { path: value.path, start: value.start, end: value.end };
+}
+
+function parseRemovalRationale(value: unknown, index: number): RemovalRationale {
+  const path = `$.removals[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(value, ['reviewItemId', 'run', 'reason', 'description', 'movedTo'], path);
+  assertString(value.reviewItemId, `${path}.reviewItemId`);
+  assertDescription(value.description, `${path}.description`);
+  if (typeof value.reason !== 'string' || !REMOVAL_REASONS.has(value.reason as RemovalReason)) {
+    fail(`${path}.reason`, 'must be a known removal reason');
+  }
+  return {
+    reviewItemId: value.reviewItemId,
+    run: parseRemovalRunRef(value.run, `${path}.run`),
+    reason: value.reason as RemovalReason,
+    description: value.description,
+    ...(value.movedTo === undefined
+      ? {}
+      : { movedTo: parseRemovalRunRef(value.movedTo, `${path}.movedTo`) }),
+  };
+}
+
+function parseRemovals(value: unknown): RemovalRationale[] {
+  assertNonEmptyArray(value, '$.removals');
+  return value.map(parseRemovalRationale);
+}
+
 function parseDiffAnalysis(value: Record<string, unknown>): ReviewAnalysisInput {
-  assertOnlyKeys(value, ['groups', 'items', 'files', 'summary'], '$');
+  assertOnlyKeys(value, ['groups', 'items', 'removals', 'files', 'summary'], '$');
   const groups = parseGroups(value.groups, parseDiffGroup);
   assertNonEmptyArray(value.items, '$.items');
   const items = value.items.map(parseDiffItem);
@@ -325,6 +376,7 @@ function parseDiffAnalysis(value: Record<string, unknown>): ReviewAnalysisInput 
     groups.map((group) => group.reviewItemIds),
     (groupIndex, referenceIndex) => `$.groups[${groupIndex}].reviewItemIds[${referenceIndex}]`,
   );
+  const removals = value.removals === undefined ? undefined : parseRemovals(value.removals);
   const files = value.files === undefined ? undefined : parseFiles(value.files);
   if (value.summary !== undefined)
     assertBoundedText(value.summary, '$.summary', MAX_SUMMARY_LENGTH);
@@ -332,6 +384,7 @@ function parseDiffAnalysis(value: Record<string, unknown>): ReviewAnalysisInput 
     kind: 'diff',
     groups,
     items,
+    ...(removals ? { removals } : {}),
     ...(files ? { files } : {}),
     ...(value.summary === undefined ? {} : { summary: value.summary }),
   };
@@ -363,7 +416,7 @@ function parseScopeAnalysis(value: Record<string, unknown>): ReviewAnalysisInput
 
 export function parseReviewAnalysisInput(value: unknown): ReviewAnalysisInput {
   assertRecord(value, '$');
-  assertOnlyKeys(value, ['groups', 'items', 'sections', 'files', 'summary'], '$');
+  assertOnlyKeys(value, ['groups', 'items', 'sections', 'removals', 'files', 'summary'], '$');
   const hasItems = Object.hasOwn(value, 'items');
   const hasSections = Object.hasOwn(value, 'sections');
   if (hasItems && hasSections) {

@@ -339,6 +339,75 @@ describe('parseReviewAnalysisInput', () => {
     expect(new Set(fileInsightSchema.required)).toEqual(new Set(FILE_INSIGHT_KEYS));
   });
 
+  it('parses removals on a diff analysis', () => {
+    const parsed = parseReviewAnalysisInput({
+      groups: [{ id: 'g1', label: 'G', reviewItemIds: ['item-1'] }],
+      items: [
+        { reviewItemId: 'item-1', description: 'd', confidence: 'high', evidencePaths: ['a.ts'] },
+      ],
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'a.ts', start: 41, end: 43 },
+          reason: 'dead-code',
+          description: 'Unreachable.',
+        },
+      ],
+    });
+    if (parsed.kind !== 'diff') throw new Error('expected diff analysis');
+    expect(parsed.removals).toHaveLength(1);
+  });
+
+  it('rejects an unknown key inside a removal', () => {
+    expect(() =>
+      parseReviewAnalysisInput({
+        groups: [{ id: 'g1', label: 'G', reviewItemIds: ['item-1'] }],
+        items: [
+          { reviewItemId: 'item-1', description: 'd', confidence: 'high', evidencePaths: ['a.ts'] },
+        ],
+        removals: [
+          {
+            reviewItemId: 'item-1',
+            run: { path: 'a.ts', start: 41, end: 43 },
+            reason: 'dead-code',
+            description: 'd',
+            nope: 1,
+          },
+        ],
+      }),
+    ).toThrow(/nope/);
+  });
+
+  it('keeps the removal schema in lockstep with the parser constants', () => {
+    const schema = JSON.parse(
+      readFileSync(new URL('./review-analysis.schema.json', import.meta.url), 'utf8'),
+    ) as {
+      $defs: {
+        removalRationale: {
+          required: string[];
+          properties: { description: { maxLength: number }; reason: { enum: string[] } };
+        };
+      };
+    };
+    expect(schema.$defs.removalRationale.properties.description.maxLength).toBe(
+      MAX_DESCRIPTION_LENGTH,
+    );
+    expect(schema.$defs.removalRationale.properties.reason.enum).toEqual([
+      'moved',
+      'merged',
+      'replaced',
+      'dead-code',
+      'obsolete',
+      'extracted-to-dep',
+    ]);
+    expect(schema.$defs.removalRationale.required).toEqual([
+      'reviewItemId',
+      'run',
+      'reason',
+      'description',
+    ]);
+  });
+
   describe('narrative fields', () => {
     it('accepts a diff payload with summary and group intro', () => {
       const payload = validDiffPayload();

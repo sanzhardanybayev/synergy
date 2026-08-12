@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import {
   type ProposedCodeSection,
+  type RemovalRationale,
   type ReviewBundle,
   type ReviewFileInsight,
   type ReviewGroup,
@@ -41,6 +42,7 @@ import {
   resolveRepositoryRoot,
 } from './review-capture.js';
 import { assertCompleteScopeCoverage } from './review-coverage.js';
+import { assertCompleteRemovalCoverage } from './review-removals.js';
 
 export interface CreateReviewRequest extends CaptureReviewSourceRequest {}
 
@@ -97,6 +99,7 @@ export interface RefreshReviewRequest {
 interface CanonicalReviewAnalysis {
   groups: ReviewGroup[];
   items: ReviewItemInsight[];
+  removals?: RemovalRationale[];
   summary?: string;
 }
 
@@ -445,6 +448,11 @@ function assertValidAnalysis(snapshot: ReviewSnapshot, analysis: CanonicalReview
     if (!groupedItemIds.has(itemId)) throw new Error(`review item is missing a group: ${itemId}`);
     if (!insightIds.has(itemId)) throw new Error(`review item is missing an analysis: ${itemId}`);
   }
+
+  // Scope snapshots derive zero removal runs, so the gate is a no-op there; calling it
+  // unconditionally avoids threading the diff/scope distinction back through this shared
+  // validator, and it reads as "every analysis submission is coverage-checked."
+  assertCompleteRemovalCoverage(snapshot, analysis.removals ?? []);
 }
 
 function proposedCodeSection(section: ScopeAnalysisSectionInput): ProposedCodeSection {
@@ -605,6 +613,7 @@ export async function applyReviewAnalysis(
       ...(diffAnalysis.summary === undefined ? {} : { summary: diffAnalysis.summary }),
       groups: diffAnalysis.groups,
       items: diffAnalysis.items,
+      ...(diffAnalysis.removals ? { removals: diffAnalysis.removals } : {}),
       ...(diffFiles ? { files: diffFiles } : {}),
     };
     finalizedAt = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
