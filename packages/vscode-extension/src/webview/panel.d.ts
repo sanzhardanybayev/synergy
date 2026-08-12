@@ -10,6 +10,8 @@
  * basename takes priority over the `.js` file for type resolution - this file is never used at
  * runtime, only for `tsc`.
  */
+import type { RemovalStrip, ResolvedRemovalTarget } from '@synergy/review-core/browser';
+
 export function renderDiffLines(
   hunk: { lines: unknown[] },
   path: string,
@@ -23,30 +25,19 @@ export function renderDiffLines(
 ): HTMLElement;
 
 export function renderRemovalStrip(
-  strip: {
-    run: { start: number; end: number; lineIds: string[]; texts: string[] };
-    rationale?: {
-      reviewItemId: string;
-      run: { path: string; start: number; end: number };
-      reason: string;
-      description: string;
-      movedTo?: { path: string; start: number; end: number };
-      movedToExcerpt?: { path: string; start: number; lines: string[] };
-    };
-    target:
-      | {
-          kind: 'in-review';
-          reviewItemId: string;
-          rowIds: string[];
-          path: string;
-          start: number;
-          end: number;
-        }
-      | { kind: 'excerpt'; path: string; start: number; lines: string[] }
-      | { kind: 'unresolved' };
-  },
+  strip: RemovalStrip,
   handlers: {
     onJumpToReviewItem(reviewItemId: string): void;
     onOpenFile(path: string, line: number): void;
   },
 ): HTMLElement | null;
+
+export function renderRemovalSummary(context?: {
+  reviewItemId: string;
+  snapshot: unknown;
+  insights: unknown;
+  onJumpToReviewItem(reviewItemId: string): void;
+  onOpenFile(path: string, line: number): void;
+}): HTMLElement | null;
+
+export type { RemovalStrip, ResolvedRemovalTarget };
