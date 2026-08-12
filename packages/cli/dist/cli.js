@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import { readFileSync as readFileSync7, rmSync as rmSync3 } from "node:fs";
-import { join as join6, resolve as resolve2 } from "node:path";
+import { readFileSync as readFileSync8, rmSync as rmSync3 } from "node:fs";
+import { join as join7, resolve as resolve2 } from "node:path";
 import cac from "cac";
 import { bold as bold3, dim as dim4, green as green5, red as red3, yellow as yellow3 } from "kleur/colors";
 
@@ -1755,7 +1755,7 @@ function registerPreviewCommand(cli2, dependencyOverrides = {}) {
 
 // src/review-cli.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-import { readFileSync as readFileSync6 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 import { performance as performance3 } from "node:perf_hooks";
 import {
   assertSafeReviewSegment,
@@ -1767,6 +1767,8 @@ import {
 import { bold as bold2, dim as dim3, green as green4, red as red2, yellow as yellow2 } from "kleur/colors";
 
 // src/review-actions.ts
+import { readFileSync as readFileSync6 } from "node:fs";
+import { join as join6 } from "node:path";
 import { performance as performance2 } from "node:perf_hooks";
 import {
   applyCodeSections,
@@ -1775,6 +1777,7 @@ import {
   compareReviewSourceFreshness as compareReviewSourceFreshness2,
   createReviewStore,
   deriveReviewReadiness,
+  deriveSnapshotRemovalRuns as deriveSnapshotRemovalRuns2,
   formatReviewRef,
   hashText,
   isReviewCoreError,
@@ -2030,8 +2033,45 @@ function assertEveryReferenceIsOwned(definitions, definitionPath, references, re
     if (!owners.has(key)) fail(definitionPath(index), "is not referenced by any group");
   }
 }
+var REMOVAL_REASONS = /* @__PURE__ */ new Set([
+  "moved",
+  "merged",
+  "replaced",
+  "dead-code",
+  "obsolete",
+  "extracted-to-dep"
+]);
+function parseRemovalRunRef(value, path) {
+  assertRecord(value, path);
+  assertOnlyKeys(value, ["path", "start", "end"], path);
+  assertString(value.path, `${path}.path`);
+  assertInteger(value.start, `${path}.start`);
+  assertInteger(value.end, `${path}.end`);
+  return { path: value.path, start: value.start, end: value.end };
+}
+function parseRemovalRationale(value, index) {
+  const path = `$.removals[${index}]`;
+  assertRecord(value, path);
+  assertOnlyKeys(value, ["reviewItemId", "run", "reason", "description", "movedTo"], path);
+  assertString(value.reviewItemId, `${path}.reviewItemId`);
+  assertDescription(value.description, `${path}.description`);
+  if (typeof value.reason !== "string" || !REMOVAL_REASONS.has(value.reason)) {
+    fail(`${path}.reason`, "must be a known removal reason");
+  }
+  return {
+    reviewItemId: value.reviewItemId,
+    run: parseRemovalRunRef(value.run, `${path}.run`),
+    reason: value.reason,
+    description: value.description,
+    ...value.movedTo === void 0 ? {} : { movedTo: parseRemovalRunRef(value.movedTo, `${path}.movedTo`) }
+  };
+}
+function parseRemovals(value) {
+  assertNonEmptyArray(value, "$.removals");
+  return value.map(parseRemovalRationale);
+}
 function parseDiffAnalysis(value) {
-  assertOnlyKeys(value, ["groups", "items", "files", "summary"], "$");
+  assertOnlyKeys(value, ["groups", "items", "removals", "files", "summary"], "$");
   const groups = parseGroups(value.groups, parseDiffGroup);
   assertNonEmptyArray(value.items, "$.items");
   const items = value.items.map(parseDiffItem);
@@ -2042,6 +2082,7 @@ function parseDiffAnalysis(value) {
     groups.map((group) => group.reviewItemIds),
     (groupIndex, referenceIndex) => `$.groups[${groupIndex}].reviewItemIds[${referenceIndex}]`
   );
+  const removals = value.removals === void 0 ? void 0 : parseRemovals(value.removals);
   const files = value.files === void 0 ? void 0 : parseFiles(value.files);
   if (value.summary !== void 0)
     assertBoundedText(value.summary, "$.summary", MAX_SUMMARY_LENGTH);
@@ -2049,6 +2090,7 @@ function parseDiffAnalysis(value) {
     kind: "diff",
     groups,
     items,
+    ...removals ? { removals } : {},
     ...files ? { files } : {},
     ...value.summary === void 0 ? {} : { summary: value.summary }
   };
@@ -2078,7 +2120,7 @@ function parseScopeAnalysis(value) {
 }
 function parseReviewAnalysisInput(value) {
   assertRecord(value, "$");
-  assertOnlyKeys(value, ["groups", "items", "sections", "files", "summary"], "$");
+  assertOnlyKeys(value, ["groups", "items", "sections", "removals", "files", "summary"], "$");
   const hasItems = Object.hasOwn(value, "items");
   const hasSections = Object.hasOwn(value, "sections");
   if (hasItems && hasSections) {
@@ -2181,6 +2223,125 @@ function assertCompleteScopeCoverage(snapshot, sections) {
   }
 }
 
+// src/review-removals.ts
+import {
+  RELOCATING_REMOVAL_REASONS,
+  deriveSnapshotRemovalRuns,
+  resolveRemovalTarget
+} from "@synergy/review-core";
+var MAX_MOVED_TO_LINES = 40;
+function runKey(path, start, end) {
+  return `${path}:${start}-${end}`;
+}
+function assertCompleteRemovalCoverage(snapshot, removals) {
+  const derived = deriveSnapshotRemovalRuns(snapshot);
+  if (derived.length === 0 && removals.length === 0) return;
+  const derivedByKey = new Map(derived.map((run) => [runKey(run.path, run.start, run.end), run]));
+  const seen = /* @__PURE__ */ new Set();
+  for (const rationale of removals) {
+    const key = runKey(rationale.run.path, rationale.run.start, rationale.run.end);
+    const run = derivedByKey.get(key);
+    if (!run) {
+      throw new Error(`removal rationale ${key} does not match a captured removal run`);
+    }
+    if (run.reviewItemId !== rationale.reviewItemId) {
+      throw new Error(
+        `removal rationale ${key} names review item ${rationale.reviewItemId} but the run belongs to ${run.reviewItemId}`
+      );
+    }
+    if (seen.has(key)) throw new Error(`duplicate removal rationale for ${key}`);
+    seen.add(key);
+    const relocating = RELOCATING_REMOVAL_REASONS.includes(rationale.reason);
+    if (relocating && !rationale.movedTo) {
+      throw new Error(`removal rationale ${key} with reason ${rationale.reason} requires movedTo`);
+    }
+    if (!relocating && rationale.movedTo) {
+      throw new Error(
+        `removal rationale ${key} with reason ${rationale.reason} must not carry movedTo`
+      );
+    }
+    const target = rationale.movedTo;
+    if (target) {
+      if (target.start > target.end) {
+        throw new Error(`removal rationale ${key} has a reversed range in movedTo`);
+      }
+      if (target.end - target.start + 1 > MAX_MOVED_TO_LINES) {
+        throw new Error(
+          `removal rationale ${key} movedTo must span at most ${MAX_MOVED_TO_LINES} lines`
+        );
+      }
+    }
+  }
+  const missing = derived.filter((run) => !seen.has(runKey(run.path, run.start, run.end))).map((run) => runKey(run.path, run.start, run.end));
+  if (missing.length > 0) {
+    throw new Error(`removal runs are missing a rationale: ${missing.join(", ")}`);
+  }
+}
+function resolveRemovalExcerpts(snapshot, removals, io) {
+  return removals.map((rationale) => {
+    const target = rationale.movedTo;
+    if (!target) return rationale;
+    if (resolveRemovalTarget(snapshot, rationale).kind === "in-review") return rationale;
+    const lines = io.readTargetLines(target.path);
+    if (!lines) {
+      throw new Error(`removal rationale movedTo target was not found: ${target.path}`);
+    }
+    if (target.end > lines.length) {
+      throw new Error(
+        `removal rationale movedTo ${target.path}:${target.start}-${target.end} is out of range (file has ${lines.length} lines)`
+      );
+    }
+    return {
+      ...rationale,
+      movedToExcerpt: {
+        path: target.path,
+        start: target.start,
+        lines: lines.slice(target.start - 1, target.end)
+      }
+    };
+  });
+}
+function reResolveCarriedRemovals(snapshot, removals, io) {
+  const resolved = [];
+  for (const rationale of removals) {
+    const target = rationale.movedTo;
+    if (!target) {
+      resolved.push(rationale);
+      continue;
+    }
+    if (resolveRemovalTarget(snapshot, rationale).kind === "in-review") {
+      resolved.push({
+        reviewItemId: rationale.reviewItemId,
+        run: rationale.run,
+        reason: rationale.reason,
+        description: rationale.description,
+        movedTo: target
+      });
+      continue;
+    }
+    let lines;
+    try {
+      lines = io.readTargetLines(target.path);
+    } catch {
+      lines = void 0;
+    }
+    if (!lines || target.end > lines.length) continue;
+    resolved.push({
+      reviewItemId: rationale.reviewItemId,
+      run: rationale.run,
+      reason: rationale.reason,
+      description: rationale.description,
+      movedTo: target,
+      movedToExcerpt: {
+        path: target.path,
+        start: target.start,
+        lines: lines.slice(target.start - 1, target.end)
+      }
+    });
+  }
+  return resolved;
+}
+
 // src/review-actions.ts
 var PreviewNotReadyError = class extends Error {
   constructor(root) {
@@ -2225,15 +2386,45 @@ function initialProgress(snapshot, now) {
     items: Object.fromEntries(snapshot.items.map((item) => [item.id, { status: "needs-review" }]))
   };
 }
-function reconcileProgressAndFiles(previous, snapshot, now) {
+function reconcileProgressAndInsights(previous, snapshot, now) {
   const { insights, ...progress } = reconcileReview(previous, snapshot, now);
-  return { progress, files: insights.files };
+  return { progress, files: insights.files, removals: insights.removals };
+}
+function removalsStatusFor(bundle) {
+  const coveredRunKeys = new Set(
+    (bundle.insights.removals ?? []).map(
+      (rationale) => removalRunKey(rationale.run.path, rationale.run.start, rationale.run.end)
+    )
+  );
+  return deriveSnapshotRemovalRuns2(bundle.snapshot).map((run) => ({
+    reviewItemId: run.reviewItemId,
+    path: run.path,
+    start: run.start,
+    end: run.end,
+    covered: coveredRunKeys.has(removalRunKey(run.path, run.start, run.end))
+  }));
 }
 function mergeFileInsights(carried, fresh) {
   if (!fresh || fresh.length === 0) return carried;
   if (!carried || carried.length === 0) return fresh;
   const freshPaths = new Set(fresh.map((file) => file.path));
   const survivingCarried = carried.filter((file) => !freshPaths.has(file.path));
+  return [...fresh, ...survivingCarried];
+}
+function removalRunKey(path, start, end) {
+  return `${path}:${start}-${end}`;
+}
+function mergeRemovalInsights(carried, fresh) {
+  if (!fresh || fresh.length === 0) return carried;
+  if (!carried || carried.length === 0) return fresh;
+  const freshKeys = new Set(
+    fresh.map(
+      (rationale) => removalRunKey(rationale.run.path, rationale.run.start, rationale.run.end)
+    )
+  );
+  const survivingCarried = carried.filter(
+    (rationale) => !freshKeys.has(removalRunKey(rationale.run.path, rationale.run.start, rationale.run.end))
+  );
   return [...fresh, ...survivingCarried];
 }
 function buildSnapshot(captured, revisionId, now, predecessorRevisionId) {
@@ -2266,6 +2457,7 @@ function resultFor(root, reference, resumed) {
     resumed,
     url: reviewUrl(reference),
     analysisRequired: !store.isAnalysisFinalized(reference.workspaceId, reference.revisionId),
+    removals: removalsStatusFor(bundle),
     ...bundle.snapshot.kind === "scope" ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) } : {}
   };
 }
@@ -2305,18 +2497,29 @@ function createOrResumeReview(request, dependencies = {}) {
     existingWorkspace,
     now
   );
-  const reconciliation = existingWorkspace ? reconcileProgressAndFiles(
+  const reconciliation = existingWorkspace ? reconcileProgressAndInsights(
     store.readBundle(workspaceId, existingWorkspace.currentRevisionId),
     snapshot,
     now
   ) : void 0;
   const progress = reconciliation?.progress ?? initialProgress(snapshot, now);
+  const carriedRemovals = reconciliation?.removals && reconciliation.removals.length > 0 ? reResolveCarriedRemovals(
+    snapshot,
+    reconciliation.removals,
+    removalExcerptIo(
+      root,
+      captured.source,
+      request.runner ?? systemCommandRunner,
+      dependencies.readFile ?? defaultReadFile
+    )
+  ) : void 0;
   const insights = {
     schemaVersion: 1,
     revisionId,
     groups: [],
     items: [],
-    ...reconciliation?.files ? { files: reconciliation.files } : {}
+    ...reconciliation?.files ? { files: reconciliation.files } : {},
+    ...carriedRemovals && carriedRemovals.length > 0 ? { removals: carriedRemovals } : {}
   };
   try {
     store.createRevision(workspace, snapshot, insights, progress);
@@ -2425,6 +2628,7 @@ function assertValidAnalysis(snapshot, analysis) {
     if (!groupedItemIds.has(itemId)) throw new Error(`review item is missing a group: ${itemId}`);
     if (!insightIds.has(itemId)) throw new Error(`review item is missing an analysis: ${itemId}`);
   }
+  assertCompleteRemovalCoverage(snapshot, analysis.removals ?? []);
 }
 function proposedCodeSection(section) {
   return {
@@ -2470,6 +2674,33 @@ function translateScopeAnalysis(snapshot, analysis, applySections) {
       groups,
       items,
       ...analysis.summary === void 0 ? {} : { summary: analysis.summary }
+    }
+  };
+}
+function splitLines(text) {
+  const lines = text.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+function defaultReadFile(path) {
+  try {
+    return readFileSync6(path, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return void 0;
+    throw error;
+  }
+}
+function runOptional(runner, root, args) {
+  const result = runner.run("git", args, { cwd: root });
+  if (result.exitCode !== 0) return void 0;
+  return typeof result.stdout === "string" ? result.stdout : result.stdout.toString("utf8");
+}
+function removalExcerptIo(root, source, runner, readFile) {
+  return {
+    readTargetLines(path) {
+      const spec = source.kind === "pr" ? `${source.headSha}:${path}` : source.kind === "staged" ? `:${path}` : void 0;
+      const text = spec === void 0 ? readFile(join6(root, path)) : runOptional(runner, root, ["show", spec]);
+      return text === void 0 ? void 0 : splitLines(text);
     }
   };
 }
@@ -2520,7 +2751,7 @@ async function applyReviewAnalysis(request, dependencies = {}) {
           progressTimestamp
         };
       }
-      const reconciled = reconcileProgressAndFiles(
+      const reconciled = reconcileProgressAndInsights(
         store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
         translated.snapshot,
         progressTimestamp
@@ -2561,8 +2792,24 @@ async function applyReviewAnalysis(request, dependencies = {}) {
       throw new Error("diff review requires a diff analysis payload");
     }
     const diffAnalysis = request.analysis;
+    const carriedRemovals = bundle.insights.removals;
+    let resolvedRemovals;
     validationMs += measureMonotonic(monotonicNow, () => {
-      assertValidAnalysis(bundle.snapshot, diffAnalysis);
+      assertValidAnalysis(bundle.snapshot, {
+        ...diffAnalysis,
+        removals: mergeRemovalInsights(carriedRemovals, diffAnalysis.removals) ?? []
+      });
+      const freshRemovals = diffAnalysis.removals ? resolveRemovalExcerpts(
+        bundle.snapshot,
+        diffAnalysis.removals,
+        removalExcerptIo(
+          request.root,
+          bundle.snapshot.source,
+          request.runner ?? systemCommandRunner,
+          request.readFile ?? defaultReadFile
+        )
+      ) : void 0;
+      resolvedRemovals = mergeRemovalInsights(carriedRemovals, freshRemovals);
     }).durationMs;
     const diffFiles = mergeFileInsights(bundle.insights.files, diffAnalysis.files);
     const insights = {
@@ -2571,6 +2818,7 @@ async function applyReviewAnalysis(request, dependencies = {}) {
       ...diffAnalysis.summary === void 0 ? {} : { summary: diffAnalysis.summary },
       groups: diffAnalysis.groups,
       items: diffAnalysis.items,
+      ...resolvedRemovals ? { removals: resolvedRemovals } : {},
       ...diffFiles ? { files: diffFiles } : {}
     };
     finalizedAt = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
@@ -2704,6 +2952,7 @@ function getReviewStatus(request) {
     readiness,
     captureFailed: freshness.captureFailed,
     url: reviewUrl(request.reference),
+    removals: removalsStatusFor(bundle),
     ...bundle.snapshot.kind === "scope" ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) } : {}
   };
 }
@@ -2714,6 +2963,7 @@ function printReviewStatus(request) {
   const status = getReviewStatus(request);
   const state = status.analysisRequired ? "analysis required" : status.readiness.ready ? "ready" : "needs review";
   const sourceState = status.captureFailed ? "capture failed" : status.readiness.sourceChanged ? "changed" : "unchanged";
+  const coveredRemovals = status.removals.filter((removal) => removal.covered).length;
   return [
     status.reference,
     state,
@@ -2721,6 +2971,7 @@ function printReviewStatus(request) {
     `pending: ${status.readiness.pending}`,
     `stale: ${status.readiness.stale}`,
     `unanswered: ${status.readiness.unanswered}`,
+    `removals: ${coveredRemovals}/${status.removals.length} explained`,
     `url: ${status.url}`
   ].join("\n");
 }
@@ -2920,7 +3171,7 @@ function parseUsageReviewRef(value) {
 }
 function readUsageAnalysis(path) {
   try {
-    const body = readFileSync6(path, "utf8");
+    const body = readFileSync7(path, "utf8");
     let value;
     try {
       value = JSON.parse(body);
@@ -2936,7 +3187,7 @@ function readUsageAnalysis(path) {
 }
 function readUsageAnswer(path) {
   try {
-    const body = readFileSync6(path, "utf8");
+    const body = readFileSync7(path, "utf8");
     if (body.trim().length === 0) throw new Error("answer body must not be empty");
     return body;
   } catch (error) {
@@ -3311,7 +3562,7 @@ ${dim4("[synergy]")} If this gets killed, re-run \`synergy feedback wait ${sessi
   }, HEARTBEAT_MS);
   heartbeat.unref?.();
   const onSignal = (signal) => {
-    rmSync3(join6(feedbackDir, session, LISTENING_FILE), { force: true });
+    rmSync3(join7(feedbackDir, session, LISTENING_FILE), { force: true });
     process.stderr.write(
       `
 ${dim4("[synergy]")} Wait interrupted. Re-run \`synergy feedback wait ${session}\` to resume; queued comments persist.
@@ -3455,7 +3706,7 @@ cli.command("status <session>", "Print the execution-state rollup for a session"
 cli.command("handoff <session>", "Write the KT handoff baton (.state/handoff.md) + resume pointer").option("--root <dir>", "Project root (default: cwd)").option("--next <phaseId>", "Phase slug the next agent should resume from").option("--body <text>", "Handoff markdown body (inline)").option("--body-file <path>", "Read the handoff markdown body from a file").action(
   async (session, flags) => {
     try {
-      const body = flags.bodyFile ? readFileSync7(flags.bodyFile, "utf8") : flags.body ?? "";
+      const body = flags.bodyFile ? readFileSync8(flags.bodyFile, "utf8") : flags.body ?? "";
       if (!body.trim()) {
         process.stderr.write(`${red3("Error:")} handoff needs --body or --body-file
 `);

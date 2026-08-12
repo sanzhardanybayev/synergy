@@ -3,7 +3,7 @@ name: review
 description: Use when the user wants a guided human review of a GitHub PR, staged changes, unstaged changes, or a bounded current-code scope, or wants to resume an exact Synergy review and answer browser questions. Captures immutable revisions, creates repository-aware review groups and concise item descriptions, opens the local portal, and runs the durable question loop.
 ---
 
-<!-- synergy-version: 0.19.0 -->
+<!-- synergy-version: 0.20.0 -->
 
 ## Step 0 — Freshness check
 
@@ -11,7 +11,7 @@ This skill may remain loaded after Synergy is updated. Set `MINE` from the marke
 run the installed-version check used by the other Synergy skills:
 
 ```bash
-MINE="0.19.0"
+MINE="0.20.0"
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -213,6 +213,30 @@ Write the scoped payload in this shape:
 Descriptions must be one or two sentences explaining the section's application role using the
 repository context gathered above. Do not merely paraphrase the selected syntax. Diff reviews
 keep the existing `groups` plus `items` payload and use the captured diff item IDs as-is.
+
+### Removal rationale
+
+`review create --json` and `review status --json` list every captured removal run as
+`removals: [{reviewItemId, path, start, end, covered}]`. The analysis payload must carry one
+entry per run under `removals`, matching `path`, `start`, and `end` exactly:
+
+```json
+{
+  "reviewItemId": "<captured id>",
+  "run": { "path": "src/auth/session.ts", "start": 41, "end": 43 },
+  "reason": "moved",
+  "description": "One sentence explaining why these lines are gone.",
+  "movedTo": { "path": "src/http/interceptor.ts", "start": 88, "end": 91 }
+}
+```
+
+Use `moved`, `merged`, or `replaced` only after inspecting the destination at the captured
+source (`git show <headSha>:<path>` for a PR, `git show :<path>` for staged, the worktree file
+for unstaged and scope) and confirming the logic is actually there. If you cannot confirm it,
+use `dead-code`, `obsolete`, or `extracted-to-dep`, which take no `movedTo`. `analysis-set`
+rejects the whole payload when a run is uncovered, when a claimed target does not resolve, or
+when the reason and `movedTo` disagree. `movedTo` may span at most 40 lines. Scope reviews have
+no removal runs.
 
 For every file that appears in the review, also emit a `files[]` entry:
 `{ "path": "<file path>", "description": "<one broad sentence or two on what changed in this file and why>", "confidence": "high" | "medium" | "low" }`.
