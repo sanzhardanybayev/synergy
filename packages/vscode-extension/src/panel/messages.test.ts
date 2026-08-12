@@ -14,6 +14,21 @@ describe('parseFromWebview', () => {
     expect(parseFromWebview({ kind: 'openFile', path: 7 })).toBeUndefined();
   });
 
+  it('parses openFile with an optional destination line', () => {
+    expect(parseFromWebview({ kind: 'openFile', path: 'src/b.ts', line: 88 })).toEqual({
+      kind: 'openFile',
+      path: 'src/b.ts',
+      line: 88,
+    });
+  });
+
+  it('rejects openFile with a non-numeric line', () => {
+    expect(parseFromWebview({ kind: 'openFile', path: 'src/b.ts', line: '88' })).toBeUndefined();
+    expect(
+      parseFromWebview({ kind: 'openFile', path: 'src/b.ts', line: Number.NaN }),
+    ).toBeUndefined();
+  });
+
   it('parses openNativeDiff with and without reviewItemId', () => {
     expect(parseFromWebview({ kind: 'openNativeDiff', path: 'src/a.ts' })).toEqual({
       kind: 'openNativeDiff',

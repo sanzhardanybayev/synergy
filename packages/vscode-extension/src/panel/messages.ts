@@ -27,7 +27,7 @@ export type FromWebview =
   | { kind: 'backToSessions' }
   | { kind: 'openNativeDiff'; path: string; reviewItemId?: string }
   | { kind: 'showSnapshot'; path: string }
-  | { kind: 'openFile'; path: string }
+  | { kind: 'openFile'; path: string; line?: number }
   | { kind: 'setDiffVisible'; value: boolean }
   | { kind: 'advanceWalkthrough'; groupId: string; reviewItemId: string };
 
@@ -41,6 +41,10 @@ function isString(value: unknown): value is string {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(isString);
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 /**
@@ -114,8 +118,10 @@ export function parseFromWebview(value: unknown): FromWebview | undefined {
       return undefined;
 
     case 'openFile':
-      if (isString(value.path)) {
-        return { kind: 'openFile', path: value.path };
+      if (isString(value.path) && (value.line === undefined || isNumber(value.line))) {
+        return value.line === undefined
+          ? { kind: 'openFile', path: value.path }
+          : { kind: 'openFile', path: value.path, line: value.line };
       }
       return undefined;
 

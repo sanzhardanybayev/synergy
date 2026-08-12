@@ -351,6 +351,9 @@ importers:
       esbuild:
         specifier: 0.24.0
         version: 0.24.0
+      jsdom:
+        specifier: 25.0.1
+        version: 25.0.1
       mocha:
         specifier: 10.8.2
         version: 10.8.2
