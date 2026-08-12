@@ -561,6 +561,53 @@ describe('review reconciliation', () => {
       expect(result.insights.removals).toEqual([rationale]);
     });
 
+    it('carries a removal rationale for a byte-identical item that no human has reviewed yet', () => {
+      // Reproduces the common "review refresh after new commits, before any human review"
+      // workflow: the item's content/location hash matches exactly (same reconciliationKey and
+      // even the same item id), so it lands on the `exactStateIds` path, but its PREVIOUS status
+      // was `needs-review` - not `reviewed`/`carried-forward` - so it must never enter
+      // `carriedItemIds`. Content identity, not human review status, is what should keep the
+      // rationale alive.
+      const previousEntry = makeRemovalHunkItem({
+        itemId: 'item-fresh',
+        contentHash: 'content-fresh',
+        locationHash: 'location-fresh',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['foo', 'bar', 'baz'],
+      });
+      const rationale: RemovalRationale = {
+        reviewItemId: 'item-fresh',
+        run: { path: 'src/a.ts', start: 41, end: 43 },
+        reason: 'dead-code',
+        description: 'Removed unused helper.',
+      };
+      const previous = makePreviousWithRemovals(
+        makeRemovalSnapshot('old-revision', [previousEntry]),
+        { 'item-fresh': { status: 'needs-review' } },
+        [rationale],
+      );
+      const currentEntry = makeRemovalHunkItem({
+        itemId: 'item-fresh',
+        contentHash: 'content-fresh',
+        locationHash: 'location-fresh',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['foo', 'bar', 'baz'],
+      });
+
+      const result = reconcileReview(
+        previous,
+        makeRemovalSnapshot('current-revision', [currentEntry]),
+        NOW,
+      );
+
+      expect(result.items['item-fresh']).toEqual({ status: 'needs-review' });
+      expect(result.insights.removals).toEqual([rationale]);
+    });
+
     it('rewrites the rationale onto the new review item id when the owning item id changes across revisions', () => {
       // Same reconciliationKey (contentHash/locationHash), different item id: exactly the
       // fuzzy carry-forward path that changes a review item's id between revisions.

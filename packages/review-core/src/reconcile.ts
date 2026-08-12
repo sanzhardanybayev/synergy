@@ -192,16 +192,22 @@ export function reconcileReview(
 
   // Item ids are not stable across revisions - `inheritedFrom.reviewItemId` records what each
   // carried current id actually descends from, so removal rationales (keyed on the old id) can
-  // be rewritten onto the new one rather than silently dropped. Scoped to `carriedItemIds`
-  // (status === 'carried-forward') rather than any presence of `inheritedFrom`, since a cloned
-  // non-carrying progress entry could in principle retain a stale pointer from an earlier
-  // revision that this reconciliation never touched.
-  const inheritance = new Map(
-    Array.from(carriedItemIds).flatMap((id) => {
-      const inheritedFrom = items[id]?.inheritedFrom;
-      return inheritedFrom ? [[id, inheritedFrom.reviewItemId] as const] : [];
-    }),
-  );
+  // be rewritten onto the new one rather than silently dropped. Content identity, not human
+  // review status, is what makes a rationale still valid: `exactStateIds` (id -> itself) covers
+  // the byte-identical-but-still-`needs-review` case that the common "refresh before anyone has
+  // reviewed" workflow hits on every run, and the fuzzy `inheritedFrom` pointers recorded on
+  // `carried-forward` entries cover items whose id changed but matched by `reconciliationKey`.
+  // The correctness guard remains `reconciliationKey` (content + context) inside
+  // `carryForwardRemovals` itself, so widening the inheritance source here cannot admit a
+  // rationale whose underlying text changed.
+  const inheritance = new Map<string, string>();
+  for (const id of exactStateIds) {
+    inheritance.set(id, id);
+  }
+  for (const id of carriedItemIds) {
+    const inheritedFrom = items[id]?.inheritedFrom;
+    if (inheritedFrom) inheritance.set(id, inheritedFrom.reviewItemId);
+  }
   const removals = carryForwardRemovals(
     previous.insights,
     previous.snapshot,
