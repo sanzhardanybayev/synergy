@@ -1,7 +1,7 @@
 import { buildDiffSnapshot } from '@synergy/review-core';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReviewProvider } from '../src/review/ReviewProvider.js';
 import { ReviewShell } from '../src/review/ReviewShell.js';
 import { makeDiffBundle, makeReviewClient } from './review-ui-fixtures.js';
@@ -121,13 +121,29 @@ describe('removal jump navigation', () => {
     expect(screen.getByRole('button', { name: /back to src\/auth\/session\.ts:41/i })).toBeTruthy();
   });
 
-  it('jumping does not change any review status', async () => {
+  it('jumping does not change any review status or persist walkthrough progress', async () => {
     const user = userEvent.setup();
     const { client } = renderReviewAt();
     await user.click(
       await screen.findByRole('button', { name: /→ src\/http\/interceptor\.ts:88/ }),
     );
     expect(client.patchProgress).not.toHaveBeenCalled();
+    // A jump touches only the LOCAL reveal floor - it must never advance the persisted
+    // walkthrough cursor (activeGroupId/activeReviewItemId), which is monotonic server state a
+    // later "back" jump could not undo.
+    expect(client.patchWalkthrough).not.toHaveBeenCalled();
+  });
+
+  it('jumping scrolls the stage into view', async () => {
+    // jsdom has no layout engine and doesn't implement scrollIntoView at all.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const user = userEvent.setup();
+    renderReviewAt();
+    await user.click(
+      await screen.findByRole('button', { name: /→ src\/http\/interceptor\.ts:88/ }),
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'start' }));
   });
 
   it('the back chip returns to the origin item and clears itself', async () => {

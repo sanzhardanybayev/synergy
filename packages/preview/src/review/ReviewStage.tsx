@@ -117,12 +117,28 @@ export function ReviewStage({
       return next;
     });
   }
+  /** Scrolls the stage into view, honoring reduced-motion, so a target swapped in off-screen (a
+   * walkthrough advance or a removal-strip jump) is actually visible rather than landing unseen
+   * on a long page. */
+  function scrollStageIntoView(): void {
+    const reduceMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (typeof stageRef.current?.scrollIntoView === 'function') {
+      stageRef.current.scrollIntoView({
+        behavior: reduceMotion ? 'auto' : 'smooth',
+        block: 'start',
+      });
+    }
+  }
+
   function handleJump(target: ResolvedRemovalTarget, strip: RemovalStripModel): void {
     if (target.kind !== 'in-review') return;
     jump.jumpTo(target, {
       reviewItemId: item.id,
       label: `${item.path}:${strip.run.start}`,
     });
+    scrollStageIntoView();
   }
   function handleBack(): void {
     if (!jump.origin) return;
@@ -154,15 +170,7 @@ export function ReviewStage({
   function handleContinue(): void {
     if (!next) return;
     walkthrough.advanceTo(next.reviewItemId);
-    const reduceMotion =
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (typeof stageRef.current?.scrollIntoView === 'function') {
-      stageRef.current.scrollIntoView({
-        behavior: reduceMotion ? 'auto' : 'smooth',
-        block: 'start',
-      });
-    }
+    scrollStageIntoView();
   }
 
   return (

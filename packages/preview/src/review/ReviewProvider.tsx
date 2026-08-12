@@ -154,9 +154,17 @@ export function ReviewProvider({
 
   const jumpTo = useCallback(
     (target: InReviewRemovalTarget, origin: JumpOrigin): void => {
-      // advanceTo only moves the active item / walkthrough cursor - it never touches progress,
-      // so a jump can never mark anything reviewed.
-      advanceTo(target.reviewItemId);
+      // A jump touches only the LOCAL reveal floor, never persisted walkthrough progress: it
+      // sets the active item (session-local, view-only) and raises `localFloorRef` directly so
+      // the target chapter is revealed, but it deliberately skips `advanceTo`/
+      // `operations.advanceWalkthrough` - that would PATCH `activeGroupId`/`activeReviewItemId`
+      // to the server and, because the advance is monotonic, permanently move the reviewer's
+      // stored story position with no way for a later "jump back" to undo it.
+      operations.setActiveItem(target.reviewItemId);
+      const chapter = chapterOf(chapters, target.reviewItemId);
+      if (chapter && chapter.index + 1 > localFloorRef.current) {
+        localFloorRef.current = chapter.index + 1;
+      }
       setJumpOrigin(origin);
       setFlashedRowIds(target.rowIds);
       clearFlashTimeout();
@@ -165,7 +173,7 @@ export function ReviewProvider({
         setFlashedRowIds([]);
       }, 1200);
     },
-    [advanceTo, clearFlashTimeout],
+    [chapters, clearFlashTimeout, operations],
   );
   const clearJumpOrigin = useCallback((): void => setJumpOrigin(null), []);
 
