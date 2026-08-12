@@ -1,8 +1,9 @@
-import { resolveBrowserReviewItemContext } from './browser.js';
+import { resolveBrowserReviewItemContext } from './browser-context.js';
 import type {
   RemovalRationale,
   ReviewDiffLineRow,
   ReviewInsights,
+  ReviewItem,
   ReviewSnapshot,
 } from './types.js';
 
@@ -60,15 +61,19 @@ export function deriveRemovalRuns(rows: readonly ReviewDiffLineRow[]): RemovalRu
   return runs;
 }
 
+/** Resolves one hunk item's rows, dropping any scope rows that can never appear alongside it. */
+function hunkDiffRows(snapshot: ReviewSnapshot, item: ReviewItem): ReviewDiffLineRow[] {
+  const context = resolveBrowserReviewItemContext(snapshot, item.id);
+  return context.rows.filter((row): row is ReviewDiffLineRow => row.kind !== 'scope');
+}
+
 /** Every removal run across a captured diff snapshot's hunk items. Scope snapshots have none. */
 export function deriveSnapshotRemovalRuns(snapshot: ReviewSnapshot): SnapshotRemovalRun[] {
   if (snapshot.kind !== 'diff') return [];
   const runs: SnapshotRemovalRun[] = [];
   for (const item of snapshot.items) {
     if (item.kind !== 'hunk') continue;
-    const context = resolveBrowserReviewItemContext(snapshot, item.id);
-    const diffRows = context.rows.filter((row): row is ReviewDiffLineRow => row.kind !== 'scope');
-    for (const run of deriveRemovalRuns(diffRows)) {
+    for (const run of deriveRemovalRuns(hunkDiffRows(snapshot, item))) {
       runs.push({ ...run, reviewItemId: item.id, path: item.path });
     }
   }
@@ -89,14 +94,9 @@ export function resolveRemovalTarget(
   if (target && snapshot.kind === 'diff') {
     for (const item of snapshot.items) {
       if (item.kind !== 'hunk' || item.path !== target.path) continue;
-      const context = resolveBrowserReviewItemContext(snapshot, item.id);
-      const rowIds = context.rows
+      const rowIds = hunkDiffRows(snapshot, item)
         .filter(
-          (row): row is ReviewDiffLineRow =>
-            row.kind !== 'scope' &&
-            row.newLine !== null &&
-            row.newLine >= target.start &&
-            row.newLine <= target.end,
+          (row) => row.newLine !== null && row.newLine >= target.start && row.newLine <= target.end,
         )
         .map((row) => row.id);
       if (rowIds.length > 0) {
