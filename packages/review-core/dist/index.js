@@ -5,7 +5,7 @@ import {
   deriveSnapshotRemovalRuns,
   resolveRemovalTarget,
   reviewRowId
-} from "./chunk-2TJQ6VRX.js";
+} from "./chunk-XNYFNTV3.js";
 import {
   buildDiffSnapshot,
   capturePr,
@@ -252,12 +252,14 @@ function reconcileReview(previous, currentSnapshot, now) {
     Object.entries(items).filter(([, itemProgress]) => itemProgress.status === "carried-forward").map(([id]) => id)
   );
   const files = carryForwardFileInsights(previous.insights, currentSnapshot, carriedItemIds);
-  const inheritance = new Map(
-    Array.from(carriedItemIds).flatMap((id) => {
-      const inheritedFrom = items[id]?.inheritedFrom;
-      return inheritedFrom ? [[id, inheritedFrom.reviewItemId]] : [];
-    })
-  );
+  const inheritance = /* @__PURE__ */ new Map();
+  for (const id of exactStateIds) {
+    inheritance.set(id, id);
+  }
+  for (const id of carriedItemIds) {
+    const inheritedFrom = items[id]?.inheritedFrom;
+    if (inheritedFrom) inheritance.set(id, inheritedFrom.reviewItemId);
+  }
   const removals = carryForwardRemovals(
     previous.insights,
     previous.snapshot,

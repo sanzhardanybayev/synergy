@@ -2001,6 +2001,11 @@ var MAX_MOVED_TO_LINES = 40;
 function runKey(path, start, end) {
   return `${path}:${start}-${end}`;
 }
+function assertSafeEvidencePath(path) {
+  if (path.length === 0 || path.includes("\0") || path.startsWith("/") || path.startsWith("\\") || path.split(/[\\/]/u).some((segment) => segment === "." || segment === "..")) {
+    throw new Error(`invalid evidence path: ${path}`);
+  }
+}
 function assertCompleteRemovalCoverage(snapshot, removals) {
   const derived = deriveSnapshotRemovalRuns(snapshot);
   if (derived.length === 0 && removals.length === 0) return;
@@ -2030,6 +2035,7 @@ function assertCompleteRemovalCoverage(snapshot, removals) {
     }
     const target = rationale.movedTo;
     if (target) {
+      assertSafeEvidencePath(target.path);
       if (target.start > target.end) {
         throw new Error(`removal rationale ${key} has a reversed range in movedTo`);
       }
@@ -2324,11 +2330,6 @@ function refreshReview(request) {
     readFile: request.readFile,
     source: captureRequestFromWorkspace(workspace)
   });
-}
-function assertSafeEvidencePath(path) {
-  if (path.length === 0 || path.includes("\0") || path.startsWith("/") || path.startsWith("\\") || path.split(/[\\/]/u).some((segment) => segment === "." || segment === "..")) {
-    throw new Error(`invalid evidence path: ${path}`);
-  }
 }
 function assertNarrativeText(value, max, label) {
   if (value.trim().length === 0 || Array.from(value).length > max) {

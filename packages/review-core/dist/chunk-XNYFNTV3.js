@@ -97,10 +97,21 @@ function resolveRemovalTarget(snapshot, rationale) {
   if (target && snapshot.kind === "diff") {
     for (const item of snapshot.items) {
       if (item.kind !== "hunk" || item.path !== target.path) continue;
-      const rowIds = hunkDiffRows(snapshot, item).filter(
-        (row) => row.newLine !== null && row.newLine >= target.start && row.newLine <= target.end
-      ).map((row) => row.id);
-      if (rowIds.length > 0) {
+      const addedByLine = /* @__PURE__ */ new Map();
+      for (const row of hunkDiffRows(snapshot, item)) {
+        if (row.kind === "add" && row.newLine !== null) addedByLine.set(row.newLine, row.id);
+      }
+      const rowIds = [];
+      let complete = true;
+      for (let line = target.start; line <= target.end; line += 1) {
+        const rowId = addedByLine.get(line);
+        if (rowId === void 0) {
+          complete = false;
+          break;
+        }
+        rowIds.push(rowId);
+      }
+      if (complete && rowIds.length > 0) {
         return {
           kind: "in-review",
           reviewItemId: item.id,
@@ -157,4 +168,4 @@ export {
   buildRemovalStrips,
   deriveReviewReadiness
 };
-//# sourceMappingURL=chunk-2TJQ6VRX.js.map
+//# sourceMappingURL=chunk-XNYFNTV3.js.map
