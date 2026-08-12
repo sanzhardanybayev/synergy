@@ -253,9 +253,10 @@ function reconcileReview(previous, currentSnapshot, now) {
   );
   const files = carryForwardFileInsights(previous.insights, currentSnapshot, carriedItemIds);
   const inheritance = new Map(
-    Object.entries(items).flatMap(
-      ([id, itemProgress]) => itemProgress.inheritedFrom ? [[id, itemProgress.inheritedFrom.reviewItemId]] : []
-    )
+    Array.from(carriedItemIds).flatMap((id) => {
+      const inheritedFrom = items[id]?.inheritedFrom;
+      return inheritedFrom ? [[id, inheritedFrom.reviewItemId]] : [];
+    })
   );
   const removals = carryForwardRemovals(
     previous.insights,

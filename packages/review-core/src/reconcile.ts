@@ -192,11 +192,15 @@ export function reconcileReview(
 
   // Item ids are not stable across revisions - `inheritedFrom.reviewItemId` records what each
   // carried current id actually descends from, so removal rationales (keyed on the old id) can
-  // be rewritten onto the new one rather than silently dropped.
+  // be rewritten onto the new one rather than silently dropped. Scoped to `carriedItemIds`
+  // (status === 'carried-forward') rather than any presence of `inheritedFrom`, since a cloned
+  // non-carrying progress entry could in principle retain a stale pointer from an earlier
+  // revision that this reconciliation never touched.
   const inheritance = new Map(
-    Object.entries(items).flatMap(([id, itemProgress]) =>
-      itemProgress.inheritedFrom ? [[id, itemProgress.inheritedFrom.reviewItemId] as const] : [],
-    ),
+    Array.from(carriedItemIds).flatMap((id) => {
+      const inheritedFrom = items[id]?.inheritedFrom;
+      return inheritedFrom ? [[id, inheritedFrom.reviewItemId] as const] : [];
+    }),
   );
   const removals = carryForwardRemovals(
     previous.insights,
