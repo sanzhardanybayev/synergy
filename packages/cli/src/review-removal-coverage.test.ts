@@ -1,7 +1,11 @@
 import { buildDiffSnapshot } from '@synergy/review-core';
 import type { RemovalRationale } from '@synergy/review-core';
 import { describe, expect, it } from 'vitest';
-import { MAX_MOVED_TO_LINES, assertCompleteRemovalCoverage } from './review-removals.js';
+import {
+  MAX_MOVED_TO_LINES,
+  assertCompleteRemovalCoverage,
+  resolveRemovalExcerpts,
+} from './review-removals.js';
 
 const SOURCE = { kind: 'staged' as const, headSha: 'abc123' };
 
@@ -127,5 +131,74 @@ describe('assertCompleteRemovalCoverage', () => {
 
   it('is a no-op for a scope snapshot', () => {
     expect(() => assertCompleteRemovalCoverage(scopeSnapshot, [])).not.toThrow();
+  });
+});
+
+describe('resolveRemovalExcerpts', () => {
+  const snapshot = buildFixtureSnapshot();
+  const itemId = snapshot.items[0]!.id;
+
+  // Lands on the same hunk's new-side lines (42-43 map to context rows c45/c46), so it
+  // resolves in-review and must not gain a persisted excerpt.
+  const movedInsideRationale: RemovalRationale = {
+    reviewItemId: itemId,
+    run: { path: 'src/a.ts', start: 41, end: 41 },
+    reason: 'moved',
+    description: 'Moved within the same file.',
+    movedTo: { path: 'src/a.ts', start: 42, end: 43 },
+  };
+
+  const movedOutsideRationale: RemovalRationale = {
+    reviewItemId: itemId,
+    run: { path: 'src/a.ts', start: 50, end: 50 },
+    reason: 'moved',
+    description: 'Moved to the interceptor.',
+    movedTo: { path: 'src/b.ts', start: 88, end: 89 },
+  };
+
+  const danglingPathRationale: RemovalRationale = {
+    reviewItemId: itemId,
+    run: { path: 'src/a.ts', start: 50, end: 50 },
+    reason: 'moved',
+    description: 'Moved to a file that does not exist at the source.',
+    movedTo: { path: 'src/missing.ts', start: 1, end: 2 },
+  };
+
+  // readTargetLines returns the whole file (as the real git/fs-backed reader does), so the
+  // fixture must be long enough to contain absolute lines 88-89 - not just those two lines.
+  const bFileLines = [
+    ...Array.from({ length: 87 }, (_, index) => `filler${index + 1}`),
+    'line88',
+    'line89',
+  ];
+  const io = {
+    readTargetLines: (path: string) => (path === 'src/b.ts' ? bFileLines : undefined),
+  };
+
+  it('attaches an excerpt for a target outside the review', () => {
+    const [resolved] = resolveRemovalExcerpts(snapshot, [movedOutsideRationale], io);
+    expect(resolved?.movedToExcerpt).toEqual({
+      path: 'src/b.ts',
+      start: 88,
+      lines: ['line88', 'line89'],
+    });
+  });
+
+  it('attaches no excerpt when the target is a captured review item', () => {
+    const [resolved] = resolveRemovalExcerpts(snapshot, [movedInsideRationale], io);
+    expect(resolved?.movedToExcerpt).toBeUndefined();
+  });
+
+  it('rejects a target whose file cannot be read', () => {
+    expect(() => resolveRemovalExcerpts(snapshot, [danglingPathRationale], io)).toThrow(
+      /movedTo target was not found/,
+    );
+  });
+
+  it('rejects a target range past the end of the file', () => {
+    const io2 = { readTargetLines: () => ['only one line'] };
+    expect(() => resolveRemovalExcerpts(snapshot, [movedOutsideRationale], io2)).toThrow(
+      /is out of range/,
+    );
   });
 });

@@ -3,6 +3,7 @@ import {
   type RemovalRationale,
   type ReviewSnapshot,
   deriveSnapshotRemovalRuns,
+  resolveRemovalTarget,
 } from '@synergy/review-core';
 
 /**
@@ -67,4 +68,46 @@ export function assertCompleteRemovalCoverage(
   if (missing.length > 0) {
     throw new Error(`removal runs are missing a rationale: ${missing.join(', ')}`);
   }
+}
+
+export interface RemovalExcerptIo {
+  /** Returns the target file's lines, or undefined when the path does not exist at the source. */
+  readTargetLines(path: string): string[] | undefined;
+}
+
+/**
+ * Resolves `movedTo` targets that land outside the captured review into a persisted
+ * `movedToExcerpt`, so browser hosts (which have no git access) never need to re-read the
+ * destination. Targets that resolve inside the review are left excerpt-free - the snapshot
+ * already carries those lines. A target whose file cannot be read, or whose range extends past
+ * the end of the file, rejects the whole payload.
+ */
+export function resolveRemovalExcerpts(
+  snapshot: ReviewSnapshot,
+  removals: readonly RemovalRationale[],
+  io: RemovalExcerptIo,
+): RemovalRationale[] {
+  return removals.map((rationale) => {
+    const target = rationale.movedTo;
+    if (!target) return rationale;
+    if (resolveRemovalTarget(snapshot, rationale).kind === 'in-review') return rationale;
+
+    const lines = io.readTargetLines(target.path);
+    if (!lines) {
+      throw new Error(`removal rationale movedTo target was not found: ${target.path}`);
+    }
+    if (target.end > lines.length) {
+      throw new Error(
+        `removal rationale movedTo ${target.path}:${target.start}-${target.end} is out of range (file has ${lines.length} lines)`,
+      );
+    }
+    return {
+      ...rationale,
+      movedToExcerpt: {
+        path: target.path,
+        start: target.start,
+        lines: lines.slice(target.start - 1, target.end),
+      },
+    };
+  });
 }

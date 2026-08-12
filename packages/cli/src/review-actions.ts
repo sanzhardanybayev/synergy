@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   type ProposedCodeSection,
@@ -10,6 +12,7 @@ import {
   type ReviewProgress,
   type ReviewRef,
   type ReviewSnapshot,
+  type ReviewSource,
   type ReviewSourceFreshness,
   type ReviewWorkspace,
   applyCodeSections,
@@ -37,12 +40,18 @@ import {
 import {
   type CaptureReviewSourceRequest,
   type CapturedReviewSource,
+  type CommandRunner,
   captureReviewSource,
   repositoryName,
   resolveRepositoryRoot,
+  systemCommandRunner,
 } from './review-capture.js';
 import { assertCompleteScopeCoverage } from './review-coverage.js';
-import { assertCompleteRemovalCoverage } from './review-removals.js';
+import {
+  type RemovalExcerptIo,
+  assertCompleteRemovalCoverage,
+  resolveRemovalExcerpts,
+} from './review-removals.js';
 
 export interface CreateReviewRequest extends CaptureReviewSourceRequest {}
 
@@ -103,12 +112,18 @@ interface CanonicalReviewAnalysis {
   summary?: string;
 }
 
+/** Reads a repository-relative path's full text, or undefined when it does not exist at the
+ * inspected source (a missing file is a normal outcome here, not an error). */
+export type ReadFile = (path: string) => string | undefined;
+
 export interface ApplyReviewAnalysisRequest {
   root: string;
   reference: ReviewRef;
   analysis: ReviewAnalysisInput;
   parsingInMs?: number;
   commandStartedAt?: number;
+  runner?: CommandRunner;
+  readFile?: ReadFile;
 }
 
 export interface ReviewAnalysisTimings {
@@ -509,6 +524,61 @@ function translateScopeAnalysis(
   };
 }
 
+/** Splits file text into lines without letting a trailing newline manufacture a phantom final
+ * line: "a\nb\n" is 2 lines, not 3, matching how line numbers are counted elsewhere in review
+ * captures. A single trailing empty element (the artifact of `String.split` on a
+ * newline-terminated string) is dropped; a genuine trailing blank line still survives because
+ * only the file's own terminating newline produces that artifact. */
+function splitLines(text: string): string[] {
+  const lines = text.split('\n');
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+function defaultReadFile(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+/** Runs `git -C <root> <args>`, collapsing a non-zero exit into undefined rather than throwing -
+ * a missing path at a historical revision (e.g. `git show <sha>:<path>`) is a normal outcome. */
+function runOptional(runner: CommandRunner, root: string, args: string[]): string | undefined {
+  const result = runner.run('git', args, { cwd: root });
+  if (result.exitCode !== 0) return undefined;
+  return typeof result.stdout === 'string' ? result.stdout : result.stdout.toString('utf8');
+}
+
+/**
+ * Builds the `movedTo` target reader for the review's captured source, mirroring how each
+ * source kind must be inspected: a PR or staged capture reads immutable Git content (the head
+ * commit or the index) so the target is stable even if the worktree later changes; unstaged and
+ * scope captures have no such immutable pointer, so they read the live worktree file.
+ */
+function removalExcerptIo(
+  root: string,
+  source: ReviewSource,
+  runner: CommandRunner,
+  readFile: ReadFile,
+): RemovalExcerptIo {
+  return {
+    readTargetLines(path) {
+      const spec =
+        source.kind === 'pr'
+          ? `${source.headSha}:${path}`
+          : source.kind === 'staged'
+            ? `:${path}`
+            : undefined;
+      const text =
+        spec === undefined ? readFile(join(root, path)) : runOptional(runner, root, ['show', spec]);
+      return text === undefined ? undefined : splitLines(text);
+    },
+  };
+}
+
 export async function applyReviewAnalysis(
   request: ApplyReviewAnalysisRequest,
   dependencies: ApplyReviewAnalysisDependencies = {},
@@ -606,6 +676,21 @@ export async function applyReviewAnalysis(
     validationMs += measureMonotonic(monotonicNow, () => {
       assertValidAnalysis(bundle.snapshot, diffAnalysis);
     }).durationMs;
+    // Resolved inline (not through measureMonotonic) because it is a no-op read for the common
+    // case (no movedTo, or a target that resolves in-review) and must not perturb the validation
+    // timing bucket callers already observe.
+    const resolvedRemovals = diffAnalysis.removals
+      ? resolveRemovalExcerpts(
+          bundle.snapshot,
+          diffAnalysis.removals,
+          removalExcerptIo(
+            request.root,
+            bundle.snapshot.source,
+            request.runner ?? systemCommandRunner,
+            request.readFile ?? defaultReadFile,
+          ),
+        )
+      : undefined;
     const diffFiles = mergeFileInsights(bundle.insights.files, diffAnalysis.files);
     const insights: ReviewInsights = {
       schemaVersion: 1,
@@ -613,7 +698,7 @@ export async function applyReviewAnalysis(
       ...(diffAnalysis.summary === undefined ? {} : { summary: diffAnalysis.summary }),
       groups: diffAnalysis.groups,
       items: diffAnalysis.items,
-      ...(diffAnalysis.removals ? { removals: diffAnalysis.removals } : {}),
+      ...(resolvedRemovals ? { removals: resolvedRemovals } : {}),
       ...(diffFiles ? { files: diffFiles } : {}),
     };
     finalizedAt = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
