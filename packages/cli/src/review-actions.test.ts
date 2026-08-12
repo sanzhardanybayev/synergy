@@ -67,6 +67,39 @@ function removalsForSnapshot(snapshot: ReviewSnapshot): RemovalRationale[] {
   }));
 }
 
+/** A single "moved" rationale for the snapshot's one derived removal run, pointed at a target
+ * outside the captured review so `resolveRemovalExcerpts` must read through the injected io. */
+function movedOutsideRationale(
+  snapshot: ReviewSnapshot,
+  reviewItemId: string,
+  movedTo: { path: string; start: number; end: number },
+): RemovalRationale[] {
+  const [run, ...rest] = deriveSnapshotRemovalRuns(snapshot);
+  if (!run || rest.length > 0) {
+    throw new Error('fixture must derive exactly one removal run');
+  }
+  return [
+    {
+      reviewItemId,
+      run: { path: run.path, start: run.start, end: run.end },
+      reason: 'moved',
+      description: 'Moved to another module.',
+      movedTo,
+    },
+  ];
+}
+
+/** Wraps a runner to record every command key it receives, in order, for assertions on which
+ * git spec a read seam actually used. */
+function recordingRunner(base: CommandRunner, calls: string[]): CommandRunner {
+  return {
+    run(command, args, options): CommandResult {
+      calls.push([command, ...args].join(' '));
+      return base.run(command, args, options);
+    },
+  };
+}
+
 describe('review lifecycle actions', () => {
   it('uses canonical shared freshness for text and JSON readiness, failing capture closed', async () => {
     const root = join(tmpdir(), `synergy-review-status-${Date.now()}`);
@@ -1555,6 +1588,348 @@ describe('review lifecycle actions', () => {
           },
         }),
       ).rejects.toThrow(/removal runs are missing a rationale/);
+      expect(
+        store.isAnalysisFinalized(created.reference.workspaceId, created.reference.revisionId),
+      ).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves a moved-to excerpt for a staged review by reading git's index", async () => {
+    const root = join(tmpdir(), `synergy-review-removals-excerpt-staged-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const calls: string[] = [];
+      const fixture: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'git show :src/other.ts') {
+            return { exitCode: 0, stdout: 'l1\nl2\nl3\nl4\nl5\nl6\n', stderr: '' };
+          }
+          return createRunner().run(command, args, options);
+        },
+      };
+      const runner = recordingRunner(fixture, calls);
+      const created = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = movedOutsideRationale(snapshot, item.id, {
+        path: 'src/other.ts',
+        start: 5,
+        end: 6,
+      });
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+          items: [
+            {
+              reviewItemId: item.id,
+              description: 'Updates the staged fixture value.',
+              confidence: 'high',
+              evidencePaths: [item.path],
+            },
+          ],
+          removals,
+        },
+        runner,
+      });
+      const finalized = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.removals?.[0]?.movedToExcerpt).toEqual({
+        path: 'src/other.ts',
+        start: 5,
+        lines: ['l5', 'l6'],
+      });
+      // The staged read seam must ask git for the indexed blob (":<path>"), not the worktree.
+      expect(calls).toContain('git show :src/other.ts');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves a moved-to excerpt for a PR review by reading the head commit', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-excerpt-pr-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const metadata = JSON.stringify({
+        number: 42,
+        title: 'Moved logic',
+        url: 'https://github.com/acme/repo/pull/42',
+        baseRefOid: 'base123',
+        headRefOid: 'head123',
+      });
+      const calls: string[] = [];
+      const fixture: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'gh pr view 42 --json number,title,url,baseRefOid,headRefOid') {
+            return { exitCode: 0, stdout: metadata, stderr: '' };
+          }
+          if (key === 'gh pr diff https://github.com/acme/repo/pull/42') {
+            return { exitCode: 0, stdout: PATCH, stderr: '' };
+          }
+          if (
+            key ===
+            'gh pr view https://github.com/acme/repo/pull/42 --json number,title,url,baseRefOid,headRefOid'
+          ) {
+            return { exitCode: 0, stdout: metadata, stderr: '' };
+          }
+          if (key === 'git rev-parse --show-toplevel') {
+            return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+          }
+          if (key === 'git show head123:src/other.ts') {
+            return { exitCode: 0, stdout: 'l1\nl2\nl3\nl4\nl5\nl6\n', stderr: '' };
+          }
+          throw new Error(`missing fixture for ${key}`);
+        },
+      };
+      const runner = recordingRunner(fixture, calls);
+      const created = createOrResumeReview({
+        root,
+        source: { kind: 'pr', selector: '42' },
+        runner,
+      });
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = movedOutsideRationale(snapshot, item.id, {
+        path: 'src/other.ts',
+        start: 5,
+        end: 6,
+      });
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+          items: [
+            {
+              reviewItemId: item.id,
+              description: 'Updates the PR fixture value.',
+              confidence: 'high',
+              evidencePaths: [item.path],
+            },
+          ],
+          removals,
+        },
+        runner,
+      });
+      const finalized = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.removals?.[0]?.movedToExcerpt).toEqual({
+        path: 'src/other.ts',
+        start: 5,
+        lines: ['l5', 'l6'],
+      });
+      // The PR read seam must pin to the captured head SHA, not the (possibly since-moved) branch tip.
+      expect(calls).toContain('git show head123:src/other.ts');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves a moved-to excerpt for an unstaged review by reading the worktree file', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-excerpt-unstaged-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const unstagedDiffCommand = [
+      'git',
+      'diff',
+      '--no-ext-diff',
+      '--binary',
+      '--',
+      ':(exclude).synergy/preview.runtime.json',
+      ':(exclude).synergy/preview.runtime.json.*',
+      ':(exclude).synergy/.preview.runtime.json.*.tmp',
+      ':(exclude).synergy/preview.start.lock',
+      ':(exclude).synergy/preview.start.lock.*',
+      ':(exclude).synergy/preview.pid',
+      ':(exclude).synergy/preview.log',
+    ].join(' ');
+    try {
+      const calls: string[] = [];
+      const fixture: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'git rev-parse --show-toplevel') {
+            return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+          }
+          if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+          if (key === unstagedDiffCommand) return { exitCode: 0, stdout: PATCH, stderr: '' };
+          if (key === 'git ls-files --others --exclude-standard -z') {
+            return { exitCode: 0, stdout: '', stderr: '' };
+          }
+          throw new Error(`missing fixture for ${key}`);
+        },
+      };
+      const runner = recordingRunner(fixture, calls);
+      const created = createOrResumeReview({
+        root,
+        source: { kind: 'unstaged' },
+        runner,
+        readFile: () => 'unused',
+      });
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = movedOutsideRationale(snapshot, item.id, {
+        path: 'src/other.ts',
+        start: 5,
+        end: 6,
+      });
+      const targetPath = join(root, 'src/other.ts');
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+          items: [
+            {
+              reviewItemId: item.id,
+              description: 'Updates the unstaged fixture value.',
+              confidence: 'high',
+              evidencePaths: [item.path],
+            },
+          ],
+          removals,
+        },
+        runner,
+        readFile: (path) => (path === targetPath ? 'l1\nl2\nl3\nl4\nl5\nl6\n' : undefined),
+      });
+      const finalized = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.removals?.[0]?.movedToExcerpt).toEqual({
+        path: 'src/other.ts',
+        start: 5,
+        lines: ['l5', 'l6'],
+      });
+      // Unstaged has no immutable Git pointer to read from, so the seam must be the worktree file
+      // (via readFile), never a git show.
+      expect(calls.some((call) => call.startsWith('git show'))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects analysis end-to-end when a moved-to target file cannot be read', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-excerpt-missing-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const runner: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'git show :src/missing.ts') {
+            return { exitCode: 1, stdout: '', stderr: 'fatal: path does not exist' };
+          }
+          return createRunner().run(command, args, options);
+        },
+      };
+      const created = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = movedOutsideRationale(snapshot, item.id, {
+        path: 'src/missing.ts',
+        start: 1,
+        end: 2,
+      });
+      await expect(
+        applyReviewAnalysis({
+          root,
+          reference: created.reference,
+          analysis: {
+            kind: 'diff',
+            groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+            items: [
+              {
+                reviewItemId: item.id,
+                description: 'Updates the staged fixture value.',
+                confidence: 'high',
+                evidencePaths: [item.path],
+              },
+            ],
+            removals,
+          },
+          runner,
+        }),
+      ).rejects.toThrow(/movedTo target was not found/);
+      expect(
+        store.isAnalysisFinalized(created.reference.workspaceId, created.reference.revisionId),
+      ).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects analysis end-to-end when a moved-to target range exceeds the file', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-excerpt-oversized-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const runner: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'git show :src/other.ts') {
+            return { exitCode: 0, stdout: 'only one line\n', stderr: '' };
+          }
+          return createRunner().run(command, args, options);
+        },
+      };
+      const created = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = movedOutsideRationale(snapshot, item.id, {
+        path: 'src/other.ts',
+        start: 5,
+        end: 6,
+      });
+      await expect(
+        applyReviewAnalysis({
+          root,
+          reference: created.reference,
+          analysis: {
+            kind: 'diff',
+            groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+            items: [
+              {
+                reviewItemId: item.id,
+                description: 'Updates the staged fixture value.',
+                confidence: 'high',
+                evidencePaths: [item.path],
+              },
+            ],
+            removals,
+          },
+          runner,
+        }),
+      ).rejects.toThrow(/is out of range/);
       expect(
         store.isAnalysisFinalized(created.reference.workspaceId, created.reference.revisionId),
       ).toBe(false);

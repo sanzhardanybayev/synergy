@@ -673,24 +673,26 @@ export async function applyReviewAnalysis(
       throw new Error('diff review requires a diff analysis payload');
     }
     const diffAnalysis = request.analysis;
+    // Excerpt resolution is folded into the validation measurement (not a separate bucket):
+    // reading a movedTo target's destination lines is itself a rejection gate - an unreadable
+    // file or an out-of-range span fails the payload exactly like assertValidAnalysis does - so
+    // its cost belongs to the same "is this payload acceptable" timing as the rest of validation.
+    let resolvedRemovals: RemovalRationale[] | undefined;
     validationMs += measureMonotonic(monotonicNow, () => {
       assertValidAnalysis(bundle.snapshot, diffAnalysis);
+      resolvedRemovals = diffAnalysis.removals
+        ? resolveRemovalExcerpts(
+            bundle.snapshot,
+            diffAnalysis.removals,
+            removalExcerptIo(
+              request.root,
+              bundle.snapshot.source,
+              request.runner ?? systemCommandRunner,
+              request.readFile ?? defaultReadFile,
+            ),
+          )
+        : undefined;
     }).durationMs;
-    // Resolved inline (not through measureMonotonic) because it is a no-op read for the common
-    // case (no movedTo, or a target that resolves in-review) and must not perturb the validation
-    // timing bucket callers already observe.
-    const resolvedRemovals = diffAnalysis.removals
-      ? resolveRemovalExcerpts(
-          bundle.snapshot,
-          diffAnalysis.removals,
-          removalExcerptIo(
-            request.root,
-            bundle.snapshot.source,
-            request.runner ?? systemCommandRunner,
-            request.readFile ?? defaultReadFile,
-          ),
-        )
-      : undefined;
     const diffFiles = mergeFileInsights(bundle.insights.files, diffAnalysis.files);
     const insights: ReviewInsights = {
       schemaVersion: 1,

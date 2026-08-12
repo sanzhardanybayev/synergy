@@ -92,6 +92,10 @@ export function resolveRemovalExcerpts(
     if (!target) return rationale;
     if (resolveRemovalTarget(snapshot, rationale).kind === 'in-review') return rationale;
 
+    // `undefined` intentionally conflates "the file does not exist at this source" with "the
+    // read failed for another reason" (a git command's non-zero exit, an ENOENT) - `io`
+    // deliberately has no room to distinguish them (see RemovalExcerptIo above), so a real git
+    // failure surfaces with the same "not found" message a genuinely missing path would.
     const lines = io.readTargetLines(target.path);
     if (!lines) {
       throw new Error(`removal rationale movedTo target was not found: ${target.path}`);
