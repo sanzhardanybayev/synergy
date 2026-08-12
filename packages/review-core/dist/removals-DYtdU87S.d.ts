@@ -191,6 +191,31 @@ interface ReviewFileInsight {
     description: string;
     confidence: ReviewInsightConfidence;
 }
+type RemovalReason = 'moved' | 'merged' | 'replaced' | 'dead-code' | 'obsolete' | 'extracted-to-dep';
+/** Reasons that assert the logic still exists somewhere and therefore require a target. */
+declare const RELOCATING_REMOVAL_REASONS: readonly RemovalReason[];
+interface RemovalRunRef {
+    path: string;
+    start: number;
+    end: number;
+}
+/** Exact destination text captured once at analysis time so browser hosts never need git. */
+interface RemovalTargetExcerpt {
+    path: string;
+    start: number;
+    lines: string[];
+}
+interface RemovalRationale {
+    reviewItemId: string;
+    /** Old-side line span of the removed run. */
+    run: RemovalRunRef;
+    reason: RemovalReason;
+    description: string;
+    /** New-side line span where the logic landed. Present only for relocating reasons. */
+    movedTo?: RemovalRunRef;
+    /** Present only when `movedTo` resolves outside the captured review. */
+    movedToExcerpt?: RemovalTargetExcerpt;
+}
 interface ReviewInsights {
     schemaVersion: 1;
     revisionId: string;
@@ -198,6 +223,7 @@ interface ReviewInsights {
     groups: ReviewGroup[];
     items: ReviewItemInsight[];
     files?: ReviewFileInsight[];
+    removals?: RemovalRationale[];
 }
 type ReviewQuestionStatus = 'queued' | 'processing' | 'answered' | 'failed' | 'stale';
 interface ReviewClaim {
@@ -315,4 +341,51 @@ interface ActiveReviewPointer {
 /** Calculates readiness solely from the current snapshot, review progress, questions, and freshness. */
 declare function deriveReviewReadiness(bundle: ReviewBundle, analysisFinalized?: boolean): ReviewReadiness;
 
-export { type ActiveReviewPointer as A, type ReviewQuestionGeneration as B, type ClaimResult as C, type DiffFile as D, type ReviewQuestionGenerationState as E, type ReviewQuestionInput as F, type ReviewQuestionStatus as G, type ReviewRange as H, type ReviewReadiness as I, type ReviewRef as J, type ReviewRepository as K, type ReviewScopeLineRow as L, type ReviewSnapshot as M, type ReviewSource as N, type ReviewWorkspace as O, type SourceFile as P, type QuestionQueue as Q, type ReviewAnswer as R, type ScopeReviewSnapshot as S, type SourceLine as T, deriveReviewReadiness as U, type WalkthroughPosition as W, type DiffFileStatus as a, type DiffHunk as b, type DiffLine as c, type DiffLineKind as d, type DiffReviewSnapshot as e, type ReviewAnswerReference as f, type ReviewBundle as g, type ReviewClaim as h, type ReviewDiffLineRow as i, type ReviewFileInsight as j, type ReviewGroup as k, type ReviewInsightConfidence as l, type ReviewInsights as m, type ReviewItem as n, type ReviewItemContext as o, type ReviewItemInsight as p, type ReviewItemKind as q, type ReviewItemProgress as r, type ReviewItemProgressPatch as s, type ReviewItemStatus as t, type ReviewLineRow as u, type ReviewLineSelection as v, type ReviewProgress as w, type ReviewProgressUpdate as x, type ReviewQuestion as y, type ReviewQuestionEnvelope as z };
+interface RemovalRun {
+    start: number;
+    end: number;
+    lineIds: string[];
+    texts: string[];
+}
+interface SnapshotRemovalRun extends RemovalRun {
+    reviewItemId: string;
+    path: string;
+}
+type ResolvedRemovalTarget = {
+    kind: 'in-review';
+    reviewItemId: string;
+    rowIds: string[];
+    path: string;
+    start: number;
+    end: number;
+} | {
+    kind: 'excerpt';
+    path: string;
+    start: number;
+    lines: string[];
+} | {
+    kind: 'unresolved';
+};
+interface RemovalStrip {
+    run: RemovalRun;
+    rationale?: RemovalRationale;
+    target: ResolvedRemovalTarget;
+}
+/**
+ * Groups maximal contiguous `remove` rows by old-side line number, preserving row order.
+ * A non-removed row (or a break in old-line contiguity) closes the current run.
+ */
+declare function deriveRemovalRuns(rows: readonly ReviewDiffLineRow[]): RemovalRun[];
+/** Every removal run across a captured diff snapshot's hunk items. Scope snapshots have none. */
+declare function deriveSnapshotRemovalRuns(snapshot: ReviewSnapshot): SnapshotRemovalRun[];
+/**
+ * Resolves an authored `movedTo` reference: onto a captured review item (an in-review jump)
+ * when the new-side target lands inside another hunk's rows, else onto the rationale's persisted
+ * excerpt, else unresolved. Reads only the immutable snapshot and rationale - never the
+ * filesystem or git.
+ */
+declare function resolveRemovalTarget(snapshot: ReviewSnapshot, rationale: RemovalRationale): ResolvedRemovalTarget;
+/** One strip per derived run, in row order, with its rationale (if any) and resolved target. */
+declare function buildRemovalStrips(rows: readonly ReviewDiffLineRow[], reviewItemId: string, snapshot: ReviewSnapshot, insights: Pick<ReviewInsights, 'removals'>): RemovalStrip[];
+
+export { type SourceFile as $, type ActiveReviewPointer as A, type ReviewItemProgressPatch as B, type ClaimResult as C, type DiffFile as D, type ReviewItemStatus as E, type ReviewLineRow as F, type ReviewLineSelection as G, type ReviewProgress as H, type ReviewProgressUpdate as I, type ReviewQuestion as J, type ReviewQuestionEnvelope as K, type ReviewQuestionGeneration as L, type ReviewQuestionGenerationState as M, type ReviewQuestionInput as N, type ReviewQuestionStatus as O, type ReviewRange as P, type QuestionQueue as Q, RELOCATING_REMOVAL_REASONS as R, type ReviewReadiness as S, type ReviewRef as T, type ReviewRepository as U, type ReviewScopeLineRow as V, type ReviewSnapshot as W, type ReviewSource as X, type ReviewWorkspace as Y, type ScopeReviewSnapshot as Z, type SnapshotRemovalRun as _, type DiffFileStatus as a, type SourceLine as a0, type WalkthroughPosition as a1, buildRemovalStrips as a2, deriveRemovalRuns as a3, deriveReviewReadiness as a4, deriveSnapshotRemovalRuns as a5, resolveRemovalTarget as a6, type DiffHunk as b, type DiffLine as c, type DiffLineKind as d, type DiffReviewSnapshot as e, type RemovalRationale as f, type RemovalReason as g, type RemovalRun as h, type RemovalRunRef as i, type RemovalStrip as j, type RemovalTargetExcerpt as k, type ResolvedRemovalTarget as l, type ReviewAnswer as m, type ReviewAnswerReference as n, type ReviewBundle as o, type ReviewClaim as p, type ReviewDiffLineRow as q, type ReviewFileInsight as r, type ReviewGroup as s, type ReviewInsightConfidence as t, type ReviewInsights as u, type ReviewItem as v, type ReviewItemContext as w, type ReviewItemInsight as x, type ReviewItemKind as y, type ReviewItemProgress as z };

@@ -1,7 +1,11 @@
 import {
+  buildRemovalStrips,
+  deriveRemovalRuns,
   deriveReviewReadiness,
+  deriveSnapshotRemovalRuns,
+  resolveRemovalTarget,
   reviewRowId
-} from "./chunk-VDPZNTKV.js";
+} from "./chunk-GOXPD7VI.js";
 import {
   buildDiffSnapshot,
   capturePr,
@@ -798,6 +802,38 @@ var fileInsightSchema = {
     confidence: { enum: ["high", "medium", "low"] }
   }
 };
+var removalRunRefSchema = {
+  type: "object",
+  required: ["path", "start", "end"],
+  additionalProperties: false,
+  properties: {
+    path: nonEmptyString,
+    start: { type: "integer", minimum: 1 },
+    end: { type: "integer", minimum: 1 }
+  }
+};
+var removalRationaleSchema = {
+  type: "object",
+  required: ["reviewItemId", "run", "reason", "description"],
+  additionalProperties: false,
+  properties: {
+    reviewItemId: nonEmptyString,
+    run: removalRunRefSchema,
+    reason: { enum: ["moved", "merged", "replaced", "dead-code", "obsolete", "extracted-to-dep"] },
+    description: nonEmptyString,
+    movedTo: removalRunRefSchema,
+    movedToExcerpt: {
+      type: "object",
+      required: ["path", "start", "lines"],
+      additionalProperties: false,
+      properties: {
+        path: nonEmptyString,
+        start: { type: "integer", minimum: 1 },
+        lines: { type: "array", items: string }
+      }
+    }
+  }
+};
 var reviewInsightsSchema = {
   type: "object",
   required: ["schemaVersion", "revisionId", "groups", "items"],
@@ -834,7 +870,8 @@ var reviewInsightsSchema = {
         }
       }
     },
-    files: { type: "array", items: fileInsightSchema }
+    files: { type: "array", items: fileInsightSchema },
+    removals: { type: "array", items: removalRationaleSchema }
   }
 };
 var itemProgressSchema = {
@@ -1093,6 +1130,14 @@ function assertReviewQuestionGeneration(value) {
 function assertReviewAnswer(value) {
   assertSchema(value, validators.answer, "answer");
   assertSafeReviewSegment(value.id, "answer");
+}
+
+// src/types.ts
+var RELOCATING_REMOVAL_REASONS = ["moved", "merged", "replaced"];
+
+// src/removal-hash.ts
+function removalRunHash(texts) {
+  return hashText(texts.join("\n"));
 }
 
 // src/store.ts
@@ -2962,6 +3007,7 @@ function createReviewStore(projectRoot, options = {}) {
   };
 }
 export {
+  RELOCATING_REMOVAL_REASONS,
   ReviewCoreError,
   ReviewFreshnessAsyncError,
   SAFE_SEGMENT,
@@ -2978,6 +3024,7 @@ export {
   assertSafeReviewSegment,
   atomicWriteJson,
   buildDiffSnapshot,
+  buildRemovalStrips,
   buildScopeSnapshot,
   capturePr,
   captureReviewSource,
@@ -2991,7 +3038,9 @@ export {
   createHunkReviewItem,
   createQuestionQueue,
   createReviewStore,
+  deriveRemovalRuns,
   deriveReviewReadiness,
+  deriveSnapshotRemovalRuns,
   enqueueQuestion,
   failQuestion,
   formatReviewRef,
@@ -3008,9 +3057,11 @@ export {
   reconcileReview,
   reconciliationKey,
   releaseClaim,
+  removalRunHash,
   removeReviewListener,
   renewClaim,
   repositoryName,
+  resolveRemovalTarget,
   resolveRepositoryRoot,
   resolveReviewItemContext,
   resolveReviewLineSelection,

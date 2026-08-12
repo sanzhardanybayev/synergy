@@ -1,5 +1,5 @@
-import { N as ReviewSource, P as SourceFile, g as ReviewBundle, M as ReviewSnapshot, w as ReviewProgress, j as ReviewFileInsight, n as ReviewItem, o as ReviewItemContext, v as ReviewLineSelection, e as DiffReviewSnapshot, b as DiffHunk, D as DiffFile, S as ScopeReviewSnapshot, J as ReviewRef, R as ReviewAnswer, m as ReviewInsights, y as ReviewQuestion, z as ReviewQuestionEnvelope, B as ReviewQuestionGeneration, O as ReviewWorkspace, K as ReviewRepository, x as ReviewProgressUpdate, s as ReviewItemProgressPatch, W as WalkthroughPosition, A as ActiveReviewPointer, E as ReviewQuestionGenerationState, C as ClaimResult, Q as QuestionQueue, F as ReviewQuestionInput } from './readiness-ByKlP-Gk.js';
-export { a as DiffFileStatus, c as DiffLine, d as DiffLineKind, f as ReviewAnswerReference, h as ReviewClaim, i as ReviewDiffLineRow, k as ReviewGroup, l as ReviewInsightConfidence, p as ReviewItemInsight, q as ReviewItemKind, r as ReviewItemProgress, t as ReviewItemStatus, u as ReviewLineRow, G as ReviewQuestionStatus, H as ReviewRange, I as ReviewReadiness, L as ReviewScopeLineRow, T as SourceLine, U as deriveReviewReadiness } from './readiness-ByKlP-Gk.js';
+import { X as ReviewSource, $ as SourceFile, o as ReviewBundle, W as ReviewSnapshot, H as ReviewProgress, r as ReviewFileInsight, v as ReviewItem, w as ReviewItemContext, G as ReviewLineSelection, e as DiffReviewSnapshot, b as DiffHunk, D as DiffFile, Z as ScopeReviewSnapshot, T as ReviewRef, m as ReviewAnswer, u as ReviewInsights, J as ReviewQuestion, K as ReviewQuestionEnvelope, L as ReviewQuestionGeneration, Y as ReviewWorkspace, U as ReviewRepository, I as ReviewProgressUpdate, B as ReviewItemProgressPatch, a1 as WalkthroughPosition, A as ActiveReviewPointer, M as ReviewQuestionGenerationState, C as ClaimResult, Q as QuestionQueue, N as ReviewQuestionInput } from './removals-DYtdU87S.js';
+export { a as DiffFileStatus, c as DiffLine, d as DiffLineKind, R as RELOCATING_REMOVAL_REASONS, f as RemovalRationale, g as RemovalReason, h as RemovalRun, i as RemovalRunRef, j as RemovalStrip, k as RemovalTargetExcerpt, l as ResolvedRemovalTarget, n as ReviewAnswerReference, p as ReviewClaim, q as ReviewDiffLineRow, s as ReviewGroup, t as ReviewInsightConfidence, x as ReviewItemInsight, y as ReviewItemKind, z as ReviewItemProgress, E as ReviewItemStatus, F as ReviewLineRow, O as ReviewQuestionStatus, P as ReviewRange, S as ReviewReadiness, V as ReviewScopeLineRow, _ as SnapshotRemovalRun, a0 as SourceLine, a2 as buildRemovalStrips, a3 as deriveRemovalRuns, a4 as deriveReviewReadiness, a5 as deriveSnapshotRemovalRuns, a6 as resolveRemovalTarget } from './removals-DYtdU87S.js';
 
 declare function atomicWriteJson(path: string, value: unknown): void;
 
@@ -847,6 +847,86 @@ declare const reviewInsightsSchema: {
                 };
             };
         };
+        readonly removals: {
+            readonly type: "array";
+            readonly items: {
+                readonly type: "object";
+                readonly required: readonly ["reviewItemId", "run", "reason", "description"];
+                readonly additionalProperties: false;
+                readonly properties: {
+                    readonly reviewItemId: {
+                        readonly type: "string";
+                        readonly minLength: 1;
+                    };
+                    readonly run: {
+                        readonly type: "object";
+                        readonly required: readonly ["path", "start", "end"];
+                        readonly additionalProperties: false;
+                        readonly properties: {
+                            readonly path: {
+                                readonly type: "string";
+                                readonly minLength: 1;
+                            };
+                            readonly start: {
+                                readonly type: "integer";
+                                readonly minimum: 1;
+                            };
+                            readonly end: {
+                                readonly type: "integer";
+                                readonly minimum: 1;
+                            };
+                        };
+                    };
+                    readonly reason: {
+                        readonly enum: readonly ["moved", "merged", "replaced", "dead-code", "obsolete", "extracted-to-dep"];
+                    };
+                    readonly description: {
+                        readonly type: "string";
+                        readonly minLength: 1;
+                    };
+                    readonly movedTo: {
+                        readonly type: "object";
+                        readonly required: readonly ["path", "start", "end"];
+                        readonly additionalProperties: false;
+                        readonly properties: {
+                            readonly path: {
+                                readonly type: "string";
+                                readonly minLength: 1;
+                            };
+                            readonly start: {
+                                readonly type: "integer";
+                                readonly minimum: 1;
+                            };
+                            readonly end: {
+                                readonly type: "integer";
+                                readonly minimum: 1;
+                            };
+                        };
+                    };
+                    readonly movedToExcerpt: {
+                        readonly type: "object";
+                        readonly required: readonly ["path", "start", "lines"];
+                        readonly additionalProperties: false;
+                        readonly properties: {
+                            readonly path: {
+                                readonly type: "string";
+                                readonly minLength: 1;
+                            };
+                            readonly start: {
+                                readonly type: "integer";
+                                readonly minimum: 1;
+                            };
+                            readonly lines: {
+                                readonly type: "array";
+                                readonly items: {
+                                    readonly type: "string";
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
     };
 };
 declare const reviewProgressSchema: {
@@ -1457,6 +1537,20 @@ declare function assertReviewQuestionEnvelope(value: unknown): asserts value is 
 declare function assertReviewQuestionGeneration(value: unknown): asserts value is ReviewQuestionGeneration;
 declare function assertReviewAnswer(value: unknown): asserts value is ReviewAnswer;
 
+/**
+ * Identity for carry-forward matching: depends only on the ordered removed text, never on line
+ * numbers, so a pure offset shift (e.g. an unrelated edit above the run) still matches.
+ *
+ * Split into its own module (rather than living in `removals.ts`) because it is the only piece
+ * of the removal-derivation surface that needs `hashText` (`node:crypto`). `removals.ts` is
+ * imported by the browser-safe entry point (`browser.ts`) for the preview app and VS Code
+ * webview; those bundlers fail to resolve `node:crypto` even for unused exports, so any
+ * node-only import at the top of `removals.ts` would break both hosts. Keeping this one function
+ * in its own file keeps `removals.ts` importable from `browser.ts` without pulling in Node
+ * built-ins.
+ */
+declare function removalRunHash(texts: readonly string[]): string;
+
 interface ReviewStore {
     createRevision(workspace: ReviewWorkspace, snapshot: ReviewSnapshot, insights: ReviewInsights, progress: ReviewProgress): void;
     readBundle(workspaceId: string, revisionId: string): ReviewBundle;
@@ -1518,4 +1612,4 @@ declare function removeReviewListener(projectRoot: string, reference: ReviewRef,
 declare function createQuestionQueue(projectRoot: string, reference: ReviewRef, options?: QuestionPersistenceOptions): QuestionQueue;
 declare function reviewQuestionsDirectory(projectRoot: string, reference: ReviewRef): string;
 
-export { ActiveReviewPointer, type BuildDiffSnapshotInput, type BuildScopeSnapshotInput, type CaptureFileOptions, type CapturePrOptions, type CaptureReviewSourceRequest, type CaptureScopeOptions, type CapturedReviewSource, ClaimResult, type CommandResult, type CommandRunner, DiffFile, DiffHunk, DiffReviewSnapshot, type ProposedCodeSection, type QuestionPersistenceOptions, type QuestionPublication, QuestionQueue, ReviewAnswer, ReviewBundle, type ReviewCaptureSourceRequest, ReviewCoreError, type ReviewCoreErrorCode, ReviewFileInsight, ReviewFreshnessAsyncError, type ReviewFreshnessAsyncErrorCode, type ReviewFreshnessWorker, type ReviewFreshnessWorkerData, type ReviewFreshnessWorkerFactory, type ReviewFreshnessWorkerInput, ReviewInsights, ReviewItem, ReviewItemContext, ReviewItemProgressPatch, ReviewLineSelection, ReviewProgress, ReviewProgressUpdate, ReviewQuestion, ReviewQuestionEnvelope, ReviewQuestionGeneration, ReviewQuestionGenerationState, ReviewQuestionInput, ReviewRef, ReviewRepository, ReviewSnapshot, ReviewSource, type ReviewSourceFreshness, type ReviewSourceFreshnessAsyncOptions, type ReviewStore, type ReviewStoreOptions, ReviewWorkspace, SAFE_SEGMENT, ScopeReviewSnapshot, SourceFile, WalkthroughPosition, answersDir, applyCodeSections, assertReviewAnswer, assertReviewInsights, assertReviewProgress, assertReviewQuestion, assertReviewQuestionEnvelope, assertReviewQuestionGeneration, assertReviewSnapshot, assertReviewWorkspace, assertSafeReviewSegment, atomicWriteJson, buildDiffSnapshot, buildScopeSnapshot, capturePr, captureReviewSource, captureScope, captureStaged, captureUnstaged, claimQuestion, claimQuestions, compareReviewSourceFreshness, compareReviewSourceFreshnessAsync, createHunkReviewItem, createQuestionQueue, createReviewStore, enqueueQuestion, failQuestion, formatReviewRef, hashText, insightsFile, isReviewCoreError, listQuestions, parseReviewRef, parseUnifiedDiff, progressFile, questionsDir, recaptureReviewSource, reconcileExpiredQuestions, reconcileReview, reconciliationKey, releaseClaim, removeReviewListener, renewClaim, repositoryName, resolveRepositoryRoot, resolveReviewItemContext, resolveReviewLineSelection, reviewAnswerSchema, reviewInsightsSchema, reviewProgressSchema, reviewQuestionEnvelopeSchema, reviewQuestionGenerationSchema, reviewQuestionSchema, reviewQuestionsDirectory, reviewRevisionDir, reviewSnapshotSchema, reviewWorkspaceDir, reviewWorkspaceSchema, reviewsDir, snapshotFile, systemCommandRunner, touchReviewListener, workspaceFile, writeAnswer };
+export { ActiveReviewPointer, type BuildDiffSnapshotInput, type BuildScopeSnapshotInput, type CaptureFileOptions, type CapturePrOptions, type CaptureReviewSourceRequest, type CaptureScopeOptions, type CapturedReviewSource, ClaimResult, type CommandResult, type CommandRunner, DiffFile, DiffHunk, DiffReviewSnapshot, type ProposedCodeSection, type QuestionPersistenceOptions, type QuestionPublication, QuestionQueue, ReviewAnswer, ReviewBundle, type ReviewCaptureSourceRequest, ReviewCoreError, type ReviewCoreErrorCode, ReviewFileInsight, ReviewFreshnessAsyncError, type ReviewFreshnessAsyncErrorCode, type ReviewFreshnessWorker, type ReviewFreshnessWorkerData, type ReviewFreshnessWorkerFactory, type ReviewFreshnessWorkerInput, ReviewInsights, ReviewItem, ReviewItemContext, ReviewItemProgressPatch, ReviewLineSelection, ReviewProgress, ReviewProgressUpdate, ReviewQuestion, ReviewQuestionEnvelope, ReviewQuestionGeneration, ReviewQuestionGenerationState, ReviewQuestionInput, ReviewRef, ReviewRepository, ReviewSnapshot, ReviewSource, type ReviewSourceFreshness, type ReviewSourceFreshnessAsyncOptions, type ReviewStore, type ReviewStoreOptions, ReviewWorkspace, SAFE_SEGMENT, ScopeReviewSnapshot, SourceFile, WalkthroughPosition, answersDir, applyCodeSections, assertReviewAnswer, assertReviewInsights, assertReviewProgress, assertReviewQuestion, assertReviewQuestionEnvelope, assertReviewQuestionGeneration, assertReviewSnapshot, assertReviewWorkspace, assertSafeReviewSegment, atomicWriteJson, buildDiffSnapshot, buildScopeSnapshot, capturePr, captureReviewSource, captureScope, captureStaged, captureUnstaged, claimQuestion, claimQuestions, compareReviewSourceFreshness, compareReviewSourceFreshnessAsync, createHunkReviewItem, createQuestionQueue, createReviewStore, enqueueQuestion, failQuestion, formatReviewRef, hashText, insightsFile, isReviewCoreError, listQuestions, parseReviewRef, parseUnifiedDiff, progressFile, questionsDir, recaptureReviewSource, reconcileExpiredQuestions, reconcileReview, reconciliationKey, releaseClaim, removalRunHash, removeReviewListener, renewClaim, repositoryName, resolveRepositoryRoot, resolveReviewItemContext, resolveReviewLineSelection, reviewAnswerSchema, reviewInsightsSchema, reviewProgressSchema, reviewQuestionEnvelopeSchema, reviewQuestionGenerationSchema, reviewQuestionSchema, reviewQuestionsDirectory, reviewRevisionDir, reviewSnapshotSchema, reviewWorkspaceDir, reviewWorkspaceSchema, reviewsDir, snapshotFile, systemCommandRunner, touchReviewListener, workspaceFile, writeAnswer };
