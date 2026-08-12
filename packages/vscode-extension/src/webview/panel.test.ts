@@ -239,6 +239,22 @@ describe('renderRemovalStrip', () => {
     expect(onJumpToReviewItem).toHaveBeenCalledWith('item-2');
   });
 
+  it('renders the badge and sentence with no jump chip and no peek for an unresolved target', () => {
+    const unresolvedStrip = {
+      ...strip,
+      target: { kind: 'unresolved' as const },
+    };
+    const node = renderRemovalStrip(unresolvedStrip, {
+      onJumpToReviewItem: () => {},
+      onOpenFile: () => {},
+    });
+    expect(node?.querySelector('.removal-cat')?.textContent).toBe('moved');
+    expect(node?.textContent).toContain('Refresh converged into the interceptor.');
+    expect(node?.querySelector('.removal-jump')).toBeNull();
+    expect(node?.querySelector('.removal-peek')).toBeNull();
+    expect(node?.querySelector('.removal-open-file')).toBeNull();
+  });
+
   it('renders a peek and an open-in-editor action instead of a jump for an out-of-review target', () => {
     const onOpenFile = vi.fn();
     const excerptStrip = {

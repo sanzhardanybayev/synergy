@@ -34,6 +34,7 @@ body.vscode-light {
   --syn-status-in-progress: #a16207;
   --syn-status-blocked: #c03a2b;
   --syn-status-done: #22794a;
+  --syn-status-shipped: #17708b;
 
   --syn-danger: #c03a2b;
   --syn-danger-soft: rgba(192, 58, 43, 0.1);
@@ -75,6 +76,7 @@ body.vscode-high-contrast {
   --syn-status-in-progress: #d9a13c;
   --syn-status-blocked: #e0644e;
   --syn-status-done: #55b47c;
+  --syn-status-shipped: #56aec9;
 
   --syn-danger: #e0644e;
   --syn-danger-soft: rgba(224, 100, 78, 0.14);
@@ -120,6 +122,7 @@ body.vscode-high-contrast-light {
   --syn-status-in-progress: #a16207;
   --syn-status-blocked: #c03a2b;
   --syn-status-done: #22794a;
+  --syn-status-shipped: #17708b;
 
   --syn-danger: #c03a2b;
   --syn-danger-soft: rgba(192, 58, 43, 0.1);
@@ -700,8 +703,8 @@ input[type="checkbox"] {
  * packages/preview/src/review/review.css. */
 .removal-cat-moved,
 .removal-cat-merged {
-  color: var(--syn-status-done);
-  border-color: var(--syn-status-done);
+  color: var(--syn-status-shipped);
+  border-color: var(--syn-status-shipped);
 }
 
 .removal-cat-replaced {
