@@ -51,6 +51,7 @@ import { assertCompleteScopeCoverage } from './review-coverage.js';
 import {
   type RemovalExcerptIo,
   assertCompleteRemovalCoverage,
+  reResolveCarriedRemovals,
   resolveRemovalExcerpts,
 } from './review-removals.js';
 
@@ -67,6 +68,11 @@ export interface CreateReviewResult {
 
 export interface ReviewActionDependencies {
   createStore?: typeof createReviewStore;
+  /** Reads a movedTo target's destination lines when re-resolving carried removal excerpts
+   * against the new revision's live worktree (unstaged/scope sources only - staged/PR sources
+   * read immutable Git content through `request.runner` instead). Defaults to real filesystem
+   * reads. */
+  readFile?: ReadFile;
 }
 
 export interface ApplyReviewAnalysisDependencies {
@@ -397,13 +403,30 @@ export function createOrResumeReview(
       )
     : undefined;
   const progress = reconciliation?.progress ?? initialProgress(snapshot, now);
+  // Carried removal rationales are re-resolved against THIS revision's own source here, at
+  // creation time - not deferred to finalize - so `status.removals[].covered` stays honest: a
+  // rationale that survives is one whose moved-to destination was just verified against the
+  // source `review refresh` just captured, not against a stale predecessor read.
+  const carriedRemovals =
+    reconciliation?.removals && reconciliation.removals.length > 0
+      ? reResolveCarriedRemovals(
+          snapshot,
+          reconciliation.removals,
+          removalExcerptIo(
+            root,
+            captured.source,
+            request.runner ?? systemCommandRunner,
+            dependencies.readFile ?? defaultReadFile,
+          ),
+        )
+      : undefined;
   const insights: ReviewInsights = {
     schemaVersion: 1,
     revisionId,
     groups: [],
     items: [],
     ...(reconciliation?.files ? { files: reconciliation.files } : {}),
-    ...(reconciliation?.removals ? { removals: reconciliation.removals } : {}),
+    ...(carriedRemovals && carriedRemovals.length > 0 ? { removals: carriedRemovals } : {}),
   };
   try {
     store.createRevision(workspace, snapshot, insights, progress);
@@ -753,9 +776,12 @@ export async function applyReviewAnalysis(
     // file or an out-of-range span fails the payload exactly like assertValidAnalysis does - so
     // its cost belongs to the same "is this payload acceptable" timing as the rest of validation.
     // Excerpts are re-resolved only for the freshly submitted rationales: a carried rationale's
-    // `movedToExcerpt` (if any) was already resolved and persisted against the predecessor
-    // revision's source, and its `run` line numbers - not the excerpt - are what `reconcileReview`
-    // rewrites on carry-forward, so the excerpt itself needs no re-reading.
+    // `movedToExcerpt` was already re-verified against THIS revision's own source at creation
+    // time (`createOrResumeReview` -> `reResolveCarriedRemovals`), not merely carried untouched
+    // from the predecessor - a stale destination is dropped there, before it ever reaches this
+    // bundle, so `bundle.insights.removals` only ever contains carried rationales whose moved-to
+    // excerpt (if any) is already honest for this exact revision. That earned trust is what lets
+    // finalize skip re-reading it here.
     let resolvedRemovals: RemovalRationale[] | undefined;
     validationMs += measureMonotonic(monotonicNow, () => {
       assertValidAnalysis(bundle.snapshot, {

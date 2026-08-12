@@ -115,3 +115,60 @@ export function resolveRemovalExcerpts(
     };
   });
 }
+
+/**
+ * Re-resolves each carried-forward rationale's `movedTo` destination against the NEW revision's
+ * source, so a persisted `movedToExcerpt` is never stale after a `review refresh`. A rationale
+ * can carry an excerpt captured against the PREDECESSOR revision's source - nothing about
+ * carry-forward constrains the moved-to destination, only the removed run's own text - so this
+ * must re-verify it at the seam where the new source is captured, before `status.removals[].covered`
+ * can be trusted to predict finalize-time acceptance.
+ *
+ * Unlike `resolveRemovalExcerpts` (which rejects an entire live submission on an unreadable or
+ * out-of-range target), this never throws: a carried rationale whose destination can no longer be
+ * verified is silently dropped - its run reverts to uncovered and must be re-authored - because a
+ * stale excerpt must never be persisted, and a refresh is not the moment to reject the revision
+ * itself over an old rationale going stale.
+ */
+export function reResolveCarriedRemovals(
+  snapshot: ReviewSnapshot,
+  removals: readonly RemovalRationale[],
+  io: RemovalExcerptIo,
+): RemovalRationale[] {
+  const resolved: RemovalRationale[] = [];
+  for (const rationale of removals) {
+    const target = rationale.movedTo;
+    if (!target) {
+      resolved.push(rationale);
+      continue;
+    }
+    if (resolveRemovalTarget(snapshot, rationale).kind === 'in-review') {
+      // The destination now lands inside the captured review: the preview resolves it live from
+      // the snapshot, so a persisted excerpt would be dead weight that can drift. Drop it rather
+      // than carry it forward unused.
+      resolved.push({
+        reviewItemId: rationale.reviewItemId,
+        run: rationale.run,
+        reason: rationale.reason,
+        description: rationale.description,
+        movedTo: target,
+      });
+      continue;
+    }
+    const lines = io.readTargetLines(target.path);
+    if (!lines || target.end > lines.length) continue;
+    resolved.push({
+      reviewItemId: rationale.reviewItemId,
+      run: rationale.run,
+      reason: rationale.reason,
+      description: rationale.description,
+      movedTo: target,
+      movedToExcerpt: {
+        path: target.path,
+        start: target.start,
+        lines: lines.slice(target.start - 1, target.end),
+      },
+    });
+  }
+  return resolved;
+}

@@ -210,6 +210,126 @@ async function setupRefreshedReviewWithCarriedRemoval(root: string): Promise<{
   return { refreshed, store, refreshedBundle, refreshedItemA, refreshedItemB };
 }
 
+/** A staged runner over the two-file removal patch that also answers `git show :src/other.ts`
+ * from a mutable getter, so a test can change what the "moved to" destination contains (or make
+ * it unreadable) between the initial capture/finalize and a later refresh. */
+function stagedMovedRunner(
+  getPatch: () => string,
+  getOtherContent: () => string | undefined,
+): CommandRunner {
+  return {
+    run(command, args, options): CommandResult {
+      const key = [command, ...args].join(' ');
+      if (key === 'git diff --cached --no-ext-diff --binary') {
+        return { exitCode: 0, stdout: getPatch(), stderr: '' };
+      }
+      if (key === 'git show :src/other.ts') {
+        const content = getOtherContent();
+        return content === undefined
+          ? { exitCode: 1, stdout: '', stderr: 'fatal: path does not exist' }
+          : { exitCode: 0, stdout: content, stderr: '' };
+      }
+      if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+      if (key === 'git rev-parse --show-toplevel') {
+        return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+      }
+      if (key === 'git config --get remote.origin.url') {
+        return { exitCode: 1, stdout: '', stderr: '' };
+      }
+      throw new Error(`missing fixture for ${key}`);
+    },
+  };
+}
+
+/** Sets up revision 1 (files a and b) with item a explained by a plain rationale and item b
+ * explained by a "moved" rationale pointing outside the captured review at `src/other.ts:5-6`,
+ * marks item b reviewed so it carries forward, and finalizes. Returns the runner (so the caller
+ * can mutate `patch`/`otherContent` and trigger a refresh) plus the store and both item ids. */
+async function setupCarriedMovedRationale(
+  root: string,
+  otherContent: { value: string | undefined },
+): Promise<{
+  store: ReturnType<typeof createReviewStore>;
+  runner: CommandRunner;
+  patch: { value: string };
+  firstReference: { workspaceId: string; revisionId: string };
+  itemAId: string;
+  itemBId: string;
+}> {
+  const patch = { value: twoFileRemovalPatch(2) };
+  const runner = stagedMovedRunner(
+    () => patch.value,
+    () => otherContent.value,
+  );
+  const first = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+  const store = createReviewStore(root);
+  const firstSnapshot = store.readBundle(
+    first.reference.workspaceId,
+    first.reference.revisionId,
+  ).snapshot;
+  const itemA = firstSnapshot.items.find((item) => item.path === 'src/a.ts');
+  const itemB = firstSnapshot.items.find((item) => item.path === 'src/b.ts');
+  if (!itemA || !itemB) throw new Error('fixture capture must create two review items');
+  const [runA] = deriveSnapshotRemovalRuns(firstSnapshot).filter(
+    (run) => run.reviewItemId === itemA.id,
+  );
+  const [runB] = deriveSnapshotRemovalRuns(firstSnapshot).filter(
+    (run) => run.reviewItemId === itemB.id,
+  );
+  if (!runA || !runB) throw new Error('fixture must derive removal runs for both items');
+
+  await applyReviewAnalysis({
+    root,
+    reference: first.reference,
+    analysis: {
+      kind: 'diff',
+      groups: [{ id: 'core', label: 'Core', reviewItemIds: [itemA.id, itemB.id] }],
+      items: [
+        {
+          reviewItemId: itemA.id,
+          description: 'Updates constant a.',
+          confidence: 'high',
+          evidencePaths: ['src/a.ts'],
+        },
+        {
+          reviewItemId: itemB.id,
+          description: 'Updates constant b.',
+          confidence: 'high',
+          evidencePaths: ['src/b.ts'],
+        },
+      ],
+      removals: [
+        {
+          reviewItemId: itemA.id,
+          run: { path: runA.path, start: runA.start, end: runA.end },
+          reason: 'dead-code',
+          description: 'Removed as part of this change.',
+        },
+        {
+          reviewItemId: itemB.id,
+          run: { path: runB.path, start: runB.start, end: runB.end },
+          reason: 'moved',
+          description: 'Moved to another module.',
+          movedTo: { path: 'src/other.ts', start: 5, end: 6 },
+        },
+      ],
+    },
+    runner,
+  });
+  store.patchItemProgress(first.reference.workspaceId, first.reference.revisionId, itemB.id, {
+    status: 'reviewed',
+  });
+
+  return {
+    store,
+    runner,
+    patch,
+    firstReference: first.reference,
+    itemAId: itemA.id,
+    itemBId: itemB.id,
+  };
+}
+
 describe('review lifecycle actions', () => {
   it('uses canonical shared freshness for text and JSON readiness, failing capture closed', async () => {
     const root = join(tmpdir(), `synergy-review-status-${Date.now()}`);
@@ -574,6 +694,164 @@ describe('review lifecycle actions', () => {
         description: 'Superseded rationale authored on the refreshed revision.',
       });
       expect(finalized.insights.removals).toHaveLength(2);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('re-resolves a carried moved-to excerpt against the new revision, replacing stale text', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-excerpt-refresh-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const otherContent: { value: string | undefined } = { value: 'l1\nl2\nl3\nl4\nl5\nl6\n' };
+      const { store, runner, patch, firstReference, itemBId } = await setupCarriedMovedRationale(
+        root,
+        otherContent,
+      );
+      const firstBundle = store.readBundle(firstReference.workspaceId, firstReference.revisionId);
+      const originalExcerpt = firstBundle.insights.removals?.find(
+        (rationale) => rationale.reviewItemId === itemBId,
+      )?.movedToExcerpt;
+      expect(originalExcerpt).toEqual({ path: 'src/other.ts', start: 5, lines: ['l5', 'l6'] });
+
+      // Refresh: file a changes (so a new revision is created); the destination file's content
+      // also changed since the first revision was captured.
+      patch.value = twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;');
+      otherContent.value = 'm1\nm2\nm3\nm4\nm5\nm6\n';
+      const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemB) throw new Error('refreshed snapshot must retain item b');
+      const carried = refreshedBundle.insights.removals?.find(
+        (rationale) => rationale.reviewItemId === refreshedItemB.id,
+      );
+      expect(carried?.movedToExcerpt).toEqual({
+        path: 'src/other.ts',
+        start: 5,
+        lines: ['m5', 'm6'],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('drops a carried removal rationale whose moved-to destination can no longer be read', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-excerpt-missing-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const otherContent: { value: string | undefined } = { value: 'l1\nl2\nl3\nl4\nl5\nl6\n' };
+      const { store, runner, patch } = await setupCarriedMovedRationale(root, otherContent);
+
+      // Refresh: file a changes, and the destination file has disappeared.
+      patch.value = twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;');
+      otherContent.value = undefined;
+      const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemB) throw new Error('refreshed snapshot must retain item b');
+      expect(
+        (refreshedBundle.insights.removals ?? []).some(
+          (rationale) => rationale.reviewItemId === refreshedItemB.id,
+        ),
+      ).toBe(false);
+
+      const status = getReviewStatus({ root, reference: refreshed.reference, runner });
+      const removalForB = status.removals.find((r) => r.reviewItemId === refreshedItemB.id);
+      expect(removalForB?.covered).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('drops a carried removal rationale whose moved-to range now overruns the destination file', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-excerpt-overrun-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const otherContent: { value: string | undefined } = { value: 'l1\nl2\nl3\nl4\nl5\nl6\n' };
+      const { store, runner, patch } = await setupCarriedMovedRationale(root, otherContent);
+
+      // Refresh: file a changes, and the destination file shrank below the rationale's range
+      // (start 5, end 6).
+      patch.value = twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;');
+      otherContent.value = 'm1\nm2\nm3\n';
+      const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemB) throw new Error('refreshed snapshot must retain item b');
+      expect(
+        (refreshedBundle.insights.removals ?? []).some(
+          (rationale) => rationale.reviewItemId === refreshedItemB.id,
+        ),
+      ).toBe(false);
+
+      const status = getReviewStatus({ root, reference: refreshed.reference, runner });
+      const removalForB = status.removals.find((r) => r.reviewItemId === refreshedItemB.id);
+      expect(removalForB?.covered).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('sheds a carried moved-to excerpt once the destination lands inside the new capture', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-excerpt-inreview-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const otherContent: { value: string | undefined } = { value: 'l1\nl2\nl3\nl4\nl5\nl6\n' };
+      const { store, runner, patch } = await setupCarriedMovedRationale(root, otherContent);
+
+      // Refresh: file a changes, and the destination file (src/other.ts) is now itself part of
+      // the captured diff, with new-side lines 5 and 6 falling inside its hunk - the same span
+      // the carried rationale's movedTo already names.
+      const otherHunk = [
+        'diff --git a/src/other.ts b/src/other.ts',
+        'index 7777777..8888888 100644',
+        '--- a/src/other.ts',
+        '+++ b/src/other.ts',
+        '@@ -1,6 +1,6 @@',
+        '-old1',
+        '+new1',
+        ' ctx2',
+        ' ctx3',
+        ' ctx4',
+        ' ctx5',
+        ' ctx6',
+      ].join('\n');
+      patch.value = `${twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;').trimEnd()}\n${otherHunk}\n`;
+      const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemB) throw new Error('refreshed snapshot must retain item b');
+      const carried = refreshedBundle.insights.removals?.find(
+        (rationale) => rationale.reviewItemId === refreshedItemB.id,
+      );
+      expect(carried).toEqual({
+        reviewItemId: refreshedItemB.id,
+        run: expect.objectContaining({ path: 'src/b.ts' }),
+        reason: 'moved',
+        description: 'Moved to another module.',
+        movedTo: { path: 'src/other.ts', start: 5, end: 6 },
+      });
+      expect(carried).not.toHaveProperty('movedToExcerpt');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
