@@ -20,8 +20,17 @@ interface DiffViewerProps {
   flashedRowIds?: string[];
 }
 
+/**
+ * A run's key for the `expandedRuns` view-preference array. `expandedRuns` is a flat array that
+ * survives item switches within one revision (it is keyed only by revision id in
+ * `localStorage`), so the key must be unique across the WHOLE revision, not just within one
+ * file/hunk - `${start}-${end}` collides whenever two files (or two hunks in the same file) have
+ * a removal run at the same line span, expanding one strip would silently expand an unrelated
+ * one elsewhere. `run.lineIds[0]` is already unique within the revision (it is a row id), so use
+ * that instead.
+ */
 export function runKey(strip: RemovalStripModel): string {
-  return `${strip.run.start}-${strip.run.end}`;
+  return strip.run.lineIds[0] ?? `${strip.run.start}-${strip.run.end}`;
 }
 
 /** Diff rows carry `add`/`remove`/`context` already; the highlighter needs only kind and text. */
