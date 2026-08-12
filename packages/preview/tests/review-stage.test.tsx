@@ -85,6 +85,12 @@ describe('ReviewStage', () => {
           advanceTo: vi.fn(),
           setRevealAll: vi.fn(),
         }}
+        jump={{
+          origin: null,
+          flashedRowIds: [],
+          jumpTo: vi.fn(),
+          clearOrigin: vi.fn(),
+        }}
         onToggleLine={vi.fn()}
         onNoteChange={vi.fn()}
         onSaveNote={vi.fn()}

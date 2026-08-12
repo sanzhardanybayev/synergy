@@ -16,10 +16,11 @@ interface DiffViewerProps {
   strips?: RemovalStripModel[];
   expandedRuns?: string[];
   onToggleRun?(key: string): void;
-  onJump?(target: ResolvedRemovalTarget): void;
+  onJump?(target: ResolvedRemovalTarget, strip: RemovalStripModel): void;
+  flashedRowIds?: string[];
 }
 
-function runKey(strip: RemovalStripModel): string {
+export function runKey(strip: RemovalStripModel): string {
   return `${strip.run.start}-${strip.run.end}`;
 }
 
@@ -45,6 +46,7 @@ export function DiffViewer({
   expandedRuns = [],
   onToggleRun = () => {},
   onJump = () => {},
+  flashedRowIds = [],
 }: DiffViewerProps) {
   const highlighted = useHighlightedHunk(path, toHunkRows(rows));
   const stripByFirstLineId = new Map(strips.map((strip) => [strip.run.lineIds[0], strip]));
@@ -63,13 +65,13 @@ export function DiffViewer({
                   strip={strip}
                   expanded={key !== undefined && expandedRuns.includes(key)}
                   onToggle={() => key !== undefined && onToggleRun(key)}
-                  onJump={onJump}
+                  onJump={(target) => onJump(target, strip)}
                 />
               ) : null}
               <div
                 className={`review-code-row review-code-row--${row.kind}${
                   selected ? ' is-selected' : ''
-                }`}
+                }${flashedRowIds.includes(row.id) ? ' is-flashed' : ''}`}
               >
                 <button
                   type="button"

@@ -1,12 +1,13 @@
 import type { ReviewBundle, ReviewFileInsight, ReviewItem } from '@synergy/review-core';
 import {
+  type RemovalStrip as RemovalStripModel,
   type ResolvedRemovalTarget,
   buildRemovalStrips,
   resolveBrowserReviewItemContext,
 } from '@synergy/review-core/browser';
 import { useEffect, useRef, useState } from 'react';
 import { CopyButton } from '../CopyButton.js';
-import { DiffViewer } from './DiffViewer.js';
+import { DiffViewer, runKey } from './DiffViewer.js';
 import { FileChangeViewer } from './FileChangeViewer.js';
 import { HunkTabs } from './HunkTabs.js';
 import { ReviewItemPanel } from './ReviewItemPanel.js';
@@ -23,6 +24,7 @@ interface ReviewStageProps {
   noteDraft?: string;
   saving: boolean;
   walkthrough: ReviewContextValue['walkthrough'];
+  jump: ReviewContextValue['jump'];
   onToggleLine(lineId: string): void;
   onNoteChange(value: string): void;
   onSaveNote(): Promise<void>;
@@ -76,6 +78,7 @@ export function ReviewStage({
   noteDraft,
   saving,
   walkthrough,
+  jump,
   onToggleLine,
   onNoteChange,
   onSaveNote,
@@ -114,8 +117,29 @@ export function ReviewStage({
       return next;
     });
   }
-  function handleJump(_target: ResolvedRemovalTarget): void {
-    // Jump navigation, flash, and the back chip land in Task 8; this pane only surfaces the strip.
+  function handleJump(target: ResolvedRemovalTarget, strip: RemovalStripModel): void {
+    if (target.kind !== 'in-review') return;
+    jump.jumpTo(target, {
+      reviewItemId: item.id,
+      label: `${item.path}:${strip.run.start}`,
+    });
+  }
+  function handleBack(): void {
+    if (!jump.origin) return;
+    walkthrough.advanceTo(jump.origin.reviewItemId);
+    jump.clearOrigin();
+  }
+  const allStripKeys = strips.map((strip) => runKey(strip));
+  const allStripsExpanded =
+    allStripKeys.length > 0 && allStripKeys.every((key) => expandedRuns.includes(key));
+  function handleToggleAll(): void {
+    setExpandedRuns((current) => {
+      const next = allStripsExpanded
+        ? current.filter((key) => !allStripKeys.includes(key))
+        : Array.from(new Set([...current, ...allStripKeys]));
+      writeExpandedRuns(revisionId, next);
+      return next;
+    });
   }
   const currentChapter = walkthrough.enabled ? chapterOf(walkthrough.chapters, item.id) : undefined;
   const next = walkthrough.enabled ? nextPosition(walkthrough.chapters, item.id) : undefined;
@@ -157,8 +181,23 @@ export function ReviewStage({
           <span className="review-stage__filedir">{directoryPrefix(item.path)}</span>
           <span className="review-stage__filename">{fileName(item.path)}</span>
         </p>
+        {strips.length > 0 ? (
+          <button
+            type="button"
+            className="review-removal-expand-all"
+            aria-pressed={allStripsExpanded}
+            onClick={handleToggleAll}
+          >
+            {allStripsExpanded ? 'Collapse all' : 'Expand all'}
+          </button>
+        ) : null}
         <CopyButton label="Copy path" value={item.path} className="review-stage__filecopy" />
       </section>
+      {jump.origin ? (
+        <button type="button" className="review-jump-back" onClick={handleBack}>
+          {`← back to ${jump.origin.label}`}
+        </button>
+      ) : null}
       {fileInsight ? (
         <header className="review-stage__heading">
           <div className="review-file-summary">
@@ -189,6 +228,7 @@ export function ReviewStage({
           expandedRuns={expandedRuns}
           onToggleRun={handleToggleRun}
           onJump={handleJump}
+          flashedRowIds={jump.flashedRowIds}
         />
       ) : bundle.snapshot.kind === 'diff' && context.item.kind === 'file' && diffFile ? (
         <FileChangeViewer file={diffFile} />
