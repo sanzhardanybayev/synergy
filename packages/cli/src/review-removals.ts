@@ -128,7 +128,15 @@ export function resolveRemovalExcerpts(
  * out-of-range target), this never throws: a carried rationale whose destination can no longer be
  * verified is silently dropped - its run reverts to uncovered and must be re-authored - because a
  * stale excerpt must never be persisted, and a refresh is not the moment to reject the revision
- * itself over an old rationale going stale.
+ * itself over an old rationale going stale. This is true by construction, not by convention: the
+ * read below is wrapped in its own `try`/`catch` so that ANY read failure - not just the
+ * `undefined`-returning "not found" case `RemovalExcerptIo` documents - collapses to "drop this
+ * rationale," regardless of what a given `io` implementation does. The git-backed reader
+ * (`runOptional`) already collapses a non-zero exit to `undefined` on its own, but the local
+ * filesystem reader (`defaultReadFile`) rethrows non-ENOENT errors (`EACCES`, `EISDIR`, …) by
+ * design, because `resolveRemovalExcerpts` above needs exactly that to reject a live submission.
+ * Guarding here - rather than requiring every creation-time caller to remember to wrap its `io` -
+ * makes this function's own "never throws" promise true for any `io`, present or future.
  */
 export function reResolveCarriedRemovals(
   snapshot: ReviewSnapshot,
@@ -155,7 +163,12 @@ export function reResolveCarriedRemovals(
       });
       continue;
     }
-    const lines = io.readTargetLines(target.path);
+    let lines: string[] | undefined;
+    try {
+      lines = io.readTargetLines(target.path);
+    } catch {
+      lines = undefined;
+    }
     if (!lines || target.end > lines.length) continue;
     resolved.push({
       reviewItemId: rationale.reviewItemId,
