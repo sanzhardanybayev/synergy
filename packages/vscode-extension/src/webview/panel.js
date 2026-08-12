@@ -254,6 +254,35 @@ function renderDiffLines(hunk, path, context) {
   return el('div', { className: 'hunk-diff' }, rowNodes);
 }
 
+/**
+ * Renders JUST the removal strips for a review item - no diff line bodies - so a reviewer with
+ * the diff toggle OFF still sees that a removal run exists and carries a rationale. Without this,
+ * collapsing the diff hid every removal strip along with it, silently defeating the coverage gate
+ * the whole feature exists to guarantee (every removed run must carry a typed reason). This is
+ * the least intrusive presentation available: it reuses `renderRemovalStrip` as-is (same collapsed
+ * category/count row, same expand-to-read-the-sentence interaction) rather than inventing a new
+ * summary widget, so the strip looks and behaves identically whether the diff is open or closed.
+ *
+ * @param {{reviewItemId:string, snapshot:any, insights:any, onJumpToReviewItem:(reviewItemId:string)=>void, onOpenFile:(path:string, line:number)=>void}} [context]
+ */
+function renderRemovalSummary(context) {
+  if (!context) return null;
+  let rows = [];
+  let strips = [];
+  try {
+    const itemContext = resolveBrowserReviewItemContext(context.snapshot, context.reviewItemId);
+    rows = itemContext.rows.filter((row) => row.kind !== 'scope');
+    strips = buildRemovalStrips(rows, context.reviewItemId, context.snapshot, context.insights);
+  } catch {
+    strips = [];
+  }
+  const stripEls = strips
+    .map((strip) => renderRemovalStrip(strip, context))
+    .filter((node) => node !== null);
+  if (stripEls.length === 0) return null;
+  return el('div', { className: 'hunk-diff hunk-diff-collapsed' }, stripEls);
+}
+
 function startWebview() {
   const vscode = acquireVsCodeApi();
   const app = document.getElementById('app');
@@ -481,15 +510,20 @@ function startWebview() {
     // the row click) - it already opens the target hunk's range in the editor with decorations,
     // which is exactly what "jump to the moved-to location" means for this host. The "open in
     // editor" action on an out-of-review excerpt is a plain `openFile` with a destination line.
-    const removalContext = hunk
-      ? {
-          reviewItemId: item.id,
-          snapshot: bundle.bundle.snapshot,
-          insights: bundle.bundle.insights,
-          onJumpToReviewItem: (reviewItemId) => post({ kind: 'openHunk', reviewItemId }),
-          onOpenFile: (path, line) => post({ kind: 'openFile', path, line }),
-        }
-      : undefined;
+    //
+    // Built for every diff-snapshot hunk item regardless of `state.diffVisible`: removal strips
+    // must stay reachable with the diff toggle off, not vanish along with the diff body (see
+    // `renderRemovalSummary` below for the collapsed presentation).
+    const removalContext =
+      bundle.bundle.snapshot.kind === 'diff'
+        ? {
+            reviewItemId: item.id,
+            snapshot: bundle.bundle.snapshot,
+            insights: bundle.bundle.insights,
+            onJumpToReviewItem: (reviewItemId) => post({ kind: 'openHunk', reviewItemId }),
+            onOpenFile: (path, line) => post({ kind: 'openFile', path, line }),
+          }
+        : undefined;
 
     return el(
       'div',
@@ -504,7 +538,9 @@ function startWebview() {
           diffButton,
         ]),
         insight ? el('div', { className: 'hunk-description' }, [insight.description]) : null,
-        hunk ? renderDiffLines(hunk, item.path, removalContext) : null,
+        hunk
+          ? renderDiffLines(hunk, item.path, removalContext)
+          : renderRemovalSummary(removalContext),
         note,
       ],
     );
@@ -900,4 +936,4 @@ function startWebview() {
 // without it throwing immediately on import.
 if (typeof acquireVsCodeApi === 'function') startWebview();
 
-export { renderDiffLines, renderRemovalStrip };
+export { renderDiffLines, renderRemovalStrip, renderRemovalSummary };

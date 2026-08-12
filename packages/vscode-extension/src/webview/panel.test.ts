@@ -13,7 +13,7 @@ import { describe, expect, it, vi } from 'vitest';
 // shape can be exercised here without a real VS Code webview. Importing this module also runs
 // its top-level `if (typeof acquireVsCodeApi === 'function') startWebview();` guard, which stays
 // a no-op under vitest/jsdom because `acquireVsCodeApi` is never defined there.
-import { renderDiffLines, renderRemovalStrip } from './panel.js';
+import { renderDiffLines, renderRemovalStrip, renderRemovalSummary } from './panel.js';
 
 function diffLine(
   kind: DiffLine['kind'],
@@ -184,6 +184,72 @@ describe('renderDiffLines removal strips', () => {
     const container = renderDiffLines(hunk, 'src/a.ts');
     expect(container.querySelectorAll('.removal-strip')).toHaveLength(0);
     expect(container.querySelectorAll('.diff-line')).toHaveLength(hunk.lines.length);
+  });
+});
+
+describe('renderRemovalSummary', () => {
+  // Reproduces the diff-toggle-off host state: renderHunkRow calls this instead of
+  // renderDiffLines when `state.diffVisible` is false, so a reviewer must still see that a
+  // removal run exists and carries a rationale even with the diff body collapsed.
+  it('renders the removal strips with no diff line rows', () => {
+    const hunk = twoRunsHunk();
+    const insights: Pick<ReviewInsights, 'removals'> = {
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'src/a.ts', start: 2, end: 4 },
+          reason: 'moved',
+          description: 'Moved into the interceptor.',
+        },
+      ],
+    };
+    const container = renderRemovalSummary({
+      reviewItemId: 'item-1',
+      snapshot: snapshotFor([twoRunsItem()], [fileFor(hunk)]),
+      insights,
+      onJumpToReviewItem: () => {},
+      onOpenFile: () => {},
+    });
+
+    expect(container).not.toBeNull();
+    expect(container?.querySelectorAll('.removal-strip')).toHaveLength(1);
+    expect(container?.querySelectorAll('.diff-line')).toHaveLength(0);
+    expect(container?.textContent).toContain('moved');
+  });
+
+  it('returns null when the item has no removal runs at all', () => {
+    const hunk: DiffHunk = {
+      reviewItemId: 'item-clean',
+      reviewItemContentHash: 'hash-clean',
+      reviewItemLocationHash: 'loc-clean',
+      header: '@@ -1,1 +1,2 @@',
+      oldStart: 1,
+      oldLines: 1,
+      newStart: 1,
+      newLines: 2,
+      lines: [diffLine('context', 'kept', 1, 1), diffLine('add', 'new line', null, 2)],
+    };
+    const item: ReviewItem = {
+      id: 'item-clean',
+      kind: 'hunk',
+      path: 'src/a.ts',
+      label: '@@ -1,1 +1,2 @@',
+      range: { start: 1, end: 2 },
+      contentHash: 'hash-clean',
+      locationHash: 'loc-clean',
+    };
+    const container = renderRemovalSummary({
+      reviewItemId: 'item-clean',
+      snapshot: snapshotFor([item], [fileFor(hunk)]),
+      insights: { removals: [] },
+      onJumpToReviewItem: () => {},
+      onOpenFile: () => {},
+    });
+    expect(container).toBeNull();
+  });
+
+  it('returns null when no context is passed', () => {
+    expect(renderRemovalSummary(undefined)).toBeNull();
   });
 });
 
