@@ -101,6 +101,115 @@ function recordingRunner(base: CommandRunner, calls: string[]): CommandRunner {
   };
 }
 
+/** Two files, each with a one-line removal run. `patch` is mutable (a `let` binding the runner
+ * reads live) so a test can capture the review, finalize it, then refresh with only file a's
+ * content changed - byte-identical file b carries its review item, progress, and removal
+ * rationale forward into the refreshed revision. */
+function twoFileRemovalPatch(bValue: number): string {
+  return [
+    'diff --git a/src/a.ts b/src/a.ts',
+    'index 1111111..2222222 100644',
+    '--- a/src/a.ts',
+    '+++ b/src/a.ts',
+    '@@ -1 +1 @@',
+    '-export const a = 1;',
+    '+export const a = 2;',
+    'diff --git a/src/b.ts b/src/b.ts',
+    'index 3333333..4444444 100644',
+    '--- a/src/b.ts',
+    '+++ b/src/b.ts',
+    '@@ -1 +1 @@',
+    '-export const b = 1;',
+    `+export const b = ${bValue};`,
+    '',
+  ].join('\n');
+}
+
+function twoFileRunner(getPatch: () => string): CommandRunner {
+  return {
+    run(command, args, options): CommandResult {
+      const key = [command, ...args].join(' ');
+      if (key === 'git diff --cached --no-ext-diff --binary') {
+        return { exitCode: 0, stdout: getPatch(), stderr: '' };
+      }
+      if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+      if (key === 'git rev-parse --show-toplevel') {
+        return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+      }
+      if (key === 'git config --get remote.origin.url') {
+        return { exitCode: 1, stdout: '', stderr: '' };
+      }
+      throw new Error(`missing fixture for ${key}`);
+    },
+  };
+}
+
+/** Captures, finalizes (with a removal rationale per file), and reviews item b so it carries
+ * forward on refresh; then refreshes with only file a's content changed. Returns everything a
+ * carry-forward test needs: the refreshed (unfinalized) revision's reference, its bundle, and
+ * both review items. */
+async function setupRefreshedReviewWithCarriedRemoval(root: string): Promise<{
+  refreshed: { reference: { workspaceId: string; revisionId: string } };
+  store: ReturnType<typeof createReviewStore>;
+  refreshedBundle: ReturnType<ReturnType<typeof createReviewStore>['readBundle']>;
+  refreshedItemA: { id: string; path: string };
+  refreshedItemB: { id: string; path: string };
+}> {
+  let patch = twoFileRemovalPatch(2);
+  const runner = twoFileRunner(() => patch);
+  const first = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+  const store = createReviewStore(root);
+  const firstSnapshot = store.readBundle(
+    first.reference.workspaceId,
+    first.reference.revisionId,
+  ).snapshot;
+  const itemA = firstSnapshot.items.find((item) => item.path === 'src/a.ts');
+  const itemB = firstSnapshot.items.find((item) => item.path === 'src/b.ts');
+  if (!itemA || !itemB) throw new Error('fixture capture must create two review items');
+
+  await applyReviewAnalysis({
+    root,
+    reference: first.reference,
+    analysis: {
+      kind: 'diff',
+      groups: [{ id: 'core', label: 'Core', reviewItemIds: [itemA.id, itemB.id] }],
+      items: [
+        {
+          reviewItemId: itemA.id,
+          description: 'Updates constant a.',
+          confidence: 'high',
+          evidencePaths: ['src/a.ts'],
+        },
+        {
+          reviewItemId: itemB.id,
+          description: 'Updates constant b.',
+          confidence: 'high',
+          evidencePaths: ['src/b.ts'],
+        },
+      ],
+      removals: removalsForSnapshot(firstSnapshot),
+    },
+  });
+  store.patchItemProgress(first.reference.workspaceId, first.reference.revisionId, itemB.id, {
+    status: 'reviewed',
+  });
+
+  // Refresh: only file a's content changes; file b's hunk is byte-identical, so its review item
+  // (and the removal rationale for it) carries forward into the new revision.
+  patch = twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;');
+  const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+  const refreshedBundle = store.readBundle(
+    refreshed.reference.workspaceId,
+    refreshed.reference.revisionId,
+  );
+  const refreshedItemA = refreshedBundle.snapshot.items.find((item) => item.path === 'src/a.ts');
+  const refreshedItemB = refreshedBundle.snapshot.items.find((item) => item.path === 'src/b.ts');
+  if (!refreshedItemA || !refreshedItemB) {
+    throw new Error('refreshed snapshot must retain both review items');
+  }
+  return { refreshed, store, refreshedBundle, refreshedItemA, refreshedItemB };
+}
+
 describe('review lifecycle actions', () => {
   it('uses canonical shared freshness for text and JSON readiness, failing capture closed', async () => {
     const root = join(tmpdir(), `synergy-review-status-${Date.now()}`);
@@ -292,6 +401,179 @@ describe('review lifecycle actions', () => {
       expect(
         printReviewStatus({ root, reference: created.reference, runner: createRunner() }),
       ).toContain('removals: 1/1 explained');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts a finalize payload that omits a carried removal rationale, keeping it covered and persisted', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-carry-omit-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const { refreshed, store, refreshedBundle, refreshedItemA, refreshedItemB } =
+        await setupRefreshedReviewWithCarriedRemoval(root);
+
+      // Before finalizing: status must already report item b's run as covered (carried) and
+      // item a's as not - this is the prediction that finalize-time acceptance must honor.
+      const preFinalizeRunner = twoFileRunner(() =>
+        twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;'),
+      );
+      const preStatus = getReviewStatus({
+        root,
+        reference: refreshed.reference,
+        runner: preFinalizeRunner,
+      });
+      const removalForA = preStatus.removals.find((r) => r.reviewItemId === refreshedItemA.id);
+      const removalForB = preStatus.removals.find((r) => r.reviewItemId === refreshedItemB.id);
+      expect(removalForA?.covered).toBe(false);
+      expect(removalForB?.covered).toBe(true);
+
+      const [runB] = deriveSnapshotRemovalRuns(refreshedBundle.snapshot).filter(
+        (run) => run.reviewItemId === refreshedItemB.id,
+      );
+      if (!runB) throw new Error('fixture must derive a removal run for item b');
+      const carriedRationale = refreshedBundle.insights.removals?.find(
+        (rationale) => rationale.reviewItemId === refreshedItemB.id,
+      );
+      expect(carriedRationale).toEqual({
+        reviewItemId: refreshedItemB.id,
+        run: { path: runB.path, start: runB.start, end: runB.end },
+        reason: 'dead-code',
+        description: 'Removed as part of this change.',
+      });
+
+      // Finalize with a payload that only explains item a's removal run - item b's carried
+      // rationale is omitted, exactly as an agent trusting `covered: true` would do.
+      const [runA] = deriveSnapshotRemovalRuns(refreshedBundle.snapshot).filter(
+        (run) => run.reviewItemId === refreshedItemA.id,
+      );
+      if (!runA) throw new Error('fixture must derive a removal run for item a');
+      await applyReviewAnalysis({
+        root,
+        reference: refreshed.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [
+            { id: 'core', label: 'Core', reviewItemIds: [refreshedItemA.id, refreshedItemB.id] },
+          ],
+          items: [
+            {
+              reviewItemId: refreshedItemA.id,
+              description: 'Updates constant a again.',
+              confidence: 'high',
+              evidencePaths: ['src/a.ts'],
+            },
+            {
+              reviewItemId: refreshedItemB.id,
+              description: 'Updates constant b.',
+              confidence: 'high',
+              evidencePaths: ['src/b.ts'],
+            },
+          ],
+          removals: [
+            {
+              reviewItemId: refreshedItemA.id,
+              run: { path: runA.path, start: runA.start, end: runA.end },
+              reason: 'dead-code',
+              description: 'Removed as part of the refreshed change.',
+            },
+          ],
+        },
+      });
+
+      const finalized = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      expect(finalized.insights.removals).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            reviewItemId: refreshedItemA.id,
+            description: 'Removed as part of the refreshed change.',
+          }),
+          carriedRationale,
+        ]),
+      );
+      expect(finalized.insights.removals).toHaveLength(2);
+
+      const postStatus = getReviewStatus({
+        root,
+        reference: refreshed.reference,
+        runner: preFinalizeRunner,
+      });
+      expect(postStatus.removals.every((r) => r.covered)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('overrides a carried removal rationale when the finalize payload includes a fresh one for the same run', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-carry-override-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const { refreshed, store, refreshedBundle, refreshedItemA, refreshedItemB } =
+        await setupRefreshedReviewWithCarriedRemoval(root);
+      const [runA] = deriveSnapshotRemovalRuns(refreshedBundle.snapshot).filter(
+        (run) => run.reviewItemId === refreshedItemA.id,
+      );
+      const [runB] = deriveSnapshotRemovalRuns(refreshedBundle.snapshot).filter(
+        (run) => run.reviewItemId === refreshedItemB.id,
+      );
+      if (!runA || !runB) throw new Error('fixture must derive removal runs for both items');
+
+      await applyReviewAnalysis({
+        root,
+        reference: refreshed.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [
+            { id: 'core', label: 'Core', reviewItemIds: [refreshedItemA.id, refreshedItemB.id] },
+          ],
+          items: [
+            {
+              reviewItemId: refreshedItemA.id,
+              description: 'Updates constant a again.',
+              confidence: 'high',
+              evidencePaths: ['src/a.ts'],
+            },
+            {
+              reviewItemId: refreshedItemB.id,
+              description: 'Updates constant b.',
+              confidence: 'high',
+              evidencePaths: ['src/b.ts'],
+            },
+          ],
+          removals: [
+            {
+              reviewItemId: refreshedItemA.id,
+              run: { path: runA.path, start: runA.start, end: runA.end },
+              reason: 'dead-code',
+              description: 'Removed as part of the refreshed change.',
+            },
+            {
+              reviewItemId: refreshedItemB.id,
+              run: { path: runB.path, start: runB.start, end: runB.end },
+              reason: 'obsolete',
+              description: 'Superseded rationale authored on the refreshed revision.',
+            },
+          ],
+        },
+      });
+
+      const finalized = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const persistedForB = finalized.insights.removals?.find(
+        (rationale) => rationale.reviewItemId === refreshedItemB.id,
+      );
+      expect(persistedForB).toEqual({
+        reviewItemId: refreshedItemB.id,
+        run: { path: runB.path, start: runB.start, end: runB.end },
+        reason: 'obsolete',
+        description: 'Superseded rationale authored on the refreshed revision.',
+      });
+      expect(finalized.insights.removals).toHaveLength(2);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

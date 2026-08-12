@@ -231,12 +231,14 @@ function reconcileProgressAndInsights(
 
 /** Every derived removal run for a bundle's snapshot, flagged with whether its persisted
  * insights already carry a rationale for that exact run - the authoring agent's checklist of
- * what it still has to explain. */
+ * what it still has to explain. Matches `mergeRemovalInsights`'s run-only key (no
+ * `reviewItemId`) deliberately: a rationale can only be persisted for a run it actually names
+ * (`assertCompleteRemovalCoverage` rejects a mismatched `reviewItemId` independently), so the
+ * ownership check does not need to be repeated here for correctness. */
 function removalsStatusFor(bundle: ReviewBundle): ReviewRemovalStatus[] {
-  const runKey = (path: string, start: number, end: number): string => `${path}:${start}-${end}`;
   const coveredRunKeys = new Set(
     (bundle.insights.removals ?? []).map((rationale) =>
-      runKey(rationale.run.path, rationale.run.start, rationale.run.end),
+      removalRunKey(rationale.run.path, rationale.run.start, rationale.run.end),
     ),
   );
   return deriveSnapshotRemovalRuns(bundle.snapshot).map((run) => ({
@@ -244,7 +246,7 @@ function removalsStatusFor(bundle: ReviewBundle): ReviewRemovalStatus[] {
     path: run.path,
     start: run.start,
     end: run.end,
-    covered: coveredRunKeys.has(runKey(run.path, run.start, run.end)),
+    covered: coveredRunKeys.has(removalRunKey(run.path, run.start, run.end)),
   }));
 }
 
@@ -261,6 +263,36 @@ function mergeFileInsights(
   if (!carried || carried.length === 0) return fresh;
   const freshPaths = new Set(fresh.map((file) => file.path));
   const survivingCarried = carried.filter((file) => !freshPaths.has(file.path));
+  return [...fresh, ...survivingCarried];
+}
+
+function removalRunKey(path: string, start: number, end: number): string {
+  return `${path}:${start}-${end}`;
+}
+
+/**
+ * Merges freshly submitted removal rationales with the predecessor's carried-forward ones, keyed
+ * by run (`path:start-end`) rather than path: fresh entries win for the runs they cover, carried
+ * entries survive for runs the fresh payload omits. This is what makes `covered: true` in
+ * `removalsStatusFor` an accurate prediction of finalize-time acceptance - an agent that sees a
+ * carried run reported as covered may omit it from its submission and have it still count toward
+ * `assertCompleteRemovalCoverage`, exactly like `mergeFileInsights` does for file insights.
+ */
+function mergeRemovalInsights(
+  carried: RemovalRationale[] | undefined,
+  fresh: RemovalRationale[] | undefined,
+): RemovalRationale[] | undefined {
+  if (!fresh || fresh.length === 0) return carried;
+  if (!carried || carried.length === 0) return fresh;
+  const freshKeys = new Set(
+    fresh.map((rationale) =>
+      removalRunKey(rationale.run.path, rationale.run.start, rationale.run.end),
+    ),
+  );
+  const survivingCarried = carried.filter(
+    (rationale) =>
+      !freshKeys.has(removalRunKey(rationale.run.path, rationale.run.start, rationale.run.end)),
+  );
   return [...fresh, ...survivingCarried];
 }
 
@@ -710,14 +742,27 @@ export async function applyReviewAnalysis(
       throw new Error('diff review requires a diff analysis payload');
     }
     const diffAnalysis = request.analysis;
+    // A carried-forward rationale (seeded onto this revision's bundle at creation time, see
+    // `createOrResumeReview`) is validated against the merged set below so an agent that reads
+    // `status.removals[].covered === true` for it and omits it from this submission is still
+    // accepted - `covered` must predict finalize-time acceptance, mirroring how `diffFiles`
+    // below merges carried file insights with fresh ones.
+    const carriedRemovals = bundle.insights.removals;
     // Excerpt resolution is folded into the validation measurement (not a separate bucket):
     // reading a movedTo target's destination lines is itself a rejection gate - an unreadable
     // file or an out-of-range span fails the payload exactly like assertValidAnalysis does - so
     // its cost belongs to the same "is this payload acceptable" timing as the rest of validation.
+    // Excerpts are re-resolved only for the freshly submitted rationales: a carried rationale's
+    // `movedToExcerpt` (if any) was already resolved and persisted against the predecessor
+    // revision's source, and its `run` line numbers - not the excerpt - are what `reconcileReview`
+    // rewrites on carry-forward, so the excerpt itself needs no re-reading.
     let resolvedRemovals: RemovalRationale[] | undefined;
     validationMs += measureMonotonic(monotonicNow, () => {
-      assertValidAnalysis(bundle.snapshot, diffAnalysis);
-      resolvedRemovals = diffAnalysis.removals
+      assertValidAnalysis(bundle.snapshot, {
+        ...diffAnalysis,
+        removals: mergeRemovalInsights(carriedRemovals, diffAnalysis.removals) ?? [],
+      });
+      const freshRemovals = diffAnalysis.removals
         ? resolveRemovalExcerpts(
             bundle.snapshot,
             diffAnalysis.removals,
@@ -729,6 +774,7 @@ export async function applyReviewAnalysis(
             ),
           )
         : undefined;
+      resolvedRemovals = mergeRemovalInsights(carriedRemovals, freshRemovals);
     }).durationMs;
     const diffFiles = mergeFileInsights(bundle.insights.files, diffAnalysis.files);
     const insights: ReviewInsights = {

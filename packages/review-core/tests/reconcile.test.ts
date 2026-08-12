@@ -157,6 +157,71 @@ function makePreviousWithRemovals(
   return previous;
 }
 
+/**
+ * Builds one hunk review item with either one or two discontiguous removal runs (separated by a
+ * context line), holding the item's id/content/location hash and old-side numbering fixed either
+ * way - the exact-match carry-forward path only cares about those, not run topology. Used to
+ * prove `carryForwardRemovals` skips an item outright when its removal-run count changed, rather
+ * than guessing a pairing between mismatched run lists.
+ */
+function makeVariableRunHunkItem(input: {
+  itemId: string;
+  contentHash: string;
+  locationHash: string;
+  path: string;
+  runCount: 1 | 2;
+}): { item: ReviewItem; file: DiffFile } {
+  const oldStart = 10;
+  const lines: DiffHunk['lines'] =
+    input.runCount === 2
+      ? [
+          { kind: 'context', text: 'ctxA', oldLine: 10, newLine: 10 },
+          { kind: 'remove', text: 'removed-1', oldLine: 11, newLine: null },
+          { kind: 'context', text: 'ctxB', oldLine: 12, newLine: 11 },
+          { kind: 'remove', text: 'removed-2', oldLine: 13, newLine: null },
+          { kind: 'context', text: 'ctxC', oldLine: 14, newLine: 12 },
+        ]
+      : [
+          { kind: 'context', text: 'ctxA', oldLine: 10, newLine: 10 },
+          { kind: 'remove', text: 'removed-1', oldLine: 11, newLine: null },
+          { kind: 'context', text: 'ctxB', oldLine: 12, newLine: 11 },
+          { kind: 'context', text: 'ctxC', oldLine: 13, newLine: 12 },
+        ];
+  const newStart = 10;
+  const newLines = input.runCount === 2 ? 3 : 3;
+  const header = `@@ -${oldStart},${lines.length} +${newStart},${newLines} @@`;
+  const range = { start: newStart, end: newStart + newLines - 1 };
+  const item: ReviewItem = {
+    id: input.itemId,
+    kind: 'hunk',
+    path: input.path,
+    label: header,
+    range,
+    contentHash: input.contentHash,
+    locationHash: input.locationHash,
+  };
+  const hunk: DiffHunk = {
+    reviewItemId: input.itemId,
+    reviewItemContentHash: input.contentHash,
+    reviewItemLocationHash: input.locationHash,
+    header,
+    oldStart,
+    oldLines: lines.length,
+    newStart,
+    newLines,
+    lines,
+  };
+  const file: DiffFile = {
+    path: input.path,
+    status: 'modified',
+    additions: 0,
+    deletions: input.runCount,
+    binary: false,
+    hunks: [hunk],
+  };
+  return { item, file };
+}
+
 describe('review reconciliation', () => {
   it('records exact reviewed items as carried into the new revision', () => {
     const reviewed = makeItem('exact-reviewed');
@@ -660,6 +725,55 @@ describe('review reconciliation', () => {
         NOW,
       );
 
+      expect(result.insights.removals ?? []).toEqual([]);
+    });
+
+    it('drops all removal rationales for an item whose removal-run count changed, rather than guessing a pairing', () => {
+      const previousEntry = makeVariableRunHunkItem({
+        itemId: 'item-recount',
+        contentHash: 'content-r',
+        locationHash: 'location-r',
+        path: 'src/a.ts',
+        runCount: 2,
+      });
+      const rationales: RemovalRationale[] = [
+        {
+          reviewItemId: 'item-recount',
+          run: { path: 'src/a.ts', start: 11, end: 11 },
+          reason: 'dead-code',
+          description: 'First removed block.',
+        },
+        {
+          reviewItemId: 'item-recount',
+          run: { path: 'src/a.ts', start: 13, end: 13 },
+          reason: 'dead-code',
+          description: 'Second removed block.',
+        },
+      ];
+      const previous = makePreviousWithRemovals(
+        makeRemovalSnapshot('old-revision', [previousEntry]),
+        { 'item-recount': { status: 'reviewed', reviewedAt: '2026-07-19T10:00:00.000Z' } },
+        rationales,
+      );
+      const currentEntry = makeVariableRunHunkItem({
+        itemId: 'item-recount',
+        contentHash: 'content-r',
+        locationHash: 'location-r',
+        path: 'src/a.ts',
+        runCount: 1,
+      });
+
+      const result = reconcileReview(
+        previous,
+        makeRemovalSnapshot('current-revision', [currentEntry]),
+        NOW,
+      );
+
+      // Same item id/content/location hash (so it does carry forward as a review item), but the
+      // new hunk derives one removal run where the old one derived two: `carryForwardRemovals`
+      // must not guess which old rationale (if either) pairs with the surviving run, so it drops
+      // both rather than carrying a possibly-mismatched one.
+      expect(result.items['item-recount']?.status).toBe('carried-forward');
       expect(result.insights.removals ?? []).toEqual([]);
     });
   });
