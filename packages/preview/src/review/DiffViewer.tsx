@@ -60,7 +60,6 @@ export function DiffViewer({
             <Fragment key={row.id}>
               {strip ? (
                 <RemovalStrip
-                  key={`strip-${row.id}`}
                   strip={strip}
                   expanded={key !== undefined && expandedRuns.includes(key)}
                   onToggle={() => key !== undefined && onToggleRun(key)}

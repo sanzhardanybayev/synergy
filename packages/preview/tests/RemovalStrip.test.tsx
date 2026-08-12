@@ -41,6 +41,18 @@ describe('RemovalStrip', () => {
     expect(onJump).toHaveBeenCalledWith(strip.target);
   });
 
+  it('keeps the toggle and the jump chip as siblings in one row container, not nested', () => {
+    render(<RemovalStrip strip={strip} expanded={false} onToggle={() => {}} onJump={() => {}} />);
+    const toggle = screen.getByRole('button', { expanded: false });
+    const jump = screen.getByRole('button', { name: /b\.ts:88/ });
+    // jsdom computes no layout, so a CSS regression that stacks these two rows can't be caught by
+    // measuring pixels here - pinning the DOM shape they rely on (one shared flex row container,
+    // chip NOT nested inside the toggle button) is the next best thing.
+    expect(jump.parentElement).toBe(toggle.parentElement);
+    expect(jump.parentElement).toHaveClass('review-removal__row');
+    expect(toggle.contains(jump)).toBe(false);
+  });
+
   it('renders the excerpt instead of a jump for an out-of-review target', () => {
     const excerptStrip = {
       ...strip,

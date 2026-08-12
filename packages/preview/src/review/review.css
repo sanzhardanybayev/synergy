@@ -1451,6 +1451,16 @@ div.review-index__card {
   color: var(--syn-fg-muted);
 }
 
+/* Collapsed strip is one ~22px row: the toggle (caret/badge/count) and the jump chip share it via
+   flex, side by side. They stay two siblings in the DOM (the chip can't nest inside the toggle
+   button - nested buttons are invalid) but this wrapper is what keeps them on one visual line. */
+.review-removal__row {
+  display: flex;
+  align-items: center;
+  gap: var(--syn-sp-2);
+  min-height: 22px;
+}
+
 .review-removal__strip {
   display: flex;
   align-items: center;
@@ -1479,6 +1489,10 @@ div.review-index__card {
   text-transform: uppercase;
 }
 
+/* Two-tier coloring is intentional, not a placeholder: moved/merged/replaced are hued because the
+   logic still exists somewhere and can be navigated to; dead-code/obsolete/extracted-to-dep stay
+   neutral (the default `.review-removal__cat` border/text) because nothing survives to jump to.
+   That split IS the signal - don't give all six reasons their own color. */
 .review-removal__cat--moved,
 .review-removal__cat--merged {
   color: var(--syn-status-shipped);
@@ -1495,7 +1509,6 @@ div.review-index__card {
 }
 
 .review-removal__jump {
-  justify-self: start;
   border: 0;
   border-bottom: 1px dashed var(--syn-accent-border);
   background: transparent;

@@ -52,27 +52,29 @@ export function RemovalStrip({ strip, expanded, onToggle, onJump }: RemovalStrip
   const count = run.end - run.start + 1;
   return (
     <div className="review-removal">
-      <button
-        type="button"
-        className="review-removal__strip"
-        aria-expanded={expanded}
-        onClick={onToggle}
-      >
-        <span className="review-removal__caret" aria-hidden="true">
-          {expanded ? '▾' : '▸'}
-        </span>
-        <span className={`review-removal__cat review-removal__cat--${rationale.reason}`}>
-          {REASON_LABEL[rationale.reason] ?? rationale.reason}
-        </span>
-        <span className="review-removal__count">
-          {count} {count === 1 ? 'line' : 'lines'} removed
-        </span>
-      </button>
-      {target.kind === 'in-review' ? (
-        <button type="button" className="review-removal__jump" onClick={() => onJump(target)}>
-          {`→ ${target.path}:${target.start}`}
+      <div className="review-removal__row">
+        <button
+          type="button"
+          className="review-removal__strip"
+          aria-expanded={expanded}
+          onClick={onToggle}
+        >
+          <span className="review-removal__caret" aria-hidden="true">
+            {expanded ? '▾' : '▸'}
+          </span>
+          <span className={`review-removal__cat review-removal__cat--${rationale.reason}`}>
+            {REASON_LABEL[rationale.reason] ?? rationale.reason}
+          </span>
+          <span className="review-removal__count">
+            {count} {count === 1 ? 'line' : 'lines'} removed
+          </span>
         </button>
-      ) : null}
+        {target.kind === 'in-review' ? (
+          <button type="button" className="review-removal__jump" onClick={() => onJump(target)}>
+            {`→ ${target.path}:${target.start}`}
+          </button>
+        ) : null}
+      </div>
       {expanded ? (
         <div className="review-removal__detail">
           <p>{rationale.description}</p>
