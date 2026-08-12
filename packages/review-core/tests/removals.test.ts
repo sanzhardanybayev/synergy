@@ -171,6 +171,38 @@ describe('resolveRemovalTarget', () => {
     });
   });
 
+  it('does not resolve a target that only partially overlaps the added lines', () => {
+    const snapshot = buildFixtureSnapshot();
+    const clientItem = snapshot.items[0]!;
+    // The interceptor hunk only adds new lines 81-82 ("+moved line one"/"+moved line two"); line
+    // 83 ("after") is unchanged context. A target of 81-83 must not resolve in-review just
+    // because *some* of its lines are added rows - every line in the range must be, or the claim
+    // silently truncates to whatever happened to be captured.
+    const partialRationale: RemovalRationale = {
+      reviewItemId: clientItem.id,
+      run: { path: 'src/http/client.ts', start: 6, end: 7 },
+      reason: 'moved',
+      description: 'Claims a move that only partly lands on added lines.',
+      movedTo: { path: 'src/http/interceptor.ts', start: 81, end: 83 },
+    };
+    expect(resolveRemovalTarget(snapshot, partialRationale)).toEqual({ kind: 'unresolved' });
+  });
+
+  it('does not resolve a target landing entirely on unchanged context rows', () => {
+    const snapshot = buildFixtureSnapshot();
+    const clientItem = snapshot.items[0]!;
+    // "before" (line 80) is context in the interceptor hunk, not an added row - a moved claim
+    // pointing at it would assert code moved to a line that was never added.
+    const contextRationale: RemovalRationale = {
+      reviewItemId: clientItem.id,
+      run: { path: 'src/http/client.ts', start: 6, end: 7 },
+      reason: 'moved',
+      description: 'Claims a move onto unchanged code.',
+      movedTo: { path: 'src/http/interceptor.ts', start: 80, end: 80 },
+    };
+    expect(resolveRemovalTarget(snapshot, contextRationale)).toEqual({ kind: 'unresolved' });
+  });
+
   it('reports an unresolved target when neither an item nor an excerpt matches', () => {
     const snapshot = buildFixtureSnapshot();
     const clientItem = snapshot.items[0]!;

@@ -16,6 +16,25 @@ function runKey(path: string, start: number, end: number): string {
   return `${path}:${start}-${end}`;
 }
 
+/**
+ * Rejects any path an agent could use to escape the captured review's root: absolute paths,
+ * embedded NUL bytes, and `.`/`..` path segments. Shared by every free-form repository-relative
+ * path an analysis submission can carry - `evidencePaths` and `movedTo.path` alike - because both
+ * are eventually joined onto the repository root (or a git `show <sha>:<path>` spec) to read file
+ * content back, and an unvalidated path there is a traversal read.
+ */
+export function assertSafeEvidencePath(path: string): void {
+  if (
+    path.length === 0 ||
+    path.includes('\0') ||
+    path.startsWith('/') ||
+    path.startsWith('\\') ||
+    path.split(/[\\/]/u).some((segment) => segment === '.' || segment === '..')
+  ) {
+    throw new Error(`invalid evidence path: ${path}`);
+  }
+}
+
 export function assertCompleteRemovalCoverage(
   snapshot: ReviewSnapshot,
   removals: readonly RemovalRationale[],
@@ -51,6 +70,7 @@ export function assertCompleteRemovalCoverage(
     }
     const target = rationale.movedTo;
     if (target) {
+      assertSafeEvidencePath(target.path);
       if (target.start > target.end) {
         throw new Error(`removal rationale ${key} has a reversed range in movedTo`);
       }

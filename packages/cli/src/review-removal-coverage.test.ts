@@ -14,11 +14,13 @@ function buildFixtureSnapshot() {
     'diff --git a/src/a.ts b/src/a.ts',
     '--- a/src/a.ts',
     '+++ b/src/a.ts',
-    '@@ -40,12 +40,8 @@',
+    '@@ -40,12 +40,10 @@',
     ' keep0',
     '-r41',
     '-r42',
     '-r43',
+    '+m41',
+    '+m42',
     ' c44',
     ' c45',
     ' c46',
@@ -73,8 +75,10 @@ describe('assertCompleteRemovalCoverage', () => {
   });
 
   it('lists every uncovered run', () => {
-    expect(() => assertCompleteRemovalCoverage(snapshot, [covered[0]!])).toThrow(
-      /src\/a\.ts:50-50/,
+    // Both derived runs (41-43 and 50-50) are left uncovered here so the assertion can tell
+    // "reports the first uncovered run" apart from "reports all of them".
+    expect(() => assertCompleteRemovalCoverage(snapshot, [])).toThrow(
+      /src\/a\.ts:41-43.*src\/a\.ts:50-50/s,
     );
   });
 
@@ -132,20 +136,42 @@ describe('assertCompleteRemovalCoverage', () => {
   it('is a no-op for a scope snapshot', () => {
     expect(() => assertCompleteRemovalCoverage(scopeSnapshot, [])).not.toThrow();
   });
+
+  it('rejects a movedTo.path that escapes the repository', () => {
+    const traversal = [
+      covered[0]!,
+      { ...covered[1]!, movedTo: { path: '../../.ssh/id_rsa', start: 1, end: 2 } },
+    ];
+    expect(() => assertCompleteRemovalCoverage(snapshot, traversal)).toThrow(
+      /invalid evidence path/,
+    );
+  });
 });
 
 describe('resolveRemovalExcerpts', () => {
   const snapshot = buildFixtureSnapshot();
   const itemId = snapshot.items[0]!.id;
 
-  // Lands on the same hunk's new-side lines (42-43 map to context rows c45/c46), so it
+  // Lands entirely on the same hunk's ADDED new-side lines (41-42 are the +m41/+m42 rows), so it
   // resolves in-review and must not gain a persisted excerpt.
   const movedInsideRationale: RemovalRationale = {
     reviewItemId: itemId,
     run: { path: 'src/a.ts', start: 41, end: 41 },
     reason: 'moved',
     description: 'Moved within the same file.',
-    movedTo: { path: 'src/a.ts', start: 42, end: 43 },
+    movedTo: { path: 'src/a.ts', start: 41, end: 42 },
+  };
+
+  // Only the first of the two target lines (41) is an added row - 43 is context (c44 unchanged).
+  // A partial overlap must not resolve in-review and silently truncate to whatever was captured;
+  // it must fall through to excerpt capture, which range-checks the full destination. Here that
+  // means "not found" because `io` has no entry for src/a.ts.
+  const partiallyOverlappingRationale: RemovalRationale = {
+    reviewItemId: itemId,
+    run: { path: 'src/a.ts', start: 41, end: 41 },
+    reason: 'moved',
+    description: 'Claims a move that only partly lands on added lines.',
+    movedTo: { path: 'src/a.ts', start: 41, end: 43 },
   };
 
   const movedOutsideRationale: RemovalRationale = {
@@ -199,6 +225,12 @@ describe('resolveRemovalExcerpts', () => {
     const io2 = { readTargetLines: () => ['only one line'] };
     expect(() => resolveRemovalExcerpts(snapshot, [movedOutsideRationale], io2)).toThrow(
       /is out of range/,
+    );
+  });
+
+  it('does not resolve in-review on a partial overlap with added lines', () => {
+    expect(() => resolveRemovalExcerpts(snapshot, [partiallyOverlappingRationale], io)).toThrow(
+      /movedTo target was not found/,
     );
   });
 });

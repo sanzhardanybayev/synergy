@@ -815,8 +815,10 @@ describe('review lifecycle actions', () => {
       const { store, runner, patch } = await setupCarriedMovedRationale(root, otherContent);
 
       // Refresh: file a changes, and the destination file (src/other.ts) is now itself part of
-      // the captured diff, with new-side lines 5 and 6 falling inside its hunk - the same span
-      // the carried rationale's movedTo already names.
+      // the captured diff, with ADDED new-side lines 5 and 6 falling inside its hunk - the same
+      // span the carried rationale's movedTo already names. (Context rows sharing those new-side
+      // line numbers would not count: an in-review jump must land on lines that were actually
+      // added, not merely present.)
       const otherHunk = [
         'diff --git a/src/other.ts b/src/other.ts',
         'index 7777777..8888888 100644',
@@ -828,8 +830,10 @@ describe('review lifecycle actions', () => {
         ' ctx2',
         ' ctx3',
         ' ctx4',
-        ' ctx5',
-        ' ctx6',
+        '-old5',
+        '+new5',
+        '-old6',
+        '+new6',
       ].join('\n');
       patch.value = `${twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;').trimEnd()}\n${otherHunk}\n`;
       const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });

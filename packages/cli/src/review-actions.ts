@@ -51,6 +51,7 @@ import { assertCompleteScopeCoverage } from './review-coverage.js';
 import {
   type RemovalExcerptIo,
   assertCompleteRemovalCoverage,
+  assertSafeEvidencePath,
   reResolveCarriedRemovals,
   resolveRemovalExcerpts,
 } from './review-removals.js';
@@ -467,18 +468,6 @@ export function refreshReview(request: RefreshReviewRequest): CreateReviewResult
     readFile: request.readFile,
     source: captureRequestFromWorkspace(workspace),
   });
-}
-
-function assertSafeEvidencePath(path: string): void {
-  if (
-    path.length === 0 ||
-    path.includes('\0') ||
-    path.startsWith('/') ||
-    path.startsWith('\\') ||
-    path.split(/[\\/]/u).some((segment) => segment === '.' || segment === '..')
-  ) {
-    throw new Error(`invalid evidence path: ${path}`);
-  }
 }
 
 function assertNarrativeText(value: string, max: number, label: string): void {

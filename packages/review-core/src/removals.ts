@@ -94,12 +94,27 @@ export function resolveRemovalTarget(
   if (target && snapshot.kind === 'diff') {
     for (const item of snapshot.items) {
       if (item.kind !== 'hunk' || item.path !== target.path) continue;
-      const rowIds = hunkDiffRows(snapshot, item)
-        .filter(
-          (row) => row.newLine !== null && row.newLine >= target.start && row.newLine <= target.end,
-        )
-        .map((row) => row.id);
-      if (rowIds.length > 0) {
+      // Only rows that were actually ADDED can back an in-review jump - a context row shares the
+      // same new-side line number but was never touched, so a `movedTo` landing on one is not
+      // evidence the removed code moved there. The whole target range must be covered by added
+      // rows (no partial overlap): a target that only partly lands in this hunk must fall through
+      // to excerpt capture below, which range-checks the full destination instead of silently
+      // truncating to whatever happened to be captured.
+      const addedByLine = new Map<number, string>();
+      for (const row of hunkDiffRows(snapshot, item)) {
+        if (row.kind === 'add' && row.newLine !== null) addedByLine.set(row.newLine, row.id);
+      }
+      const rowIds: string[] = [];
+      let complete = true;
+      for (let line = target.start; line <= target.end; line += 1) {
+        const rowId = addedByLine.get(line);
+        if (rowId === undefined) {
+          complete = false;
+          break;
+        }
+        rowIds.push(rowId);
+      }
+      if (complete && rowIds.length > 0) {
         return {
           kind: 'in-review',
           reviewItemId: item.id,
