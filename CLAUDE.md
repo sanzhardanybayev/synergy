@@ -174,7 +174,9 @@ PR, staged changes, unstaged changes, and a bounded current-code scope.
   sentence, gated at `review analysis-set`. Relocating reasons carry a `movedTo` reference that
   resolves to an in-review jump or, when the destination is outside the capture, to an excerpt
   captured once at analysis time. Derivation and resolution live in
-  `@synergy/review-core/removals`; add categories there, never per host.
+  `packages/review-core/src/removals.ts`, exported through the package's root
+  `@synergy/review-core` entry (browser-safe pieces re-export from `@synergy/review-core/browser`);
+  add categories there, never per host.
 - **Syntax highlighting** for both review panes lives in `@synergy/review-core/highlight` (Shiki,
   JS raw engine + precompiled grammars — no WASM, so the VS Code webview CSP stays strict). Add a
   language there, never per-host. The "Ember & Graphite" theme pair is a projection of the

@@ -217,8 +217,12 @@ keep the existing `groups` plus `items` payload and use the captured diff item I
 ### Removal rationale
 
 `review create --json` and `review status --json` list every captured removal run as
-`removals: [{reviewItemId, path, start, end, covered}]`. The analysis payload must carry one
-entry per run under `removals`, matching `path`, `start`, and `end` exactly:
+`removals: [{reviewItemId, path, start, end, covered}]`. A run with `covered: true` already has a
+rationale - either freshly submitted or carried forward from the predecessor revision - and needs
+no resubmission; submitting a fresh entry for that same run replaces the carried one. Submit an
+entry under `removals` for every `covered: false` run, matching its `reviewItemId`, `path`,
+`start`, and `end` exactly - `reviewItemId` is checked separately from the run coordinates, so a
+mismatched item ID is rejected even when the range is right:
 
 ```json
 {
@@ -234,9 +238,10 @@ Use `moved`, `merged`, or `replaced` only after inspecting the destination at th
 source (`git show <headSha>:<path>` for a PR, `git show :<path>` for staged, the worktree file
 for unstaged and scope) and confirming the logic is actually there. If you cannot confirm it,
 use `dead-code`, `obsolete`, or `extracted-to-dep`, which take no `movedTo`. `analysis-set`
-rejects the whole payload when a run is uncovered, when a claimed target does not resolve, or
-when the reason and `movedTo` disagree. `movedTo` may span at most 40 lines. Scope reviews have
-no removal runs.
+rejects the whole payload when a run is uncovered, when a run has two rationales, when a claimed
+target does not resolve, or when the reason and `movedTo` disagree. `movedTo` may span at most 40
+lines. Never author `movedToExcerpt` - it is derived and persisted by the CLI at `analysis-set`
+time, and the schema rejects it on an authored payload. Scope reviews have no removal runs.
 
 For every file that appears in the review, also emit a `files[]` entry:
 `{ "path": "<file path>", "description": "<one broad sentence or two on what changed in this file and why>", "confidence": "high" | "medium" | "low" }`.
