@@ -17,6 +17,7 @@ import {
   applyReviewAnalysis,
   createOrResumeReview,
   formatReviewStatusJson,
+  getReviewStatus,
   openReview,
   printReviewStatus,
 } from './review-actions.js';
@@ -215,6 +216,82 @@ describe('review lifecycle actions', () => {
 
       expect(created).not.toHaveProperty('analysisGuidance');
       expect(status).not.toHaveProperty('analysisGuidance');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports every derived removal run and its coverage in create and status', () => {
+    const root = join(tmpdir(), `synergy-review-removals-status-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const snapshot = createReviewStore(root).readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const [run, ...rest] = deriveSnapshotRemovalRuns(snapshot);
+      if (!run || rest.length > 0) throw new Error('fixture must derive exactly one removal run');
+      const expected = [
+        {
+          reviewItemId: run.reviewItemId,
+          path: run.path,
+          start: run.start,
+          end: run.end,
+          covered: false,
+        },
+      ];
+
+      expect(created.removals).toEqual(expected);
+      expect(
+        getReviewStatus({ root, reference: created.reference, runner: createRunner() }).removals,
+      ).toEqual(expected);
+      expect(
+        printReviewStatus({ root, reference: created.reference, runner: createRunner() }),
+      ).toContain('removals: 0/1 explained');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('marks removal runs covered once analysis is finalized', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-covered-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const snapshot = createReviewStore(root).readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const reviewItemId = snapshot.items[0]?.id;
+      if (!reviewItemId) throw new Error('fixture capture must create one review item');
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [reviewItemId] }],
+          items: [
+            {
+              reviewItemId,
+              description: 'Updates the staged fixture value.',
+              confidence: 'high',
+              evidencePaths: [snapshot.items[0]!.path],
+            },
+          ],
+          removals: removalsForSnapshot(snapshot),
+        },
+      });
+
+      const status = getReviewStatus({
+        root,
+        reference: created.reference,
+        runner: createRunner(),
+      });
+      expect(status.removals[0]?.covered).toBe(true);
+      expect(
+        printReviewStatus({ root, reference: created.reference, runner: createRunner() }),
+      ).toContain('removals: 1/1 explained');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

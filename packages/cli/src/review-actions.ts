@@ -21,6 +21,7 @@ import {
   compareReviewSourceFreshness,
   createReviewStore,
   deriveReviewReadiness,
+  deriveSnapshotRemovalRuns,
   formatReviewRef,
   hashText,
   isReviewCoreError,
@@ -61,6 +62,7 @@ export interface CreateReviewResult {
   url: string;
   analysisRequired: boolean;
   analysisGuidance?: ReviewAnalysisGuidance;
+  removals: ReviewRemovalStatus[];
 }
 
 export interface ReviewActionDependencies {
@@ -156,6 +158,15 @@ export interface ReviewStatusRequest {
   compareSourceFreshness?: typeof compareReviewSourceFreshness;
 }
 
+export interface ReviewRemovalStatus {
+  reviewItemId: string;
+  path: string;
+  start: number;
+  end: number;
+  /** Whether the currently persisted insights already carry a rationale for this exact run. */
+  covered: boolean;
+}
+
 export interface ReviewStatusResult {
   reference: string;
   analysisRequired: boolean;
@@ -163,6 +174,7 @@ export interface ReviewStatusResult {
   captureFailed: boolean;
   url: string;
   analysisGuidance?: ReviewAnalysisGuidance;
+  removals: ReviewRemovalStatus[];
 }
 
 const GROUP_ID = /^[a-z0-9][a-z0-9_-]*$/u;
@@ -199,18 +211,41 @@ function initialProgress(snapshot: ReviewSnapshot, now: string): ReviewProgress 
 }
 
 /**
- * Reconciles progress for a new snapshot against its predecessor. The carried file insights
- * that ride alongside the progress result are returned separately so callers can fold them into
- * the new revision's `ReviewInsights` document (the store's `ReviewProgress` schema rejects
- * unknown properties, so they cannot be forwarded as part of the progress object itself).
+ * Reconciles progress for a new snapshot against its predecessor. The carried file and removal
+ * insights that ride alongside the progress result are returned separately so callers can fold
+ * them into the new revision's `ReviewInsights` document (the store's `ReviewProgress` schema
+ * rejects unknown properties, so they cannot be forwarded as part of the progress object itself).
  */
-function reconcileProgressAndFiles(
+function reconcileProgressAndInsights(
   previous: ReviewBundle,
   snapshot: ReviewSnapshot,
   now: string,
-): { progress: ReviewProgress; files: ReviewFileInsight[] | undefined } {
+): {
+  progress: ReviewProgress;
+  files: ReviewFileInsight[] | undefined;
+  removals: RemovalRationale[] | undefined;
+} {
   const { insights, ...progress } = reconcileReview(previous, snapshot, now);
-  return { progress, files: insights.files };
+  return { progress, files: insights.files, removals: insights.removals };
+}
+
+/** Every derived removal run for a bundle's snapshot, flagged with whether its persisted
+ * insights already carry a rationale for that exact run - the authoring agent's checklist of
+ * what it still has to explain. */
+function removalsStatusFor(bundle: ReviewBundle): ReviewRemovalStatus[] {
+  const runKey = (path: string, start: number, end: number): string => `${path}:${start}-${end}`;
+  const coveredRunKeys = new Set(
+    (bundle.insights.removals ?? []).map((rationale) =>
+      runKey(rationale.run.path, rationale.run.start, rationale.run.end),
+    ),
+  );
+  return deriveSnapshotRemovalRuns(bundle.snapshot).map((run) => ({
+    reviewItemId: run.reviewItemId,
+    path: run.path,
+    start: run.start,
+    end: run.end,
+    covered: coveredRunKeys.has(runKey(run.path, run.start, run.end)),
+  }));
 }
 
 /**
@@ -265,6 +300,7 @@ function resultFor(root: string, reference: ReviewRef, resumed: boolean): Create
     resumed,
     url: reviewUrl(reference),
     analysisRequired: !store.isAnalysisFinalized(reference.workspaceId, reference.revisionId),
+    removals: removalsStatusFor(bundle),
     ...(bundle.snapshot.kind === 'scope'
       ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) }
       : {}),
@@ -322,7 +358,7 @@ export function createOrResumeReview(
     now,
   );
   const reconciliation = existingWorkspace
-    ? reconcileProgressAndFiles(
+    ? reconcileProgressAndInsights(
         store.readBundle(workspaceId, existingWorkspace.currentRevisionId),
         snapshot,
         now,
@@ -335,6 +371,7 @@ export function createOrResumeReview(
     groups: [],
     items: [],
     ...(reconciliation?.files ? { files: reconciliation.files } : {}),
+    ...(reconciliation?.removals ? { removals: reconciliation.removals } : {}),
   };
   try {
     store.createRevision(workspace, snapshot, insights, progress);
@@ -628,7 +665,7 @@ export async function applyReviewAnalysis(
           progressTimestamp,
         };
       }
-      const reconciled = reconcileProgressAndFiles(
+      const reconciled = reconcileProgressAndInsights(
         store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
         translated.snapshot,
         progressTimestamp,
@@ -859,6 +896,7 @@ export function getReviewStatus(request: ReviewStatusRequest): ReviewStatusResul
     readiness,
     captureFailed: freshness.captureFailed,
     url: reviewUrl(request.reference),
+    removals: removalsStatusFor(bundle),
     ...(bundle.snapshot.kind === 'scope'
       ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) }
       : {}),
@@ -881,6 +919,7 @@ export function printReviewStatus(request: ReviewStatusRequest): string {
     : status.readiness.sourceChanged
       ? 'changed'
       : 'unchanged';
+  const coveredRemovals = status.removals.filter((removal) => removal.covered).length;
   return [
     status.reference,
     state,
@@ -888,6 +927,7 @@ export function printReviewStatus(request: ReviewStatusRequest): string {
     `pending: ${status.readiness.pending}`,
     `stale: ${status.readiness.stale}`,
     `unanswered: ${status.readiness.unanswered}`,
+    `removals: ${coveredRemovals}/${status.removals.length} explained`,
     `url: ${status.url}`,
   ].join('\n');
 }

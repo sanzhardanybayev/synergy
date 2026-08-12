@@ -3,7 +3,7 @@ import {
   deriveRemovalRuns,
   deriveReviewReadiness,
   resolveBrowserReviewItemContext
-} from "./chunk-GOXPD7VI.js";
+} from "./chunk-2TJQ6VRX.js";
 
 // src/browser.ts
 function stableReviewJson(value) {

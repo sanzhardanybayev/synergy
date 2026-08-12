@@ -1,4 +1,7 @@
+import { removalRunHash } from './removal-hash.js';
+import { type SnapshotRemovalRun, deriveSnapshotRemovalRuns } from './removals.js';
 import type {
+  RemovalRationale,
   ReviewBundle,
   ReviewFileInsight,
   ReviewInsights,
@@ -9,8 +12,9 @@ import type {
 } from './types.js';
 
 export interface ReviewReconciliation extends ReviewProgress {
-  /** File-level insights carried into the next revision alongside the reconciled progress. */
-  insights: { files?: ReviewFileInsight[] };
+  /** File- and removal-level insights carried into the next revision alongside the reconciled
+   * progress. */
+  insights: { files?: ReviewFileInsight[]; removals?: RemovalRationale[] };
 }
 
 function isCarryable(progress: ReviewItemProgress | undefined): boolean {
@@ -60,6 +64,57 @@ function carryForwardFileInsights(
     const items = nextItemsByPath.get(file.path);
     return items?.every((item) => carriedItemIds.has(item.id)) ?? false;
   });
+  return carried.length > 0 ? carried : undefined;
+}
+
+/**
+ * Carries a rationale into the next revision only when its review item carried forward and the
+ * run's removed text is byte-identical, so a stale explanation can never outlive its code.
+ */
+function carryForwardRemovals(
+  previousInsights: ReviewInsights,
+  previousSnapshot: ReviewSnapshot,
+  currentSnapshot: ReviewSnapshot,
+  /** Current item id -> the previous item id it inherited from. */
+  inheritance: ReadonlyMap<string, string>,
+): RemovalRationale[] | undefined {
+  const previousRemovals = previousInsights.removals ?? [];
+  if (previousRemovals.length === 0) return undefined;
+
+  const byItem = (runs: SnapshotRemovalRun[]): Map<string, SnapshotRemovalRun[]> => {
+    const index = new Map<string, SnapshotRemovalRun[]>();
+    for (const run of runs) {
+      const list = index.get(run.reviewItemId) ?? [];
+      list.push(run);
+      index.set(run.reviewItemId, list);
+    }
+    return index;
+  };
+  const previousRuns = byItem(deriveSnapshotRemovalRuns(previousSnapshot));
+  const currentRuns = byItem(deriveSnapshotRemovalRuns(currentSnapshot));
+
+  const carried: RemovalRationale[] = [];
+  for (const [currentItemId, previousItemId] of inheritance) {
+    const before = previousRuns.get(previousItemId) ?? [];
+    const after = currentRuns.get(currentItemId) ?? [];
+    if (before.length !== after.length) continue;
+    for (const [ordinal, beforeRun] of before.entries()) {
+      const afterRun = after[ordinal]!;
+      if (removalRunHash(beforeRun.texts) !== removalRunHash(afterRun.texts)) continue;
+      const rationale = previousRemovals.find(
+        (candidate) =>
+          candidate.reviewItemId === previousItemId &&
+          candidate.run.start === beforeRun.start &&
+          candidate.run.end === beforeRun.end,
+      );
+      if (!rationale) continue;
+      carried.push({
+        ...rationale,
+        reviewItemId: currentItemId,
+        run: { path: afterRun.path, start: afterRun.start, end: afterRun.end },
+      });
+    }
+  }
   return carried.length > 0 ? carried : undefined;
 }
 
@@ -135,5 +190,25 @@ export function reconcileReview(
   );
   const files = carryForwardFileInsights(previous.insights, currentSnapshot, carriedItemIds);
 
-  return { schemaVersion: 1, updatedAt: now, items, insights: { files } };
+  // Item ids are not stable across revisions - `inheritedFrom.reviewItemId` records what each
+  // carried current id actually descends from, so removal rationales (keyed on the old id) can
+  // be rewritten onto the new one rather than silently dropped.
+  const inheritance = new Map(
+    Object.entries(items).flatMap(([id, itemProgress]) =>
+      itemProgress.inheritedFrom ? [[id, itemProgress.inheritedFrom.reviewItemId] as const] : [],
+    ),
+  );
+  const removals = carryForwardRemovals(
+    previous.insights,
+    previous.snapshot,
+    currentSnapshot,
+    inheritance,
+  );
+
+  return {
+    schemaVersion: 1,
+    updatedAt: now,
+    items,
+    insights: { files, ...(removals ? { removals } : {}) },
+  };
 }

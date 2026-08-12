@@ -1,19 +1,3 @@
-// src/readiness.ts
-function deriveReviewReadiness(bundle, analysisFinalized = true) {
-  const states = bundle.snapshot.items.map((item) => bundle.progress.items[item.id]);
-  const pending = states.filter((state) => !state || state.status === "needs-review").length;
-  const stale = states.filter((state) => state?.status === "stale").length;
-  const unanswered = bundle.questions.filter((question) => question.status !== "answered").length;
-  return {
-    ready: analysisFinalized && pending === 0 && stale === 0 && unanswered === 0 && !bundle.sourceChanged,
-    preparing: !analysisFinalized,
-    pending,
-    stale,
-    unanswered,
-    sourceChanged: bundle.sourceChanged
-  };
-}
-
 // src/review-row-id.ts
 function reviewRowId(itemId, position) {
   if (!Number.isSafeInteger(position) || position < 0) {
@@ -148,13 +132,29 @@ function buildRemovalStrips(rows, reviewItemId, snapshot, insights) {
   });
 }
 
+// src/readiness.ts
+function deriveReviewReadiness(bundle, analysisFinalized = true) {
+  const states = bundle.snapshot.items.map((item) => bundle.progress.items[item.id]);
+  const pending = states.filter((state) => !state || state.status === "needs-review").length;
+  const stale = states.filter((state) => state?.status === "stale").length;
+  const unanswered = bundle.questions.filter((question) => question.status !== "answered").length;
+  return {
+    ready: analysisFinalized && pending === 0 && stale === 0 && unanswered === 0 && !bundle.sourceChanged,
+    preparing: !analysisFinalized,
+    pending,
+    stale,
+    unanswered,
+    sourceChanged: bundle.sourceChanged
+  };
+}
+
 export {
   reviewRowId,
-  deriveReviewReadiness,
   resolveBrowserReviewItemContext,
   deriveRemovalRuns,
   deriveSnapshotRemovalRuns,
   resolveRemovalTarget,
-  buildRemovalStrips
+  buildRemovalStrips,
+  deriveReviewReadiness
 };
-//# sourceMappingURL=chunk-GOXPD7VI.js.map
+//# sourceMappingURL=chunk-2TJQ6VRX.js.map
