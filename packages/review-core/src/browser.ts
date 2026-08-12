@@ -82,3 +82,9 @@ export function resolveBrowserReviewItemContext(
   }
   throw new Error('review item kind does not match its snapshot');
 }
+
+// Re-exported here (rather than from ./removals.js directly by consumers) because removals.ts
+// itself imports resolveBrowserReviewItemContext from this module - keeping removal derivation
+// free of node-only imports (hash.js/review-lines.js pull in node:crypto) so the preview app and
+// VS Code webview bundlers can resolve this entry point.
+export { buildRemovalStrips, deriveRemovalRuns } from './removals.js';
