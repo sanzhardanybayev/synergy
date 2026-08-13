@@ -391,6 +391,7 @@ export const reviewInsightsSchema = {
     },
     files: { type: 'array', items: fileInsightSchema },
     removals: { type: 'array', items: removalRationaleSchema },
+    analysisPolicy: analysisPolicySchema,
   },
 } as const;
 

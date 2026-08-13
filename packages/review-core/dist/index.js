@@ -955,7 +955,8 @@ var reviewInsightsSchema = {
       }
     },
     files: { type: "array", items: fileInsightSchema },
-    removals: { type: "array", items: removalRationaleSchema }
+    removals: { type: "array", items: removalRationaleSchema },
+    analysisPolicy: analysisPolicySchema
   }
 };
 var itemProgressSchema = {

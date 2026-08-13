@@ -847,4 +847,69 @@ describe('removal-rationale coverage policy', () => {
     const statusForB = refreshed.removals.find((run) => run.reviewItemId === refreshedItemB.id);
     expect(statusForB?.covered).toBe(true);
   });
+
+  it('stamps the policy onto insights at finalize so the revision stays self-describing after a later policy change', async () => {
+    const { root, created } = await createStagedRemovalReview(true);
+    const store = createReviewStore(root);
+    const snapshot = store.readBundle(
+      created.reference.workspaceId,
+      created.reference.revisionId,
+    ).snapshot;
+    const item = snapshot.items[0]!;
+    await applyReviewAnalysis({
+      root,
+      reference: created.reference,
+      analysis: singleItemAnalysis(item, removalsForSnapshot(snapshot)),
+    });
+    const finalized = store.readBundle(created.reference.workspaceId, created.reference.revisionId);
+    expect(finalized.insights.analysisPolicy).toEqual({ explainRemovals: true });
+
+    // A later `review create` moves the WORKSPACE's current policy off, but must not rewrite
+    // what this already-finalized revision was actually analyzed under.
+    const flippedElsewhere = createOrResumeReview({
+      root,
+      source: { kind: 'staged' },
+      explainRemovals: false,
+    });
+    expect(flippedElsewhere.analysisPolicyLocked).toBe(true);
+    const stillFinalized = store.readBundle(
+      created.reference.workspaceId,
+      created.reference.revisionId,
+    );
+    expect(stillFinalized.insights.analysisPolicy).toEqual({ explainRemovals: true });
+    expect(stillFinalized.workspace.analysisPolicy).toEqual({ explainRemovals: true });
+  });
+
+  it('keeps an old finalized revision self-describing after a fresh revision moves the workspace policy off', async () => {
+    const { root, created } = await createStagedRemovalReview(true);
+    const store = createReviewStore(root);
+    const snapshotA = store.readBundle(
+      created.reference.workspaceId,
+      created.reference.revisionId,
+    ).snapshot;
+    const itemA = snapshotA.items[0]!;
+    await applyReviewAnalysis({
+      root,
+      reference: created.reference,
+      analysis: singleItemAnalysis(itemA, removalsForSnapshot(snapshotA)),
+    });
+
+    // A genuinely new revision (different fingerprint), created with the policy explicitly off -
+    // this legitimately moves the WORKSPACE's current policy, unlike the locked-resume case above.
+    writeFileSync(join(root, 'src.ts'), 'export const value = 4;\n', 'utf8');
+    git(root, 'add', 'src.ts');
+    const revisionB = createOrResumeReview({
+      root,
+      source: { kind: 'staged' },
+      explainRemovals: false,
+    });
+    expect(revisionB.reference.revisionId).not.toBe(created.reference.revisionId);
+    expect(revisionB.analysisPolicy).toEqual({ explainRemovals: false });
+
+    const stillFinalizedA = store.readBundle(
+      created.reference.workspaceId,
+      created.reference.revisionId,
+    );
+    expect(stillFinalizedA.insights.analysisPolicy).toEqual({ explainRemovals: true });
+  });
 });

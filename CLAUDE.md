@@ -170,14 +170,14 @@ PR, staged changes, unstaged changes, and a bounded current-code scope.
 - Browser questions are durable. The agent runs `review wait` in the foreground, answers the
   exact revision through `review answer`, then waits again. It never changes application code
   merely because a question was asked.
-- **Removal rationale.** Opt-in via `--explain-removals` on `review create` (default off). When
-  on, every contiguous run of removed lines must carry a typed reason and one sentence, gated at
-  `review analysis-set`; when off, the gate is skipped but a submitted `removals` payload is
-  still validated for correctness, and a rationale already captured while the policy was on keeps
-  rendering after it's turned back off. Relocating reasons carry a `movedTo` reference that
-  resolves to an in-review jump or, when the destination is outside the capture, to an excerpt
-  captured once at analysis time. Derivation and resolution live in
-  `packages/review-core/src/removals.ts`, exported through the package's root
+- **Removal rationale.** Opt-in via `--explain-removals` on `review create` (default off on a
+  workspace's first capture). When on, every contiguous run of removed lines must carry a typed
+  reason and one sentence, gated at `review analysis-set`; when off, the gate is skipped but a
+  submitted `removals` payload is still validated for correctness, and a rationale already
+  captured while the policy was on keeps rendering after it's turned back off. Relocating reasons
+  carry a `movedTo` reference that resolves to an in-review jump or, when the destination is
+  outside the capture, to an excerpt captured once at analysis time. Derivation and resolution
+  live in `packages/review-core/src/removals.ts`, exported through the package's root
   `@synergy/review-core` entry (browser-safe pieces re-export from `@synergy/review-core/browser`);
   add categories there, never per host. The policy itself (`ReviewWorkspace.analysisPolicy`) is
   workspace state, not source: it's deliberately excluded from `sourceFingerprint` and
@@ -185,6 +185,30 @@ PR, staged changes, unstaged changes, and a bounded current-code scope.
   on or off is still the same revision. UI hosts gate strip chrome on whether a run actually has
   a rationale, not on the policy flag directly - that's what makes an already-paid-for
   explanation keep rendering after the policy turns off.
+  - **CLI flag semantics on resume.** `--explain-removals` absent means "no opinion", not "off":
+    resuming a workspace (`create` with no source change, or `refresh`) leaves the stored policy
+    exactly as it was. `--explain-removals` turns it on; `--no-explain-removals` turns it off
+    explicitly; giving both is a usage error. Only a brand-new workspace's first capture reads
+    flag-absence as off. `review create`'s result always reports the effective
+    `analysisPolicy`, and adds `previousAnalysisPolicy` when this exact call changed it
+    (`analysisPolicyLocked` still covers the separate case where a change was requested but
+    refused because the current revision's analysis is already finalized). `review status` (not
+    just `create`) also reports `analysisPolicy`, since the skill's documented exact-resume path
+    runs `status` alone.
+  - **Finalize stamps the policy onto the revision.** `applyReviewAnalysis` copies the
+    workspace's current `analysisPolicy` onto `ReviewInsights.analysisPolicy` at the moment a
+    revision finalizes, so a finalized revision stays self-describing even after a later
+    `review create` moves the workspace's CURRENT policy (workspace-global, latest-wins). Both
+    hosts' "Removals" header fact prefer the stamped `insights.analysisPolicy` and fall back to
+    `workspace.analysisPolicy` for an unfinalized revision or one finalized before this field
+    existed.
+  - **Upgrade migration.** A workspace written before this feature (0.21.0 and earlier) has no
+    `analysisPolicy` field at all, and every reader treats that the same as `{explainRemovals:
+    false}`. An in-flight review that was being held to a mandatory removal-rationale convention
+    by process rather than by this field loses that gate silently on upgrade - there is no
+    stored signal distinguishing "never asked for it" from "used to require it before this field
+    existed". Re-apply `--explain-removals` after upgrading if that in-flight review still needs
+    the gate.
 - **Syntax highlighting** for both review panes lives in `@synergy/review-core/highlight` (Shiki,
   JS raw engine + precompiled grammars — no WASM, so the VS Code webview CSP stays strict). Add a
   language there, never per-host. The "Ember & Graphite" theme pair is a projection of the

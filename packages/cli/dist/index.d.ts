@@ -151,6 +151,11 @@ interface CreateReviewResult {
      * is already finalized, so the immutable revision was left exactly as-is instead of silently
      * dropping the request. */
     analysisPolicyLocked?: boolean;
+    /** The workspace's `analysisPolicy` immediately before this call, present only when this call
+     * actually changed the stored policy (never set alongside `analysisPolicyLocked`, whose change
+     * was refused rather than applied). Lets a caller report "explanations off (was on)" instead of
+     * only the new value, without a second round trip. */
+    previousAnalysisPolicy?: AnalysisPolicy;
     /** Repository-relative exclude patterns active for this review's source, normalized and
      * sorted. Absent when no excludes are configured. */
     excludes?: string[];
@@ -237,6 +242,11 @@ interface ReviewStatusResult {
     url: string;
     analysisGuidance?: ReviewAnalysisGuidance;
     removals: ReviewRemovalStatus[];
+    /** The workspace's current removal-rationale coverage policy. Populated from
+     * `bundle.workspace.analysisPolicy` exactly like `CreateReviewResult.analysisPolicy`, so an
+     * agent resuming through `status` alone (the documented exact-resume path) can read the same
+     * signal `create` reports without re-running `create` just to see it. */
+    analysisPolicy: AnalysisPolicy;
     /** Repository-relative exclude patterns active for this review's source, normalized and
      * sorted. Absent when no excludes are configured. */
     excludes?: string[];
@@ -261,7 +271,11 @@ interface ReviewCreateFlags {
      * for one `--exclude` occurrence and an array for several. */
     exclude?: string | string[];
     /** Require every derived removal run to carry a rationale before analysis can finalize.
-     * Default off - see AnalysisPolicy in @synergy/review-core. Create only. */
+     * `true` when `--explain-removals` is given, `false` when `--no-explain-removals` is given
+     * (CAC parses the `no-` prefix into a boolean without the flag needing separate declaration),
+     * `undefined` when neither is given - "no opinion", not "off". Create only. See
+     * `ValidatedReviewCommand.explainRemovals` and `CreateReviewRequest.explainRemovals` for how
+     * that tri-state is threaded through and honored. */
     explainRemovals?: boolean;
 }
 interface ReviewCliDependencies {

@@ -57,10 +57,13 @@ explanation, and the question rail sends durable questions to the listening agen
   workspace - you don't (and can't) re-pass `--exclude` there.
 - **Removal explanations are opt-in.** `synergy review create --pr 370 --explain-removals`
   requires a typed reason and a one-sentence explanation for every contiguous run of removed
-  lines before analysis can finalize. It's off by default - a delete-heavy diff is reviewable
-  without paying that cost - and re-running `create` on an unfinalized revision flips it either
-  way. A rationale already captured under the flag keeps rendering in the review panes even
-  after you turn it back off.
+  lines before analysis can finalize. It's off by default on a workspace's first capture - a
+  delete-heavy diff is reviewable without paying that cost. On a resume, omitting the flag
+  leaves the stored policy exactly as it was ("no opinion", never "off") - re-running the same
+  `create` command a second time never silently disables a gate you already turned on. Use
+  `--no-explain-removals` to turn it off explicitly. `create`'s output always reports the
+  effective policy, and calls out when this exact call changed it. A rationale already captured
+  under the flag keeps rendering in the review panes even after you turn it back off.
 
 Local artifacts live under `.synergy/reviews/<workspace>/revisions/<revision>/`; the active
 browser pointer is `.synergy/active-review.json`. Both are gitignored by `synergy init`.

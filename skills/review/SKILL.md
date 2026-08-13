@@ -67,10 +67,10 @@ it implicitly. A workspace-only resume means refresh/reconcile its current sourc
 Run the matching command and consume its output; use `--json` for create/status/list data:
 
 ```text
-node "<synergy-root>/packages/cli/dist/cli.js" review create --pr <number-or-url> [--exclude <pattern>]... --json --root "<project-root>"
-node "<synergy-root>/packages/cli/dist/cli.js" review create --staged [--exclude <pattern>]... --json --root "<project-root>"
-node "<synergy-root>/packages/cli/dist/cli.js" review create --unstaged [--exclude <pattern>]... --json --root "<project-root>"
-node "<synergy-root>/packages/cli/dist/cli.js" review create --scope <repository-relative-path> [--exclude <pattern>]... --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --pr <number-or-url> [--exclude <pattern>]... [--explain-removals] --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --staged [--exclude <pattern>]... [--explain-removals] --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --unstaged [--exclude <pattern>]... [--explain-removals] --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --scope <repository-relative-path> [--exclude <pattern>]... [--explain-removals] --json --root "<project-root>"
 node "<synergy-root>/packages/cli/dist/cli.js" review refresh <workspace-id> --root "<project-root>"
 node "<synergy-root>/packages/cli/dist/cli.js" review status <workspace@revision> --json --root "<project-root>"
 node "<synergy-root>/packages/cli/dist/cli.js" review open <workspace@revision> --root "<project-root>"
@@ -243,8 +243,15 @@ written: every run must be covered before analysis can finalize.
 If a user asks in natural language for removal explanations on a review whose policy is off,
 re-run `review create` with `--explain-removals` (this updates the stored policy on an
 unfinalized revision) rather than authoring rationales into a payload for a review whose policy
-is still off. If the create result reports `analysisPolicyLocked: true`, the revision's analysis
-is already finalized and immutable, so the policy change was refused - tell the user rather than
+is still off. Symmetrically, `--no-explain-removals` turns an on policy back off on a resume. A
+plain re-run of `review create` with neither flag never changes the stored policy on a resumed
+workspace - it means "no opinion", not "off" - so resuming a review whose policy is already on
+(e.g. re-running `review create --pr 370 --json` for the exact same command the user asked
+earlier) leaves it on. `review create`'s output always reports the effective policy (a
+`Removals:` line in text mode, `analysisPolicy` in JSON), and marks it explicitly when this call
+changed it (`previousAnalysisPolicy` in JSON, "(was on/off)" in text) - read that rather than
+assuming. If the create result reports `analysisPolicyLocked: true`, the revision's analysis is
+already finalized and immutable, so the policy change was refused - tell the user rather than
 retrying the same command.
 
 The rest of this section describes how to author a rationale once the policy is on.

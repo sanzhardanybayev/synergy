@@ -271,6 +271,13 @@ export interface ReviewInsights {
   items: ReviewItemInsight[];
   files?: ReviewFileInsight[];
   removals?: RemovalRationale[];
+  /** The workspace's `analysisPolicy` at the moment THIS revision's analysis was finalized,
+   * stamped in by `applyReviewAnalysis` so a finalized revision stays self-describing even if a
+   * later `review create` changes the workspace's current policy (`analysisPolicy` is
+   * workspace-global and latest-wins - see its own doc comment). Absent on a revision finalized
+   * before this field existed, or on one not yet finalized at all; readers should fall back to
+   * `ReviewWorkspace.analysisPolicy` in both cases. */
+  analysisPolicy?: AnalysisPolicy;
 }
 
 export type ReviewQuestionStatus = 'queued' | 'processing' | 'answered' | 'failed' | 'stale';

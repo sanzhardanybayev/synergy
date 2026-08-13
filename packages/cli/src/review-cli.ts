@@ -37,7 +37,11 @@ interface ReviewCreateFlags {
    * for one `--exclude` occurrence and an array for several. */
   exclude?: string | string[];
   /** Require every derived removal run to carry a rationale before analysis can finalize.
-   * Default off - see AnalysisPolicy in @synergy/review-core. Create only. */
+   * `true` when `--explain-removals` is given, `false` when `--no-explain-removals` is given
+   * (CAC parses the `no-` prefix into a boolean without the flag needing separate declaration),
+   * `undefined` when neither is given - "no opinion", not "off". Create only. See
+   * `ValidatedReviewCommand.explainRemovals` and `CreateReviewRequest.explainRemovals` for how
+   * that tri-state is threaded through and honored. */
   explainRemovals?: boolean;
 }
 
@@ -121,11 +125,20 @@ function printCreateResult(
     result.excludedFileCount && result.excludedFileCount > 0
       ? `${dim('Excluded:')} ${result.excludedFileCount} file${result.excludedFileCount === 1 ? '' : 's'} via ${result.excludes?.length ?? 0} pattern${result.excludes?.length === 1 ? '' : 's'}\n`
       : '';
+  // Always printed, never conditional on a flag having been passed this call: a silently
+  // unchanged policy looks identical to one that was just turned off unless the effective state
+  // is reported every time. `previousAnalysisPolicy` (set only when this call actually flipped
+  // the stored value) upgrades that into an explicit before/after when it applies.
+  const removalsState = result.analysisPolicy.explainRemovals ? 'on' : 'off';
+  const removalsChangeNote = result.previousAnalysisPolicy
+    ? ` (was ${result.previousAnalysisPolicy.explainRemovals ? 'on' : 'off'})`
+    : '';
+  const removalsLine = `${dim('Removals:')} explanations ${removalsState}${removalsChangeNote}\n`;
   const lockedLine = result.analysisPolicyLocked
     ? `${yellow('Note:')} --explain-removals was requested but the current revision's analysis is already finalized and immutable; the stored policy was left unchanged (${result.analysisPolicy.explainRemovals ? 'on' : 'off'}).\n`
     : '';
   process.stdout.write(
-    `${green('✓')} ${bold(reference)} ${dim(result.resumed ? 'resumed' : 'created')}\n${dim('Preparation:')} ${preparation}\n${excludedLine}${lockedLine}${dim('Open:')} ${result.url}\n`,
+    `${green('✓')} ${bold(reference)} ${dim(result.resumed ? 'resumed' : 'created')}\n${dim('Preparation:')} ${preparation}\n${excludedLine}${removalsLine}${lockedLine}${dim('Open:')} ${result.url}\n`,
   );
 }
 
@@ -194,9 +207,13 @@ type ReviewAction = (typeof REVIEW_ACTIONS)[number];
 interface ValidatedReviewCommand {
   action: ReviewAction;
   source?: ReviewCaptureSourceRequest;
-  /** Always a definite boolean for `create` (absence of `--explain-removals` means explicit
-   * off, not "leave unchanged" - re-running `create` without the flag is the documented escape
-   * hatch for turning the policy back off). */
+  /** Tri-state, mirroring `CreateReviewRequest.explainRemovals`: `true` for `--explain-removals`,
+   * `false` for `--no-explain-removals`, `undefined` when neither flag was given - "no opinion",
+   * which `createOrResumeReview` reads as "leave the workspace's stored policy untouched" on a
+   * resume, or "off" on a brand-new workspace's first capture. This is NOT coerced to a boolean
+   * here; doing so at this layer previously collapsed "no opinion" into "off" and silently
+   * disabled the gate on every re-run of `create` that omitted the flag - see the `create` case
+   * below and `assertNoConflictingExplainRemovalsFlags`. */
   explainRemovals?: boolean;
   workspaceId?: string;
   reference?: ReturnType<typeof parseReviewRef>;
@@ -284,6 +301,17 @@ function assertActionOptions(action: ReviewAction, flags: ReviewCommandFlags): v
   }
 }
 
+/** CAC parses both `--explain-removals` and `--no-explain-removals` into the same `explainRemovals`
+ * key, with the later occurrence winning (or, depending on argument order, silently collapsing
+ * into an array neither caller expects) - it never reports "both were given" on its own. This
+ * inspects the raw argv directly so that usage error is caught explicitly instead of surfacing as
+ * a confusing downstream value. */
+function assertNoConflictingExplainRemovalsFlags(rawArgs: readonly string[]): void {
+  if (rawArgs.includes('--explain-removals') && rawArgs.includes('--no-explain-removals')) {
+    throw new ReviewUsageError('--explain-removals and --no-explain-removals cannot both be given');
+  }
+}
+
 function parseUsageWorkspaceId(value: string): string {
   try {
     assertSafeReviewSegment(value, 'workspace');
@@ -299,6 +327,7 @@ function validateReviewCommand(
   references: string[],
   flags: ReviewCommandFlags,
   monotonicNow: () => number = () => performance.now(),
+  rawArgs: readonly string[] = [],
 ): ValidatedReviewCommand {
   assertKnownAction(actionValue);
   assertKnownOptions(flags);
@@ -306,10 +335,15 @@ function validateReviewCommand(
   switch (actionValue) {
     case 'create':
       assertReferenceCount(actionValue, references, 0);
+      assertNoConflictingExplainRemovalsFlags(rawArgs);
       return {
         action: actionValue,
         source: createReviewSourceFromFlags(flags),
-        explainRemovals: flags.explainRemovals === true,
+        // Pass the tri-state straight through - see the field's doc comment. Coercing this with
+        // `=== true` was the bug: it turned "flag omitted" into an explicit `false`, which
+        // `createOrResumeReview` then applied as "turn the policy off" on every resumed
+        // workspace, silently disabling a gate the reviewer had turned on.
+        explainRemovals: flags.explainRemovals,
       };
     case 'refresh':
       assertReferenceCount(actionValue, references, 1);
@@ -428,8 +462,15 @@ export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependen
       'Repository-relative path pattern to exclude from the review (repeatable); create only',
     )
     .option(
+      // `--no-explain-removals` is intentionally NOT declared as its own `.option()`: CAC
+      // treats a declared `--no-x` as a distinct boolean option with its own implicit
+      // `default: true` for `x`, which would make `explainRemovals` default to `true` on every
+      // invocation that omits both flags - exactly the "no opinion" case this must NOT resolve
+      // to a value. `mri`, the arg parser CAC delegates to, already recognizes an undeclared
+      // `--no-` prefix as boolean negation on its own, so this single declaration is enough for
+      // both spellings to parse correctly while keeping "neither given" as `undefined`.
       '--explain-removals',
-      'Require a rationale for every detected removal run before analysis can finalize (default: off); create only',
+      'Require a rationale for every detected removal run before analysis can finalize (default: off on first capture; unchanged on resume; use --no-explain-removals to turn off explicitly); create only',
     )
     .option('--json', 'Print machine-readable output')
     .option('--body-file <path>', 'Analysis or answer body file')
@@ -439,7 +480,7 @@ export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependen
     .action(async (action: string, references: string[], flags: ReviewCommandFlags) => {
       try {
         const commandStartedAt = monotonicNow();
-        const command = validateReviewCommand(action, references, flags, monotonicNow);
+        const command = validateReviewCommand(action, references, flags, monotonicNow, cli.rawArgs);
         const root = resolveRepositoryRoot(flags.root ?? process.cwd());
         if (command.action === 'create') {
           printCreateResult(

@@ -1,5 +1,5 @@
-import { Y as ReviewSource, a0 as SourceFile, p as ReviewBundle, X as ReviewSnapshot, I as ReviewProgress, s as ReviewFileInsight, g as RemovalRationale, w as ReviewItem, x as ReviewItemContext, H as ReviewLineSelection, f as DiffReviewSnapshot, c as DiffHunk, D as DiffFile, _ as ScopeReviewSnapshot, U as ReviewRef, n as ReviewAnswer, v as ReviewInsights, K as ReviewQuestion, L as ReviewQuestionEnvelope, M as ReviewQuestionGeneration, Z as ReviewWorkspace, V as ReviewRepository, a as AnalysisPolicy, J as ReviewProgressUpdate, E as ReviewItemProgressPatch, a2 as WalkthroughPosition, A as ActiveReviewPointer, N as ReviewQuestionGenerationState, C as ClaimResult, Q as QuestionQueue, O as ReviewQuestionInput } from './removals-DvMVYrsr.js';
-export { b as DiffFileStatus, d as DiffLine, e as DiffLineKind, R as RELOCATING_REMOVAL_REASONS, h as RemovalReason, i as RemovalRun, j as RemovalRunRef, k as RemovalStrip, l as RemovalTargetExcerpt, m as ResolvedRemovalTarget, o as ReviewAnswerReference, q as ReviewClaim, r as ReviewDiffLineRow, t as ReviewGroup, u as ReviewInsightConfidence, y as ReviewItemInsight, z as ReviewItemKind, B as ReviewItemProgress, F as ReviewItemStatus, G as ReviewLineRow, P as ReviewQuestionStatus, S as ReviewRange, T as ReviewReadiness, W as ReviewScopeLineRow, $ as SnapshotRemovalRun, a1 as SourceLine, a3 as buildRemovalStrips, a4 as deriveRemovalRuns, a5 as deriveReviewReadiness, a6 as deriveSnapshotRemovalRuns, a7 as resolveRemovalTarget } from './removals-DvMVYrsr.js';
+import { Y as ReviewSource, a0 as SourceFile, p as ReviewBundle, X as ReviewSnapshot, I as ReviewProgress, s as ReviewFileInsight, g as RemovalRationale, w as ReviewItem, x as ReviewItemContext, H as ReviewLineSelection, f as DiffReviewSnapshot, c as DiffHunk, D as DiffFile, _ as ScopeReviewSnapshot, U as ReviewRef, n as ReviewAnswer, v as ReviewInsights, K as ReviewQuestion, L as ReviewQuestionEnvelope, M as ReviewQuestionGeneration, Z as ReviewWorkspace, V as ReviewRepository, a as AnalysisPolicy, J as ReviewProgressUpdate, E as ReviewItemProgressPatch, a2 as WalkthroughPosition, A as ActiveReviewPointer, N as ReviewQuestionGenerationState, C as ClaimResult, Q as QuestionQueue, O as ReviewQuestionInput } from './removals-CpjQNzVH.js';
+export { b as DiffFileStatus, d as DiffLine, e as DiffLineKind, R as RELOCATING_REMOVAL_REASONS, h as RemovalReason, i as RemovalRun, j as RemovalRunRef, k as RemovalStrip, l as RemovalTargetExcerpt, m as ResolvedRemovalTarget, o as ReviewAnswerReference, q as ReviewClaim, r as ReviewDiffLineRow, t as ReviewGroup, u as ReviewInsightConfidence, y as ReviewItemInsight, z as ReviewItemKind, B as ReviewItemProgress, F as ReviewItemStatus, G as ReviewLineRow, P as ReviewQuestionStatus, S as ReviewRange, T as ReviewReadiness, W as ReviewScopeLineRow, $ as SnapshotRemovalRun, a1 as SourceLine, a3 as buildRemovalStrips, a4 as deriveRemovalRuns, a5 as deriveReviewReadiness, a6 as deriveSnapshotRemovalRuns, a7 as resolveRemovalTarget } from './removals-CpjQNzVH.js';
 
 declare function atomicWriteJson(path: string, value: unknown): void;
 
@@ -1075,6 +1075,16 @@ declare const reviewInsightsSchema: {
                             };
                         };
                     };
+                };
+            };
+        };
+        readonly analysisPolicy: {
+            readonly type: "object";
+            readonly required: readonly ["explainRemovals"];
+            readonly additionalProperties: false;
+            readonly properties: {
+                readonly explainRemovals: {
+                    readonly type: "boolean";
                 };
             };
         };

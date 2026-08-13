@@ -2154,6 +2154,7 @@ describe('review lifecycle actions', () => {
             evidencePaths: section.evidencePaths,
           },
         ],
+        analysisPolicy: { explainRemovals: false },
       });
       expect(JSON.stringify(finalized)).not.toContain(section.key);
       expect(

@@ -2,9 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createReviewStore } from '@synergy/review-core';
 import cac from 'cac';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PreviewNotReadyError } from './review-actions.js';
+import { PreviewNotReadyError, applyReviewAnalysis } from './review-actions.js';
 import {
   type ReviewCliDependencies,
   createReviewSourceFromFlags,
@@ -117,6 +118,18 @@ describe('review CLI source flags', () => {
     ]);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toMatch(/review status does not accept --exclude/);
+  });
+
+  it('rejects --explain-removals on actions other than create', async () => {
+    const result = await runReviewCli([
+      'status',
+      'workspace@revision',
+      '--explain-removals',
+      '--root',
+      '/not-a-repository',
+    ]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toMatch(/review status does not accept --explain-removals/);
   });
 
   it('rejects invalid usage before attempting Git root resolution', async () => {
@@ -418,5 +431,167 @@ describe('review CLI source flags', () => {
     ).rejects.toThrow('wait failed');
     expect(process.listenerCount('SIGINT')).toBe(initialInterruptListeners);
     expect(process.listenerCount('SIGTERM')).toBe(initialTerminateListeners);
+  });
+});
+
+describe('review CLI --explain-removals flag', () => {
+  const temporaryRoots: string[] = [];
+
+  afterEach(() => {
+    for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  /** A repository with a base commit (`--staged` capture needs a resolvable `HEAD`) plus one
+   * new, staged file - `git diff --cached` renders that whole file as additions, so the capture
+   * derives zero removal runs. That keeps these tests focused on the policy VALUE
+   * (on/off/unchanged) rather than needing a real rationale payload to satisfy coverage when the
+   * policy is on. */
+  function initRepoWithPureAdditionStaged(): string {
+    const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-explain-'));
+    execFileSync('git', ['init', '--quiet'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Synergy Test'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'synergy@example.test'], { cwd: root });
+    writeFileSync(join(root, 'base.ts'), 'export const base = true;\n', 'utf8');
+    execFileSync('git', ['add', 'base.ts'], { cwd: root });
+    execFileSync('git', ['commit', '--quiet', '-m', 'base'], { cwd: root });
+    writeFileSync(join(root, 'example.ts'), 'export const value = 1;\n', 'utf8');
+    execFileSync('git', ['add', 'example.ts'], { cwd: root });
+    return root;
+  }
+
+  it('creates with explanations off when the flag is omitted (first capture)', async () => {
+    const root = initRepoWithPureAdditionStaged();
+    temporaryRoots.push(root);
+    const result = await runReviewCli(['create', '--staged', '--json', '--root', root]);
+    expect(result.exitCode).toBeUndefined();
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.analysisPolicy).toEqual({ explainRemovals: false });
+    expect(parsed.previousAnalysisPolicy).toBeUndefined();
+  });
+
+  it('creates with explanations on when --explain-removals is given', async () => {
+    const root = initRepoWithPureAdditionStaged();
+    temporaryRoots.push(root);
+    const result = await runReviewCli([
+      'create',
+      '--staged',
+      '--explain-removals',
+      '--json',
+      '--root',
+      root,
+    ]);
+    expect(JSON.parse(result.stdout).analysisPolicy).toEqual({ explainRemovals: true });
+  });
+
+  it('leaves an on policy unchanged when create is re-run without the flag', async () => {
+    // This is the regression the bug was in: the CLI used to coerce a missing
+    // --explain-removals into an explicit `false`, which silently turned an already-on policy
+    // back off on every plain resume (e.g. `review create --pr 370 --json` run a second time).
+    const root = initRepoWithPureAdditionStaged();
+    temporaryRoots.push(root);
+    const first = await runReviewCli([
+      'create',
+      '--staged',
+      '--explain-removals',
+      '--json',
+      '--root',
+      root,
+    ]);
+    expect(JSON.parse(first.stdout).analysisPolicy).toEqual({ explainRemovals: true });
+
+    const resumed = await runReviewCli(['create', '--staged', '--json', '--root', root]);
+    const parsed = JSON.parse(resumed.stdout);
+    expect(parsed.resumed).toBe(true);
+    expect(parsed.analysisPolicy).toEqual({ explainRemovals: true });
+    expect(parsed.previousAnalysisPolicy).toBeUndefined();
+  });
+
+  it('turns an on policy off with --no-explain-removals on resume and reports the change', async () => {
+    const root = initRepoWithPureAdditionStaged();
+    temporaryRoots.push(root);
+    await runReviewCli(['create', '--staged', '--explain-removals', '--json', '--root', root]);
+
+    const off = await runReviewCli(['create', '--staged', '--no-explain-removals', '--root', root]);
+    expect(off.exitCode).toBeUndefined();
+    expect(off.stdout).toContain('Removals: explanations off (was on)');
+
+    const jsonOff = await runReviewCli(['create', '--staged', '--json', '--root', root]);
+    // A follow-up create with no opinion must not resurrect the policy the previous call just
+    // turned off.
+    expect(JSON.parse(jsonOff.stdout).analysisPolicy).toEqual({ explainRemovals: false });
+  });
+
+  it('prints the effective policy on every create, unconditionally', async () => {
+    const root = initRepoWithPureAdditionStaged();
+    temporaryRoots.push(root);
+    const result = await runReviewCli(['create', '--staged', '--root', root]);
+    expect(result.stdout).toContain('Removals: explanations off');
+  });
+
+  it('rejects giving --explain-removals and --no-explain-removals together', async () => {
+    const root = initRepoWithPureAdditionStaged();
+    temporaryRoots.push(root);
+    const result = await runReviewCli([
+      'create',
+      '--staged',
+      '--explain-removals',
+      '--no-explain-removals',
+      '--root',
+      root,
+    ]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toMatch(
+      /--explain-removals and --no-explain-removals cannot both be given/,
+    );
+  });
+
+  it('reports the locked note and leaves a finalized revision policy unchanged', async () => {
+    const root = initRepoWithPureAdditionStaged();
+    temporaryRoots.push(root);
+    const created = await runReviewCli([
+      'create',
+      '--staged',
+      '--explain-removals',
+      '--json',
+      '--root',
+      root,
+    ]);
+    const { reference } = JSON.parse(created.stdout) as { reference: string };
+    const [workspaceId, revisionId] = reference.split('@');
+    if (!workspaceId || !revisionId) throw new Error('fixture must produce a valid reference');
+
+    const bundle = createReviewStore(root).readBundle(workspaceId, revisionId);
+    const item = bundle.snapshot.items[0];
+    if (!item) throw new Error('fixture must produce one review item');
+    await applyReviewAnalysis({
+      root,
+      reference: { workspaceId, revisionId },
+      analysis: {
+        kind: 'diff',
+        groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+        items: [
+          {
+            reviewItemId: item.id,
+            description: 'Adds the example module.',
+            confidence: 'high',
+            evidencePaths: [item.path],
+          },
+        ],
+      },
+    });
+
+    const attempted = await runReviewCli([
+      'create',
+      '--staged',
+      '--no-explain-removals',
+      '--root',
+      root,
+    ]);
+    expect(attempted.exitCode).toBeUndefined();
+    expect(attempted.stdout).toMatch(
+      /--explain-removals was requested but the current revision's analysis is already finalized and immutable/,
+    );
+    expect(attempted.stdout).toContain('(on)');
+    expect(attempted.stdout).toContain('Removals: explanations on');
   });
 });

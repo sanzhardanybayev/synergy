@@ -79,6 +79,11 @@ export interface CreateReviewResult {
    * is already finalized, so the immutable revision was left exactly as-is instead of silently
    * dropping the request. */
   analysisPolicyLocked?: boolean;
+  /** The workspace's `analysisPolicy` immediately before this call, present only when this call
+   * actually changed the stored policy (never set alongside `analysisPolicyLocked`, whose change
+   * was refused rather than applied). Lets a caller report "explanations off (was on)" instead of
+   * only the new value, without a second round trip. */
+  previousAnalysisPolicy?: AnalysisPolicy;
   /** Repository-relative exclude patterns active for this review's source, normalized and
    * sorted. Absent when no excludes are configured. */
   excludes?: string[];
@@ -202,6 +207,11 @@ export interface ReviewStatusResult {
   url: string;
   analysisGuidance?: ReviewAnalysisGuidance;
   removals: ReviewRemovalStatus[];
+  /** The workspace's current removal-rationale coverage policy. Populated from
+   * `bundle.workspace.analysisPolicy` exactly like `CreateReviewResult.analysisPolicy`, so an
+   * agent resuming through `status` alone (the documented exact-resume path) can read the same
+   * signal `create` reports without re-running `create` just to see it. */
+  analysisPolicy: AnalysisPolicy;
   /** Repository-relative exclude patterns active for this review's source, normalized and
    * sorted. Absent when no excludes are configured. */
   excludes?: string[];
@@ -360,6 +370,7 @@ function resultFor(
   resumed: boolean,
   captured?: CapturedReviewSource,
   analysisPolicyLocked?: boolean,
+  previousExplainRemovals?: boolean,
 ): CreateReviewResult {
   const store = createReviewStore(root);
   const bundle = store.readBundle(reference.workspaceId, reference.revisionId);
@@ -372,6 +383,9 @@ function resultFor(
     removals: removalsStatusFor(bundle),
     analysisPolicy: bundle.workspace.analysisPolicy ?? { explainRemovals: false },
     ...(analysisPolicyLocked ? { analysisPolicyLocked: true } : {}),
+    ...(previousExplainRemovals !== undefined
+      ? { previousAnalysisPolicy: { explainRemovals: previousExplainRemovals } }
+      : {}),
     ...(excludes && excludes.length > 0 ? { excludes } : {}),
     ...(captured?.excludedFileCount !== undefined
       ? { excludedFileCount: captured.excludedFileCount }
@@ -421,6 +435,15 @@ export function createOrResumeReview(
     // an already-finalized revision - that analysis is immutable, so the request is honored by
     // reporting `analysisPolicyLocked` rather than silently dropping it OR silently mutating a
     // published result.
+    //
+    // The finalization check below is scoped to THIS revision only, even though `analysisPolicy`
+    // lives on the workspace (shared by every revision). Resuming an OLDER unfinalized revision
+    // of a workspace whose CURRENT revision is already finalized will still apply a policy
+    // change here - the lock only fires when the exact revision being resumed is itself
+    // finalized. That is a narrow, deliberate reading of "immutable": each revision's own
+    // analysis is what must never be rewritten after finalization, and this check protects
+    // exactly that. It does mean the shared, workspace-global policy can still move out from
+    // under an already-finalized sibling revision - see `AnalysisPolicy`'s doc comment.
     const finalized = store.isAnalysisFinalized(workspaceId, existingRevision);
     const requestedPolicy = request.explainRemovals;
     // The workspace pointer can be missing here (a crash between publishing the revision
@@ -434,15 +457,22 @@ export function createOrResumeReview(
     } catch (error) {
       if (!isReviewCoreError(error) || error.code !== 'review_not_found') throw error;
     }
-    const policyChangeRequested =
-      requestedPolicy !== undefined && requestedPolicy !== priorExplainRemovals;
-    const applyPolicy = policyChangeRequested && !finalized;
+    // `requestedPolicy` is only known to be a definite boolean inside this `if` - narrowing it
+    // through a separately named `policyChangeRequested` boolean (as an earlier version of this
+    // function did) loses that for TypeScript, forcing an `as boolean` cast below. Keeping the
+    // update payload itself as the narrowed value sidesteps the cast entirely.
+    let policyChangeRequested = false;
+    let explainRemovalsUpdate: { explainRemovals: boolean } | undefined;
+    if (requestedPolicy !== undefined && requestedPolicy !== priorExplainRemovals) {
+      policyChangeRequested = true;
+      if (!finalized) explainRemovalsUpdate = { explainRemovals: requestedPolicy };
+    }
     store.setCurrentRevision(
       workspaceId,
       existingRevision,
       captured.source,
       { root, name: repositoryName(root) },
-      applyPolicy ? { explainRemovals: requestedPolicy as boolean } : undefined,
+      explainRemovalsUpdate,
     );
     return resultFor(
       root,
@@ -450,6 +480,7 @@ export function createOrResumeReview(
       true,
       captured,
       policyChangeRequested && finalized,
+      explainRemovalsUpdate ? priorExplainRemovals : undefined,
     );
   }
 
@@ -458,6 +489,19 @@ export function createOrResumeReview(
   const existingWorkspace = store
     .listWorkspaces()
     .find((workspace) => workspace.id === workspaceId);
+  // A brand-new revision (different fingerprint) is always freshly mutable, so an explicit
+  // policy request is applied unconditionally here - there is no finalized-revision lock to
+  // check, unlike the identical-fingerprint resume path above. Still worth surfacing to the
+  // caller as a change: this is exactly the case a resumed workspace's `refreshReview` masks by
+  // always passing an explicit value (never `undefined`), so only a genuine explicit-and-
+  // different request from a direct `createOrResumeReview` caller (the CLI's `create`) reaches
+  // here as a change.
+  const priorWorkspaceExplainRemovals = existingWorkspace?.analysisPolicy?.explainRemovals ?? false;
+  const previousExplainRemovals =
+    request.explainRemovals !== undefined &&
+    request.explainRemovals !== priorWorkspaceExplainRemovals
+      ? priorWorkspaceExplainRemovals
+      : undefined;
   const snapshot = buildSnapshot(captured, revisionId, now, existingWorkspace?.currentRevisionId);
   const workspace = createWorkspace(
     root,
@@ -513,7 +557,14 @@ export function createOrResumeReview(
     });
     return resultFor(root, { workspaceId, revisionId: concurrentRevision }, true, captured);
   }
-  return resultFor(root, { workspaceId, revisionId }, false, captured);
+  return resultFor(
+    root,
+    { workspaceId, revisionId },
+    false,
+    captured,
+    undefined,
+    previousExplainRemovals,
+  );
 }
 
 function captureRequestFromWorkspace(
@@ -824,6 +875,10 @@ export async function applyReviewAnalysis(
       groups: translated.analysis.groups,
       items: translated.analysis.items,
       ...(scopeFiles ? { files: scopeFiles } : {}),
+      // Stamps the policy this analysis was actually finalized under, so the revision stays
+      // self-describing even after a later `review create` changes the workspace's CURRENT
+      // policy - see `ReviewInsights.analysisPolicy`'s doc comment.
+      analysisPolicy: bundle.workspace.analysisPolicy ?? { explainRemovals: false },
     };
     finalizedAt = nondecreasingIsoTimestamp(derived.value.progressTimestamp, now());
     publicationMs += measureMonotonic(monotonicNow, () => {
@@ -896,6 +951,10 @@ export async function applyReviewAnalysis(
       items: diffAnalysis.items,
       ...(resolvedRemovals ? { removals: resolvedRemovals } : {}),
       ...(diffFiles ? { files: diffFiles } : {}),
+      // Stamps the policy this analysis was actually finalized under, so the revision stays
+      // self-describing even after a later `review create` changes the workspace's CURRENT
+      // policy - see `ReviewInsights.analysisPolicy`'s doc comment.
+      analysisPolicy: bundle.workspace.analysisPolicy ?? { explainRemovals: false },
     };
     finalizedAt = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
     publicationMs += measureMonotonic(monotonicNow, () => {
@@ -1055,6 +1114,7 @@ export function getReviewStatus(request: ReviewStatusRequest): ReviewStatusResul
     captureFailed: freshness.captureFailed,
     url: reviewUrl(request.reference),
     removals: removalsStatusFor(bundle),
+    analysisPolicy: bundle.workspace.analysisPolicy ?? { explainRemovals: false },
     ...(excludes && excludes.length > 0 ? { excludes } : {}),
     ...(bundle.snapshot.kind === 'scope'
       ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) }
