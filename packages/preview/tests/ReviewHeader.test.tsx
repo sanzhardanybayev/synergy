@@ -74,7 +74,7 @@ describe('ReviewHeader excluded fact', () => {
 });
 
 describe('ReviewHeader removals fact', () => {
-  it('reports explanations optional when the policy is off (including the absent/legacy case)', () => {
+  it('reports explanations optional when the policy is explicitly off', () => {
     render(
       <ReviewHeader
         bundle={bundleFor(undefined, { explainRemovals: false })}
@@ -83,14 +83,14 @@ describe('ReviewHeader removals fact', () => {
       />,
     );
     expect(screen.getByText('Removals')).toBeInTheDocument();
-    expect(screen.getByText('Explanations optional')).toBeInTheDocument();
+    expect(screen.getByText('Optional')).toBeInTheDocument();
   });
 
   it('reports explanations optional when the workspace predates analysisPolicy entirely', () => {
     render(
       <ReviewHeader bundle={bundleFor(undefined)} readiness={READINESS} captureFailed={false} />,
     );
-    expect(screen.getByText('Explanations optional')).toBeInTheDocument();
+    expect(screen.getByText('Optional')).toBeInTheDocument();
   });
 
   it('reports explanations required when the policy is on', () => {
@@ -101,7 +101,7 @@ describe('ReviewHeader removals fact', () => {
         captureFailed={false}
       />,
     );
-    expect(screen.getByText('Explanations required')).toBeInTheDocument();
+    expect(screen.getByText('Required')).toBeInTheDocument();
   });
 
   it('prefers the policy stamped on insights at finalize time over a workspace policy that later changed', () => {
@@ -112,6 +112,6 @@ describe('ReviewHeader removals fact', () => {
         captureFailed={false}
       />,
     );
-    expect(screen.getByText('Explanations required')).toBeInTheDocument();
+    expect(screen.getByText('Required')).toBeInTheDocument();
   });
 });

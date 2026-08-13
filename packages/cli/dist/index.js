@@ -2299,7 +2299,7 @@ function createOrResumeReview(request, dependencies = {}) {
   const revisionId = revisionIdFor(captured);
   const existingWorkspace = store.listWorkspaces().find((workspace2) => workspace2.id === workspaceId);
   const priorWorkspaceExplainRemovals = existingWorkspace?.analysisPolicy?.explainRemovals ?? false;
-  const previousExplainRemovals = request.explainRemovals !== void 0 && request.explainRemovals !== priorWorkspaceExplainRemovals ? priorWorkspaceExplainRemovals : void 0;
+  const previousExplainRemovals = existingWorkspace !== void 0 && request.explainRemovals !== void 0 && request.explainRemovals !== priorWorkspaceExplainRemovals ? priorWorkspaceExplainRemovals : void 0;
   const snapshot = buildSnapshot(captured, revisionId, now, existingWorkspace?.currentRevisionId);
   const workspace = createWorkspace(
     root,
@@ -3171,6 +3171,13 @@ function assertNoConflictingExplainRemovalsFlags(rawArgs) {
     throw new ReviewUsageError("--explain-removals and --no-explain-removals cannot both be given");
   }
 }
+function assertValidExplainRemovalsFlagValue(flags) {
+  if (flags.explainRemovals !== void 0 && typeof flags.explainRemovals !== "boolean") {
+    throw new ReviewUsageError(
+      "--explain-removals does not accept a value; use --explain-removals or --no-explain-removals"
+    );
+  }
+}
 function parseUsageWorkspaceId(value) {
   try {
     assertSafeReviewSegment(value, "workspace");
@@ -3188,6 +3195,7 @@ function validateReviewCommand(actionValue, references, flags, monotonicNow = ()
     case "create":
       assertReferenceCount(actionValue, references, 0);
       assertNoConflictingExplainRemovalsFlags(rawArgs);
+      assertValidExplainRemovalsFlagValue(flags);
       return {
         action: actionValue,
         source: createReviewSourceFromFlags(flags),

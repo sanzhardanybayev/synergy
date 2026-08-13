@@ -3,6 +3,7 @@ import {
   type ReviewItem,
   type ReviewItemProgress,
   buildDiffSnapshot,
+  deriveSnapshotRemovalRuns,
 } from '@synergy/review-core';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -250,6 +251,12 @@ describe('ReviewStage removal-rationale rendering', () => {
 
   it('expands only the rationale-covered run in a mixed set, even though the control says "all"', () => {
     const bundle = makeMixedRemovalBundle();
+
+    // Pin the fixture's premise: the diff must actually derive TWO removal runs, only one of
+    // which carries a rationale. Otherwise a run-derivation regression that collapsed both
+    // removed lines into a single run would still pass every assertion below.
+    expect(deriveSnapshotRemovalRuns(bundle.snapshot)).toHaveLength(2);
+
     renderStageWithBundle(bundle);
 
     // The bare run renders no chrome at all - only the covered run produces a strip.

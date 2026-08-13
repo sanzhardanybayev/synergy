@@ -232,8 +232,8 @@ keep the existing `groups` plus `items` payload and use the captured diff item I
 
 Removal explanations are opt-in and OFF by default. Do not author `removals` in the analysis
 payload unless the review's policy asks for them. Read `analysisPolicy.explainRemovals` from
-`review create --json` or `review status --json` to tell: when it is `false` (or the field is
-absent on an older workspace), `removals[]` in the status payload is informational only - it
+`review create --json` or `review status --json` to tell: when it is `false`, `removals[]`
+in the status payload is informational only - it
 still lists every captured removal run, since that is a fact about the diff and is reported
 either way, but there is no coverage obligation. Do not treat an uncovered run as a gap to fix,
 and do not mention uncovered runs as blockers in summaries, descriptions, or completion reports.

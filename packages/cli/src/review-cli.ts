@@ -312,6 +312,19 @@ function assertNoConflictingExplainRemovalsFlags(rawArgs: readonly string[]): vo
   }
 }
 
+/** `--explain-removals` and `--no-explain-removals` are meant to be used bare - CAC treats them
+ * as booleans with no value. A valued spelling like `--explain-removals=false` instead yields the
+ * *string* `"false"`, which used to reach `CreateReviewRequest.explainRemovals` (typed `boolean`)
+ * unchecked and fail deep inside schema validation as an opaque internal error. Reject it here,
+ * at the usage boundary, with a message that names the flag and the accepted bare spellings. */
+function assertValidExplainRemovalsFlagValue(flags: ReviewCommandFlags): void {
+  if (flags.explainRemovals !== undefined && typeof flags.explainRemovals !== 'boolean') {
+    throw new ReviewUsageError(
+      '--explain-removals does not accept a value; use --explain-removals or --no-explain-removals',
+    );
+  }
+}
+
 function parseUsageWorkspaceId(value: string): string {
   try {
     assertSafeReviewSegment(value, 'workspace');
@@ -336,6 +349,7 @@ function validateReviewCommand(
     case 'create':
       assertReferenceCount(actionValue, references, 0);
       assertNoConflictingExplainRemovalsFlags(rawArgs);
+      assertValidExplainRemovalsFlagValue(flags);
       return {
         action: actionValue,
         source: createReviewSourceFromFlags(flags),

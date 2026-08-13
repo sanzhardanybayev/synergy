@@ -821,7 +821,9 @@ function startWebview() {
     const removalPolicyText =
       state.screen === 'bundle' && state.bundle ? removalPolicySummary(state.bundle.bundle) : null;
     const removalPolicyBadge = removalPolicyText
-      ? el('span', { className: 'toolbar-removal-policy' }, [removalPolicyText])
+      ? el('span', { className: 'toolbar-removal-policy', title: removalPolicyText }, [
+          removalPolicyText,
+        ])
       : null;
     const diffToggle =
       state.screen === 'bundle'

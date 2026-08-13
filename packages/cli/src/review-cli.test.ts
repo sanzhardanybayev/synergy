@@ -480,7 +480,9 @@ describe('review CLI --explain-removals flag', () => {
       '--root',
       root,
     ]);
-    expect(JSON.parse(result.stdout).analysisPolicy).toEqual({ explainRemovals: true });
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.analysisPolicy).toEqual({ explainRemovals: true });
+    expect(parsed.previousAnalysisPolicy).toBeUndefined();
   });
 
   it('leaves an on policy unchanged when create is re-run without the flag', async () => {
@@ -543,6 +545,38 @@ describe('review CLI --explain-removals flag', () => {
     expect(result.stderr).toMatch(
       /--explain-removals and --no-explain-removals cannot both be given/,
     );
+  });
+
+  it('rejects a valued --explain-removals=false as a usage error, not a schema error', async () => {
+    const root = initRepoWithPureAdditionStaged();
+    temporaryRoots.push(root);
+    const result = await runReviewCli([
+      'create',
+      '--staged',
+      '--explain-removals=false',
+      '--root',
+      root,
+    ]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toMatch(/--explain-removals/);
+    expect(result.stderr).toMatch(/--no-explain-removals/);
+    expect(result.stderr).not.toMatch(/analysisPolicy/);
+  });
+
+  it('rejects a valued --explain-removals=true as a usage error, not a schema error', async () => {
+    const root = initRepoWithPureAdditionStaged();
+    temporaryRoots.push(root);
+    const result = await runReviewCli([
+      'create',
+      '--staged',
+      '--explain-removals=true',
+      '--root',
+      root,
+    ]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toMatch(/--explain-removals/);
+    expect(result.stderr).toMatch(/--no-explain-removals/);
+    expect(result.stderr).not.toMatch(/analysisPolicy/);
   });
 
   it('reports the locked note and leaves a finalized revision policy unchanged', async () => {

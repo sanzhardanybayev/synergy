@@ -93,10 +93,10 @@ export function ReviewHeader({ bundle, readiness, captureFailed, walkthrough }: 
         <div className="review-header__fact--removal-policy">
           <dt>Removals</dt>
           <dd
-            className={explainRemovals ? 'review-tone--success' : 'review-tone--warning'}
+            className={explainRemovals ? 'review-tone--success' : undefined}
             title="Whether every removal run captured by this review must carry a rationale before analysis can finalize."
           >
-            {explainRemovals ? 'Explanations required' : 'Explanations optional'}
+            {explainRemovals ? 'Required' : 'Optional'}
           </dd>
         </div>
       </dl>

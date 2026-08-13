@@ -498,6 +498,7 @@ export function createOrResumeReview(
   // here as a change.
   const priorWorkspaceExplainRemovals = existingWorkspace?.analysisPolicy?.explainRemovals ?? false;
   const previousExplainRemovals =
+    existingWorkspace !== undefined &&
     request.explainRemovals !== undefined &&
     request.explainRemovals !== priorWorkspaceExplainRemovals
       ? priorWorkspaceExplainRemovals
