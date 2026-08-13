@@ -2927,6 +2927,9 @@ var ReviewUsageError = class extends Error {
 function excludesFromFlag(value) {
   if (value === void 0) return void 0;
   const raw = Array.isArray(value) ? value : [value];
+  if (raw.some((entry) => typeof entry !== "string")) {
+    throw new ReviewUsageError("--exclude requires a pattern value, e.g. --exclude .vouch");
+  }
   try {
     const normalized = normalizeExcludes(raw);
     return normalized.length > 0 ? normalized : void 0;

@@ -150,7 +150,13 @@ declare function reconcileReview(previous: ReviewBundle, currentSnapshot: Review
  * single-segment `*` semantics documented above, so any pattern containing `*` is left for this
  * module to filter in JS; only wildcard-free patterns get a (literal, therefore safe) pathspec.
  */
-/** Trims, strips a leading `./`, and collapses trailing slashes so directory forms collapse. */
+/** Trims, converts backslash separators to forward slashes, strips a leading `./`, and collapses
+ * trailing slashes so directory forms collapse. Without the backslash conversion, a pattern like
+ * `.vouch\sub` (typed on Windows, or by an agent unaware the matcher is POSIX-only) would pass
+ * `assertSafeExcludePattern` unchanged, then compile to a regex matching a literal backslash
+ * character - which no repository-relative path ever contains, so the pattern silently excludes
+ * nothing. Normalizing the separator first means it matches the same path a `/`-separated
+ * pattern would. */
 declare function normalizeExcludePattern(raw: string): string;
 /** Normalizes, dedupes, and sorts a set of exclude patterns so equivalent input is identical. */
 declare function normalizeExcludes(patterns: readonly string[]): string[];

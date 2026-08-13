@@ -398,6 +398,7 @@ ${occurrence}`).slice(
 }
 
 // src/path-excludes.ts
+var EXCLUDE_REGEX_CACHE_LIMIT = 500;
 var EXCLUDE_REGEX_CACHE = /* @__PURE__ */ new Map();
 var WINDOWS_DRIVE_ABSOLUTE = /^[A-Za-z]:[\\/]/u;
 function assertSafeExcludePattern(pattern) {
@@ -406,7 +407,7 @@ function assertSafeExcludePattern(pattern) {
   }
 }
 function normalizeExcludePattern(raw) {
-  let normalized = raw.trim();
+  let normalized = raw.trim().replace(/\\/g, "/");
   while (normalized.startsWith("./")) normalized = normalized.slice(2);
   while (normalized.length > 1 && normalized.endsWith("/")) normalized = normalized.slice(0, -1);
   assertSafeExcludePattern(normalized);
@@ -452,6 +453,10 @@ function compileExcludePattern(pattern) {
   const cached = EXCLUDE_REGEX_CACHE.get(pattern);
   if (cached) return cached;
   const regex = new RegExp(`^${globToRegexSource(pattern)}(?:/.*)?$`);
+  if (EXCLUDE_REGEX_CACHE.size >= EXCLUDE_REGEX_CACHE_LIMIT) {
+    const oldest = EXCLUDE_REGEX_CACHE.keys().next().value;
+    if (oldest !== void 0) EXCLUDE_REGEX_CACHE.delete(oldest);
+  }
   EXCLUDE_REGEX_CACHE.set(pattern, regex);
   return regex;
 }
@@ -521,6 +526,15 @@ function parseNulPaths(value) {
   for (const path of paths) assertSafeRepositoryPath2(path);
   return [...new Set(paths)].sort();
 }
+var RUNTIME_EXCLUDE_PATHSPECS = [
+  ":(exclude).synergy/preview.runtime.json",
+  ":(exclude).synergy/preview.runtime.json.*",
+  ":(exclude).synergy/.preview.runtime.json.*.tmp",
+  ":(exclude).synergy/preview.start.lock",
+  ":(exclude).synergy/preview.start.lock.*",
+  ":(exclude).synergy/preview.pid",
+  ":(exclude).synergy/preview.log"
+];
 var PREVIEW_RUNTIME_PATHS = /* @__PURE__ */ new Set([
   ".synergy/preview.runtime.json",
   ".synergy/preview.runtime.json.mutation.lock",
@@ -538,11 +552,12 @@ function filterPatch(patch, excludes) {
     const files = parseUnifiedDiff(chunk);
     if (files.length === 0) return true;
     const isRuntimeMatch = (file) => isPreviewRuntimePath(file.path) || file.previousPath !== void 0 && isPreviewRuntimePath(file.previousPath);
-    const isUserExcludeMatch = (file) => isPathExcluded(file.path, excludes) || file.previousPath !== void 0 && isPathExcluded(file.previousPath, excludes);
+    const isUserExcludeMatch = (file) => isPathExcluded(file.path, excludes);
     if (files.some(isRuntimeMatch)) return false;
-    if (files.some(isUserExcludeMatch)) {
+    const userExcludedFiles = files.filter(isUserExcludeMatch);
+    if (userExcludedFiles.length > 0) {
       excludedAny = true;
-      for (const file of files) excludedPaths.add(file.path);
+      for (const file of userExcludedFiles) excludedPaths.add(file.path);
       return false;
     }
     return true;
@@ -794,20 +809,24 @@ function captureUnstaged(options) {
     "--no-ext-diff",
     "--binary",
     "--",
-    ":(exclude).synergy/preview.runtime.json",
-    ":(exclude).synergy/preview.runtime.json.*",
-    ":(exclude).synergy/.preview.runtime.json.*.tmp",
-    ":(exclude).synergy/preview.start.lock",
-    ":(exclude).synergy/preview.start.lock.*",
-    ":(exclude).synergy/preview.pid",
-    ":(exclude).synergy/preview.log",
+    ...RUNTIME_EXCLUDE_PATHSPECS,
     ...excludePathspecs(excludes)
   ]);
-  const {
-    patch: trackedPatch,
-    excludedAny: trackedExcludedAny,
-    excludedPaths: trackedExcludedPaths
-  } = filterPatch(trackedRaw, excludes);
+  const { patch: trackedPatch } = filterPatch(trackedRaw, excludes);
+  const groundTruthTrackedPaths = excludes.length > 0 ? parseNulPaths(
+    runCheckedBuffer(runner, options.root, "git", [
+      "diff",
+      "--name-only",
+      "-z",
+      "--no-ext-diff",
+      "--binary",
+      "--",
+      ...RUNTIME_EXCLUDE_PATHSPECS
+    ])
+  ) : [];
+  const trackedExcludedCount = groundTruthTrackedPaths.filter(
+    (path) => isPathExcluded(path, excludes)
+  ).length;
   const allUntrackedPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, "git", [
       "ls-files",
@@ -831,7 +850,7 @@ function captureUnstaged(options) {
     headSha: "",
     ...excludes.length > 0 ? { excludes } : {}
   };
-  const excludedEverything = (trackedExcludedAny || untrackedExcludedAny) && parseUnifiedDiff(patch).length === 0;
+  const excludedEverything = (trackedExcludedCount > 0 || untrackedExcludedAny) && parseUnifiedDiff(patch).length === 0;
   const eligiblePaths = assertCapturedPatch(patch, "unstaged", excludedEverything);
   const fingerprintContent = [
     patch,
@@ -846,7 +865,7 @@ function captureUnstaged(options) {
     fingerprintContent,
     fingerprint: sourceFingerprint(source, fingerprintContent),
     ...excludes.length > 0 ? {
-      excludedFileCount: trackedExcludedPaths.length + (allUntrackedPaths.length - untrackedPaths.length)
+      excludedFileCount: trackedExcludedCount + (allUntrackedPaths.length - untrackedPaths.length)
     } : {}
   };
 }
@@ -870,8 +889,22 @@ function captureScope(options) {
     ])
   ).filter((path) => !isPreviewRuntimePath(path));
   const paths = rawPaths.filter((path) => !isPathExcluded(path, excludes));
+  const groundTruthPaths = excludes.length > 0 ? parseNulPaths(
+    runCheckedBuffer(runner, options.root, "git", [
+      "ls-files",
+      "--cached",
+      "--others",
+      "--exclude-standard",
+      "-z",
+      "--",
+      ...patterns
+    ])
+  ).filter((path) => !isPreviewRuntimePath(path)) : rawPaths;
+  const excludedFileCount = groundTruthPaths.filter(
+    (path) => isPathExcluded(path, excludes)
+  ).length;
   if (paths.length === 0) {
-    const excludedEverything = excludes.length > 0 && rawPaths.length > paths.length;
+    const excludedEverything = excludes.length > 0 && excludedFileCount > 0;
     throw new Error(
       excludedEverything ? "Exclude patterns removed every scoped file; no review was created. Adjust --exclude and try again." : "Scope resolved to no eligible files. Choose a different path."
     );
@@ -892,7 +925,7 @@ function captureScope(options) {
     eligiblePaths: paths,
     fingerprintContent: captured.fingerprintContent,
     fingerprint: sourceFingerprint(source, captured.fingerprintContent),
-    ...excludes.length > 0 ? { excludedFileCount: rawPaths.length - paths.length } : {}
+    ...excludes.length > 0 ? { excludedFileCount } : {}
   };
 }
 function captureReviewSource(request) {
@@ -971,4 +1004,4 @@ export {
   resolveRepositoryRoot,
   repositoryName
 };
-//# sourceMappingURL=chunk-PMLQ7SYX.js.map
+//# sourceMappingURL=chunk-MRNQSRL4.js.map
