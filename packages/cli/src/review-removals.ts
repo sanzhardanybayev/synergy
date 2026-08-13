@@ -185,6 +185,12 @@ export function reResolveCarriedRemovals(
     }
     let lines: string[] | undefined;
     try {
+      // Defence in depth: a rationale persisted by a pre-fix build could still carry an unsafe
+      // `movedTo.path` (this guard runs at creation time via `assertCompleteRemovalCoverage`, but
+      // that only covers rationales written after the guard existed). Re-check it here too, so a
+      // stale unsafe path is dropped like any other unresolvable target rather than reaching
+      // `readTargetLines` with a path that could escape the repository root.
+      assertSafeEvidencePath(target.path);
       lines = io.readTargetLines(target.path);
     } catch {
       lines = undefined;
