@@ -8,6 +8,7 @@ import {
   type CommandRunner,
   captureReviewSource,
   captureScope,
+  captureStaged,
   captureUnstaged,
   compareReviewSourceFreshness,
   recaptureReviewSource,
@@ -79,9 +80,68 @@ function makeWildcardExcludeRepository(): string {
   return root;
 }
 
+function initRepository(prefix: string): string {
+  const root = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random()}`);
+  temporaryRoots.push(root);
+  mkdirSync(root, { recursive: true });
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'review@example.test'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 'Review Test'], { cwd: root });
+  return root;
+}
+
+function git(root: string, ...args: string[]): void {
+  execFileSync('git', args, { cwd: root });
+}
+
+// Module-scoped so every describe block below that creates a real repository (not just the one
+// named after it) gets its temp directory cleaned up.
+afterEach(() => {
+  for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
 describe('exclude semantics against real git (not the fixture runner)', () => {
-  afterEach(() => {
-    for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+  it('keeps a file renamed OUT of an excluded directory in the review (C1 regression)', () => {
+    const root = initRepository('synergy-review-exclude-rename-out');
+    mkdirSync(join(root, '.vouch'), { recursive: true });
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(join(root, '.vouch', 'r.ts'), 'export const r = 1;\n');
+    writeFileSync(join(root, 'src', 'keep.ts'), 'export const keep = 1;\n');
+    git(root, 'add', '.');
+    git(root, 'commit', '--quiet', '-m', 'base');
+
+    // Rename a file OUT of the excluded directory into reviewed source, and touch an unrelated
+    // reviewed file so the staged diff has more than one chunk (matching the reported repro).
+    git(root, 'mv', '.vouch/r.ts', 'src/moved.ts');
+    writeFileSync(join(root, 'src', 'keep.ts'), 'export const keep = 2;\n');
+    git(root, 'add', '.');
+
+    const result = captureStaged({ root, excludes: ['.vouch'] });
+
+    // The destination now lives in reviewed source and was never itself named by the exclude
+    // pattern - it must survive. Gating on `previousPath` too (the pre-fix behavior) silently
+    // dropped it because the file's OLD path matched `.vouch`.
+    expect(result.eligiblePaths).toEqual(['src/keep.ts', 'src/moved.ts']);
+    expect(result.patch).toContain('src/moved.ts');
+  });
+
+  it('still drops a file renamed INTO an excluded directory', () => {
+    const root = initRepository('synergy-review-exclude-rename-in');
+    mkdirSync(join(root, 'src'), { recursive: true });
+    mkdirSync(join(root, '.vouch'), { recursive: true });
+    writeFileSync(join(root, 'src', 'move-me.ts'), 'export const m = 1;\n');
+    writeFileSync(join(root, 'src', 'keep.ts'), 'export const keep = 1;\n');
+    git(root, 'add', '.');
+    git(root, 'commit', '--quiet', '-m', 'base');
+
+    git(root, 'mv', 'src/move-me.ts', '.vouch/moved.ts');
+    writeFileSync(join(root, 'src', 'keep.ts'), 'export const keep = 2;\n');
+    git(root, 'add', '.');
+
+    const result = captureStaged({ root, excludes: ['.vouch'] });
+
+    expect(result.eligiblePaths).toEqual(['src/keep.ts']);
+    expect(result.patch).not.toContain('.vouch');
   });
 
   it('gives captureUnstaged the same *.log answer for tracked and untracked nested matches', () => {
@@ -178,17 +238,26 @@ describe('excludes', () => {
     ).toThrow(/exclud/i);
   });
 
-  it('reports precisely when an exclude pattern consumed the entire scope', () => {
-    const commandRunner = runner({
-      'git rev-parse HEAD': 'abc123\n',
-      'git ls-files --cached --others --exclude-standard -z -- src': 'src/example.log\0',
-    });
+  // NOTE: this used to run against a fixture runner with a WILDCARD pattern (`**/*.log`). That
+  // pattern never becomes a git pathspec (see `excludePathspecs`), so the fixture only exercised
+  // the JS-filter path. A wildcard-FREE pattern - the case that actually matters, since it takes
+  // the pathspec route and reached `captureScope`'s pathspec-optimized `ls-files` call before the
+  // JS filter ever runs - would have changed the fixture's command key and never matched,
+  // silently passing regardless of whether the underlying diagnosis logic was correct (I5). A
+  // real repository exercises the actual pathspec route.
+  it('reports precisely when a wildcard-free exclude pattern consumed the entire scope', () => {
+    const root = initRepository('synergy-review-exclude-scope-everything');
+    mkdirSync(join(root, '.vouch'), { recursive: true });
+    writeFileSync(join(root, '.vouch', 'a.md'), 'a\n');
+    git(root, 'add', '.');
+    git(root, 'commit', '--quiet', '-m', 'base');
+
     expect(() =>
-      captureReviewSource({
-        root: '/repo',
-        runner: commandRunner,
-        readFile: () => 'content\n',
-        source: { kind: 'scope', patterns: ['src'], excludes: ['**/*.log'] },
+      captureScope({
+        root,
+        patterns: ['.vouch'],
+        excludes: ['.vouch'],
+        readFile: () => 'a\n',
       }),
     ).toThrow(/exclud/i);
   });
@@ -214,6 +283,11 @@ describe('excludes', () => {
         if (commandKey === 'git rev-parse HEAD') {
           return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
         }
+        if (commandKey.startsWith('git diff --name-only -z --no-ext-diff --binary --')) {
+          // The pathspec-free ground-truth enumeration `captureUnstaged` uses to compute
+          // `excludedFileCount` accurately (I1) - no tracked files changed in this fixture.
+          return { exitCode: 0, stdout: '', stderr: '' };
+        }
         if (commandKey.startsWith('git diff --no-ext-diff --binary --')) {
           expect(commandKey).toContain(':(exclude,literal).vouch');
           return { exitCode: 0, stdout: '', stderr: '' };
@@ -232,6 +306,7 @@ describe('excludes', () => {
     });
     expect(captured.eligiblePaths).toEqual(['src/keep.ts']);
     expect(captured.patch).not.toContain('.vouch');
+    expect(captured.excludedFileCount).toBe(1);
   });
 
   it('produces a different fingerprint and source identity for different excludes', () => {
@@ -271,6 +346,63 @@ describe('excludes', () => {
     });
     expect(a.fingerprint).toBe(b.fingerprint);
     expect(a.source).toEqual(b.source);
+  });
+});
+
+describe('excludedFileCount accuracy against real git (I1 regression)', () => {
+  it('counts every unstaged file a pathspec removed, tracked and untracked alike', () => {
+    const root = initRepository('synergy-review-exclude-unstaged-count');
+    mkdirSync(join(root, '.vouch'), { recursive: true });
+    writeFileSync(join(root, '.vouch', 'tracked.md'), 'v1\n');
+    writeFileSync(join(root, 'src.ts'), 'export const v = 1;\n');
+    git(root, 'add', '.');
+    git(root, 'commit', '--quiet', '-m', 'base');
+
+    // One tracked-modified file and one untracked file under the excluded directory: the
+    // wildcard-free `.vouch` pattern removes the tracked one at the git pathspec level, before
+    // `filterPatch` ever sees it, so a count derived only from the (already-filtered) patch
+    // undercounts by exactly the tracked half.
+    writeFileSync(join(root, '.vouch', 'tracked.md'), 'v2\n');
+    writeFileSync(join(root, '.vouch', 'untracked.md'), 'new\n');
+    writeFileSync(join(root, 'src.ts'), 'export const v = 2;\n');
+
+    const result = captureUnstaged({ root, excludes: ['.vouch'] });
+
+    expect(result.eligiblePaths).toEqual(['src.ts']);
+    expect(result.excludedFileCount).toBe(2);
+  });
+
+  it('counts a scoped file a wildcard-free pathspec removed, not just JS-filtered survivors', () => {
+    const root = initRepository('synergy-review-exclude-scope-count');
+    mkdirSync(join(root, '.vouch'), { recursive: true });
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(join(root, '.vouch', 'a.md'), 'a\n');
+    writeFileSync(join(root, 'src', 'keep.ts'), 'export const keep = 1;\n');
+    git(root, 'add', '.');
+    git(root, 'commit', '--quiet', '-m', 'base');
+
+    const result = captureScope({
+      root,
+      patterns: ['.vouch', 'src'],
+      excludes: ['.vouch'],
+      readFile: () => 'export const keep = 1;\n',
+    });
+
+    expect(result.eligiblePaths).toEqual(['src/keep.ts']);
+    expect(result.excludedFileCount).toBe(1);
+  });
+});
+
+describe('"excludes removed everything" diagnosis against real git (I2 regression)', () => {
+  it('names --exclude as the cause when only excluded unstaged changes exist', () => {
+    const root = initRepository('synergy-review-exclude-unstaged-everything');
+    mkdirSync(join(root, '.vouch'), { recursive: true });
+    writeFileSync(join(root, '.vouch', 'r.ts'), 'v1\n');
+    git(root, 'add', '.');
+    git(root, 'commit', '--quiet', '-m', 'base');
+    writeFileSync(join(root, '.vouch', 'r.ts'), 'v2\n');
+
+    expect(() => captureUnstaged({ root, excludes: ['.vouch'] })).toThrow(/exclud/i);
   });
 });
 

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -58,44 +59,15 @@ function createRequest(root: string): CreateReviewRequest {
   return { root, source: { kind: 'staged' }, runner: createRunner() };
 }
 
-const PATCH_WITH_EXCLUDED_FILE = [
-  'diff --git a/.vouch/report.md b/.vouch/report.md',
-  'index 1111111..2222222 100644',
-  '--- a/.vouch/report.md',
-  '+++ b/.vouch/report.md',
-  '@@ -1 +1 @@',
-  '-old',
-  '+new',
-  '',
-  'diff --git a/src/example.ts b/src/example.ts',
-  'index 1111111..2222222 100644',
-  '--- a/src/example.ts',
-  '+++ b/src/example.ts',
-  '@@ -1 +1 @@',
-  '-export const value = 1;',
-  '+export const value = 2;',
-  '',
-].join('\n');
+function git(root: string, ...args: string[]): void {
+  execFileSync('git', args, { cwd: root });
+}
 
-/** Same fixture command surface as `createRunner`, but the staged diff carries a `.vouch/`
- * file alongside `src/example.ts` so exclude filtering has something to drop. */
-function excludeRunner(): CommandRunner {
-  return {
-    run(command, args, options): CommandResult {
-      const key = [command, ...args].join(' ');
-      if (key === 'git diff --cached --no-ext-diff --binary') {
-        return { exitCode: 0, stdout: PATCH_WITH_EXCLUDED_FILE, stderr: '' };
-      }
-      if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
-      if (key === 'git rev-parse --show-toplevel') {
-        return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
-      }
-      if (key === 'git config --get remote.origin.url') {
-        return { exitCode: 1, stdout: '', stderr: '' };
-      }
-      throw new Error(`missing fixture for ${key}`);
-    },
-  };
+function createRealRepository(root: string): void {
+  mkdirSync(root, { recursive: true });
+  git(root, 'init', '--quiet');
+  git(root, 'config', 'user.email', 'synergy@example.test');
+  git(root, 'config', 'user.name', 'Synergy Test');
 }
 
 /** Blanket "dead-code" rationale for every derived removal run, sufficient to satisfy the
@@ -2921,17 +2893,35 @@ describe('review lifecycle actions', () => {
       }
     });
 
+    // Previously fixture-based with a single excluded file, which passed regardless of whether
+    // `excludedFileCount` was actually counted correctly - staged capture happens to skip git
+    // pathspecs entirely (see path-excludes.ts / CLAUDE.md), so a fixture with exactly one
+    // excluded chunk cannot distinguish "counts every excluded file" from "always reports 1"
+    // (I5). A real repository with TWO excluded files under two different exclude patterns
+    // actually exercises the count.
     it('echoes active exclusions in create and status results and reports what was dropped', () => {
       const root = join(tmpdir(), `synergy-review-excludes-present-${Date.now()}`);
-      mkdirSync(root, { recursive: true });
       try {
+        createRealRepository(root);
+        mkdirSync(join(root, '.vouch'), { recursive: true });
+        mkdirSync(join(root, 'dist'), { recursive: true });
+        writeFileSync(join(root, '.vouch', 'report.md'), 'v1\n');
+        writeFileSync(join(root, 'dist', 'bundle.js'), 'v1\n');
+        writeFileSync(join(root, 'src.ts'), 'export const value = 1;\n');
+        git(root, 'add', '.');
+        git(root, 'commit', '--quiet', '-m', 'base');
+
+        writeFileSync(join(root, '.vouch', 'report.md'), 'v2\n');
+        writeFileSync(join(root, 'dist', 'bundle.js'), 'v2\n');
+        writeFileSync(join(root, 'src.ts'), 'export const value = 2;\n');
+        git(root, 'add', '.');
+
         const created = createOrResumeReview({
           root,
-          source: { kind: 'staged', excludes: ['.vouch'] },
-          runner: excludeRunner(),
+          source: { kind: 'staged', excludes: ['.vouch', 'dist'] },
         });
-        expect(created.excludes).toEqual(['.vouch']);
-        expect(created.excludedFileCount).toBe(1);
+        expect(created.excludes).toEqual(['.vouch', 'dist']);
+        expect(created.excludedFileCount).toBe(2);
 
         const store = createReviewStore(root);
         const bundle = store.readBundle(
@@ -2939,18 +2929,14 @@ describe('review lifecycle actions', () => {
           created.reference.revisionId,
         );
         if (bundle.snapshot.kind !== 'diff') throw new Error('expected a diff snapshot');
-        expect(bundle.snapshot.files.map((file) => file.path)).toEqual(['src/example.ts']);
-        expect(bundle.snapshot.source.excludes).toEqual(['.vouch']);
+        expect(bundle.snapshot.files.map((file) => file.path)).toEqual(['src.ts']);
+        expect(bundle.snapshot.source.excludes).toEqual(['.vouch', 'dist']);
 
-        const status = getReviewStatus({
-          root,
-          reference: created.reference,
-          runner: excludeRunner(),
-        });
-        expect(status.excludes).toEqual(['.vouch']);
-        expect(
-          printReviewStatus({ root, reference: created.reference, runner: excludeRunner() }),
-        ).toContain('excludes: .vouch');
+        const status = getReviewStatus({ root, reference: created.reference });
+        expect(status.excludes).toEqual(['.vouch', 'dist']);
+        expect(printReviewStatus({ root, reference: created.reference })).toContain(
+          'excludes: .vouch, dist',
+        );
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

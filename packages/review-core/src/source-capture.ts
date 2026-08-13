@@ -146,6 +146,19 @@ interface RepositoryEntry {
   mode: number;
 }
 
+/** Pathspecs that keep Synergy's own runtime files out of a tracked-diff query, shared by
+ * `captureUnstaged`'s optimized query and its pathspec-free ground-truth query for
+ * `excludedFileCount` (see that function for why a second query is needed). */
+const RUNTIME_EXCLUDE_PATHSPECS: readonly string[] = [
+  ':(exclude).synergy/preview.runtime.json',
+  ':(exclude).synergy/preview.runtime.json.*',
+  ':(exclude).synergy/.preview.runtime.json.*.tmp',
+  ':(exclude).synergy/preview.start.lock',
+  ':(exclude).synergy/preview.start.lock.*',
+  ':(exclude).synergy/preview.pid',
+  ':(exclude).synergy/preview.log',
+];
+
 const PREVIEW_RUNTIME_PATHS = new Set<string>([
   '.synergy/preview.runtime.json',
   '.synergy/preview.runtime.json.mutation.lock',
@@ -176,9 +189,17 @@ interface FilteredPatch {
  * Drops whole-file patch chunks for Synergy's own runtime files and, when `excludes` is
  * non-empty, for any user-excluded path - in one pass so each chunk is parsed once. This is
  * the only enforcement mechanism available for PR capture, because `gh pr diff` accepts no
- * pathspec; other capture paths also pass `excludes` as git pathspecs (see `excludePathspecs`)
- * so excluded files are never read off disk in the first place, with this filter remaining the
- * correctness backstop.
+ * pathspec; unstaged and scope captures also pass `excludes` as git pathspecs (see
+ * `excludePathspecs`) so excluded files are never read off disk in the first place, with this
+ * filter remaining the correctness backstop. Staged capture relies on this filter alone.
+ *
+ * A git rename emits one chunk naming both `previousPath` (old location) and `path` (new
+ * location). Runtime-path matching checks both, because Synergy's own runtime files must never
+ * be promoted into reviewed source no matter which side of a rename they land on. User excludes
+ * check `path` ONLY: a rename's destination is what now lives in the tree, so a file renamed
+ * OUT of an excluded directory belongs in the review (the source it moved from is irrelevant),
+ * while a file renamed INTO an excluded directory is correctly dropped. Gating on either side
+ * (the pre-fix behavior) silently deleted renamed-out files from the capture entirely.
  */
 function filterPatch(patch: string, excludes: readonly string[]): FilteredPatch {
   let excludedAny = false;
@@ -192,12 +213,12 @@ function filterPatch(patch: string, excludes: readonly string[]): FilteredPatch 
         isPreviewRuntimePath(file.path) ||
         (file.previousPath !== undefined && isPreviewRuntimePath(file.previousPath));
       const isUserExcludeMatch = (file: (typeof files)[number]) =>
-        isPathExcluded(file.path, excludes) ||
-        (file.previousPath !== undefined && isPathExcluded(file.previousPath, excludes));
+        isPathExcluded(file.path, excludes);
       if (files.some(isRuntimeMatch)) return false;
-      if (files.some(isUserExcludeMatch)) {
+      const userExcludedFiles = files.filter(isUserExcludeMatch);
+      if (userExcludedFiles.length > 0) {
         excludedAny = true;
-        for (const file of files) excludedPaths.add(file.path);
+        for (const file of userExcludedFiles) excludedPaths.add(file.path);
         return false;
       }
       return true;
@@ -500,20 +521,33 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
     '--no-ext-diff',
     '--binary',
     '--',
-    ':(exclude).synergy/preview.runtime.json',
-    ':(exclude).synergy/preview.runtime.json.*',
-    ':(exclude).synergy/.preview.runtime.json.*.tmp',
-    ':(exclude).synergy/preview.start.lock',
-    ':(exclude).synergy/preview.start.lock.*',
-    ':(exclude).synergy/preview.pid',
-    ':(exclude).synergy/preview.log',
+    ...RUNTIME_EXCLUDE_PATHSPECS,
     ...excludePathspecs(excludes),
   ]);
-  const {
-    patch: trackedPatch,
-    excludedAny: trackedExcludedAny,
-    excludedPaths: trackedExcludedPaths,
-  } = filterPatch(trackedRaw, excludes);
+  const { patch: trackedPatch } = filterPatch(trackedRaw, excludes);
+  // `excludedFileCount` cannot be derived from `trackedRaw` above: when a wildcard-free pattern
+  // is in play, `excludePathspecs` already removed those files at the git level, so they never
+  // reach `filterPatch` to be counted. Re-enumerate tracked-changed paths WITHOUT the user
+  // pathspecs (an accepted extra call, only made when excludes are configured) and count matches
+  // with the same JS matcher used everywhere else, so the count - and the "excludes removed
+  // everything" diagnosis below - are exact regardless of which layer actually did the dropping.
+  const groundTruthTrackedPaths =
+    excludes.length > 0
+      ? parseNulPaths(
+          runCheckedBuffer(runner, options.root, 'git', [
+            'diff',
+            '--name-only',
+            '-z',
+            '--no-ext-diff',
+            '--binary',
+            '--',
+            ...RUNTIME_EXCLUDE_PATHSPECS,
+          ]),
+        )
+      : [];
+  const trackedExcludedCount = groundTruthTrackedPaths.filter((path) =>
+    isPathExcluded(path, excludes),
+  ).length;
   const allUntrackedPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, 'git', [
       'ls-files',
@@ -538,7 +572,7 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
     ...(excludes.length > 0 ? { excludes } : {}),
   };
   const excludedEverything =
-    (trackedExcludedAny || untrackedExcludedAny) && parseUnifiedDiff(patch).length === 0;
+    (trackedExcludedCount > 0 || untrackedExcludedAny) && parseUnifiedDiff(patch).length === 0;
   const eligiblePaths = assertCapturedPatch(patch, 'unstaged', excludedEverything);
   const fingerprintContent = [
     patch,
@@ -556,7 +590,7 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
     ...(excludes.length > 0
       ? {
           excludedFileCount:
-            trackedExcludedPaths.length + (allUntrackedPaths.length - untrackedPaths.length),
+            trackedExcludedCount + (allUntrackedPaths.length - untrackedPaths.length),
         }
       : {}),
   };
@@ -582,8 +616,31 @@ export function captureScope(options: CaptureScopeOptions): CapturedReviewSource
     ]),
   ).filter((path) => !isPreviewRuntimePath(path));
   const paths = rawPaths.filter((path) => !isPathExcluded(path, excludes));
+  // Ground truth for `excludedFileCount` and the "excludes removed everything" diagnosis below:
+  // `rawPaths` above already ran through `excludePathspecs`, so a wildcard-free pattern makes
+  // matching files vanish before they ever reach the JS filter, undercounting (often to zero).
+  // Re-list the same scope WITHOUT the user pathspecs (an accepted extra `ls-files` call, only
+  // made when excludes are configured) and count matches with the same JS matcher used
+  // everywhere else.
+  const groundTruthPaths =
+    excludes.length > 0
+      ? parseNulPaths(
+          runCheckedBuffer(runner, options.root, 'git', [
+            'ls-files',
+            '--cached',
+            '--others',
+            '--exclude-standard',
+            '-z',
+            '--',
+            ...patterns,
+          ]),
+        ).filter((path) => !isPreviewRuntimePath(path))
+      : rawPaths;
+  const excludedFileCount = groundTruthPaths.filter((path) =>
+    isPathExcluded(path, excludes),
+  ).length;
   if (paths.length === 0) {
-    const excludedEverything = excludes.length > 0 && rawPaths.length > paths.length;
+    const excludedEverything = excludes.length > 0 && excludedFileCount > 0;
     throw new Error(
       excludedEverything
         ? 'Exclude patterns removed every scoped file; no review was created. Adjust --exclude and try again.'
@@ -606,7 +663,7 @@ export function captureScope(options: CaptureScopeOptions): CapturedReviewSource
     eligiblePaths: paths,
     fingerprintContent: captured.fingerprintContent,
     fingerprint: sourceFingerprint(source, captured.fingerprintContent),
-    ...(excludes.length > 0 ? { excludedFileCount: rawPaths.length - paths.length } : {}),
+    ...(excludes.length > 0 ? { excludedFileCount } : {}),
   };
 }
 
