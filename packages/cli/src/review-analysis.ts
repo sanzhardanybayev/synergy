@@ -328,6 +328,7 @@ const REMOVAL_REASONS = new Set<RemovalReason>([
   'dead-code',
   'obsolete',
   'extracted-to-dep',
+  'unclear',
 ]);
 
 function parseRemovalRunRef(value: unknown, path: string): RemovalRunRef {

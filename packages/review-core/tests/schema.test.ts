@@ -87,6 +87,36 @@ describe('removal rationale schema', () => {
     expect(() => assertReviewInsights(baseInsights)).not.toThrow();
   });
 
+  it('accepts an unclear rationale with no movedTo', () => {
+    const value = {
+      ...baseInsights,
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'a.ts', start: 41, end: 43 },
+          reason: 'unclear',
+          description: 'Removed alongside the auth refactor; could not confirm where it landed.',
+        },
+      ],
+    };
+    expect(() => assertReviewInsights(value)).not.toThrow();
+  });
+
+  it('still accepts a persisted revision written before unclear existed (six-reason payload)', () => {
+    const value = {
+      ...baseInsights,
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'a.ts', start: 41, end: 43 },
+          reason: 'obsolete',
+          description: 'Superseded by the new config loader.',
+        },
+      ],
+    };
+    expect(() => assertReviewInsights(value)).not.toThrow();
+  });
+
   it('rejects an unknown reason', () => {
     const value = {
       ...baseInsights,

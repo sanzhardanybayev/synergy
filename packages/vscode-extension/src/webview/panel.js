@@ -84,6 +84,7 @@ const REMOVAL_REASON_LABEL = {
   'dead-code': 'dead-code',
   obsolete: 'obsolete',
   'extracted-to-dep': 'extracted to dep',
+  unclear: 'unclear',
 };
 
 /**

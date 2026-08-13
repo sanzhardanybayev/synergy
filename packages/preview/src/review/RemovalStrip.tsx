@@ -18,6 +18,7 @@ const REASON_LABEL: Record<string, string> = {
   'dead-code': 'dead-code',
   obsolete: 'obsolete',
   'extracted-to-dep': 'extracted to dep',
+  unclear: 'unclear',
 };
 
 interface ExcerptPeekProps {

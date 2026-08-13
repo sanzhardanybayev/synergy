@@ -316,7 +316,9 @@ const removalRationaleSchema = {
   properties: {
     reviewItemId: nonEmptyString,
     run: removalRunRefSchema,
-    reason: { enum: ['moved', 'merged', 'replaced', 'dead-code', 'obsolete', 'extracted-to-dep'] },
+    reason: {
+      enum: ['moved', 'merged', 'replaced', 'dead-code', 'obsolete', 'extracted-to-dep', 'unclear'],
+    },
     description: nonEmptyString,
     movedTo: removalRunRefSchema,
     movedToExcerpt: {

@@ -698,8 +698,10 @@ input[type="checkbox"] {
 
 /* Two-tier coloring is intentional, not a placeholder: moved/merged are hued because the logic
  * still exists somewhere and can be navigated to; dead-code/obsolete/extracted-to-dep stay
- * neutral (the default `.removal-cat` border/text) because nothing survives to jump to. That
- * split IS the signal - don't give all six reasons their own color. See the matching comment in
+ * neutral (the default `.removal-cat` border/text) because nothing survives to jump to. unclear
+ * also stays neutral - it isn't a claim that nothing survives, only that the agent could not
+ * verify a destination, so it is not navigable either and gets no hue of its own. That split IS
+ * the signal - don't give all seven reasons their own color. See the matching comment in
  * packages/preview/src/review/review.css. */
 .removal-cat-moved,
 .removal-cat-merged {

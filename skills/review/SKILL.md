@@ -242,14 +242,21 @@ for unstaged and scope) and confirming the logic is actually there. `dead-code`,
 `extracted-to-dep` are STRONGER claims than a relocation - each asserts the removed code went
 nowhere - so they are never a fallback for "I couldn't verify where it went." If inspection does
 not confirm a destination, re-investigate (search the diff, the destination file, the commit
-history) before concluding anything. If you still cannot verify it after re-investigating, do not
-assert a terminal reason at all: pick the reason that best fits what you did observe and say
-plainly in the `description` that the destination could not be confirmed, so a human reviewer
-knows to check it themselves rather than trusting a manufactured label. `analysis-set`
-rejects the whole payload when a run is uncovered, when a run has two rationales, when a claimed
-target does not resolve, or when the reason and `movedTo` disagree. `movedTo` may span at most 40
-lines. Never author `movedToExcerpt` - it is derived and persisted by the CLI at `analysis-set`
-time, and the schema rejects it on an authored payload. Scope reviews have no removal runs.
+history) before concluding anything. If you still cannot verify it after re-investigating, use
+`unclear` - it admits "this code is gone and I could not determine where it went" without
+claiming either a destination or that nothing survives. It is a last resort after honest effort,
+not a cheap default: reach for `unclear` only once re-investigation has genuinely failed. Like
+the terminal reasons, `unclear` forbids `movedTo` - if you could name a destination, it would not
+be unclear. When you do use it, say in the `description` what you did observe, e.g. "removed
+alongside the auth refactor; could not confirm where it landed" - not just "unclear" restated -
+so a human reviewer knows what you already ruled out. `analysis-set` rejects the whole payload
+when a run is uncovered, when a run has two rationales, when a claimed target does not resolve,
+or when the reason and `movedTo` disagree. `movedTo` may span at most 40 lines and must land
+entirely on ADDED lines to resolve as an in-review jump; a span that includes unchanged context
+lines silently degrades to an excerpt (the content still shows, but the jump affordance is lost),
+so target only the lines that were actually added. Never author `movedToExcerpt` - it is derived
+and persisted by the CLI at `analysis-set` time, and the schema rejects it on an authored payload.
+Scope reviews have no removal runs.
 
 For every file that appears in the review, also emit a `files[]` entry:
 `{ "path": "<file path>", "description": "<one broad sentence or two on what changed in this file and why>", "confidence": "high" | "medium" | "low" }`.

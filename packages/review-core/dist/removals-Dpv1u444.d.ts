@@ -191,7 +191,7 @@ interface ReviewFileInsight {
     description: string;
     confidence: ReviewInsightConfidence;
 }
-type RemovalReason = 'moved' | 'merged' | 'replaced' | 'dead-code' | 'obsolete' | 'extracted-to-dep';
+type RemovalReason = 'moved' | 'merged' | 'replaced' | 'dead-code' | 'obsolete' | 'extracted-to-dep' | 'unclear';
 /** Reasons that assert the logic still exists somewhere and therefore require a target. */
 declare const RELOCATING_REMOVAL_REASONS: readonly RemovalReason[];
 interface RemovalRunRef {

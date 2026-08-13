@@ -321,6 +321,28 @@ describe('renderRemovalStrip', () => {
     expect(node?.querySelector('.removal-open-file')).toBeNull();
   });
 
+  it('renders an unclear rationale as an unresolved, unhued badge with no jump chip', () => {
+    const unclearStrip = {
+      run: strip.run,
+      rationale: {
+        reviewItemId: 'item-1',
+        run: { path: 'a.ts', start: 41, end: 43 },
+        reason: 'unclear' as const,
+        description: 'Removed alongside the auth refactor; could not confirm where it landed.',
+      },
+      target: { kind: 'unresolved' as const },
+    };
+    const node = renderRemovalStrip(unclearStrip, {
+      onJumpToReviewItem: () => {},
+      onOpenFile: () => {},
+    });
+    const cat = node?.querySelector('.removal-cat');
+    expect(cat?.textContent).toBe('unclear');
+    expect(cat?.classList.contains('removal-cat-unclear')).toBe(true);
+    expect(node?.querySelector('.removal-jump')).toBeNull();
+    expect(node?.textContent).toContain('could not confirm where it landed');
+  });
+
   it('renders a peek and an open-in-editor action instead of a jump for an out-of-review target', () => {
     const onOpenFile = vi.fn();
     const excerptStrip = {

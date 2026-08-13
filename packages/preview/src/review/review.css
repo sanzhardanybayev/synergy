@@ -1545,7 +1545,9 @@ div.review-index__card {
 /* Two-tier coloring is intentional, not a placeholder: moved/merged/replaced are hued because the
    logic still exists somewhere and can be navigated to; dead-code/obsolete/extracted-to-dep stay
    neutral (the default `.review-removal__cat` border/text) because nothing survives to jump to.
-   That split IS the signal - don't give all six reasons their own color. */
+   unclear also stays neutral - it isn't a claim that nothing survives, only that the agent could
+   not verify a destination, so it is not navigable either and gets no hue of its own.
+   That split IS the signal - don't give all seven reasons their own color. */
 .review-removal__cat--moved,
 .review-removal__cat--merged {
   color: var(--syn-status-shipped);

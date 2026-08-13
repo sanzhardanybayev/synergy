@@ -358,6 +358,26 @@ describe('parseReviewAnalysisInput', () => {
     expect(parsed.removals).toHaveLength(1);
   });
 
+  it('parses an unclear removal reason', () => {
+    const parsed = parseReviewAnalysisInput({
+      groups: [{ id: 'g1', label: 'G', reviewItemIds: ['item-1'] }],
+      items: [
+        { reviewItemId: 'item-1', description: 'd', confidence: 'high', evidencePaths: ['a.ts'] },
+      ],
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'a.ts', start: 41, end: 43 },
+          reason: 'unclear',
+          description: 'Removed alongside the auth refactor; could not confirm where it landed.',
+        },
+      ],
+    });
+    if (parsed.kind !== 'diff') throw new Error('expected diff analysis');
+    expect(parsed.removals).toHaveLength(1);
+    expect(parsed.removals?.[0]?.reason).toBe('unclear');
+  });
+
   it('rejects an unknown key inside a removal', () => {
     expect(() =>
       parseReviewAnalysisInput({
@@ -399,6 +419,7 @@ describe('parseReviewAnalysisInput', () => {
       'dead-code',
       'obsolete',
       'extracted-to-dep',
+      'unclear',
     ]);
     expect(schema.$defs.removalRationale.required).toEqual([
       'reviewItemId',

@@ -106,6 +106,26 @@ describe('assertCompleteRemovalCoverage', () => {
     expect(() => assertCompleteRemovalCoverage(snapshot, extra)).toThrow(/must not carry movedTo/);
   });
 
+  it('accepts an unclear reason with no movedTo', () => {
+    const unclear = [
+      covered[0]!,
+      {
+        ...covered[1]!,
+        movedTo: undefined,
+        reason: 'unclear' as const,
+        description: 'Removed alongside the auth refactor; could not confirm where it landed.',
+      },
+    ];
+    expect(() => assertCompleteRemovalCoverage(snapshot, unclear)).not.toThrow();
+  });
+
+  it('rejects an unclear reason that carries movedTo', () => {
+    const unclearWithTarget = [covered[0]!, { ...covered[1]!, reason: 'unclear' as const }];
+    expect(() => assertCompleteRemovalCoverage(snapshot, unclearWithTarget)).toThrow(
+      /must not carry movedTo/,
+    );
+  });
+
   it('rejects a rationale naming a review item that does not own the matched run', () => {
     const wrongOwner = [{ ...covered[0]!, reviewItemId: 'not-the-owner' }, covered[1]!];
     expect(() => assertCompleteRemovalCoverage(snapshot, wrongOwner)).toThrow(/belongs to/);

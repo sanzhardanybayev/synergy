@@ -209,7 +209,8 @@ export type RemovalReason =
   | 'replaced'
   | 'dead-code'
   | 'obsolete'
-  | 'extracted-to-dep';
+  | 'extracted-to-dep'
+  | 'unclear';
 
 /** Reasons that assert the logic still exists somewhere and therefore require a target. */
 export const RELOCATING_REMOVAL_REASONS: readonly RemovalReason[] = ['moved', 'merged', 'replaced'];

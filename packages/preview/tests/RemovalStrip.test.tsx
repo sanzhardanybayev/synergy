@@ -63,6 +63,23 @@ describe('RemovalStrip', () => {
     expect(screen.getByText('if (x) {')).toBeTruthy();
   });
 
+  it('renders an unclear rationale as an unresolved, unhued badge with no jump chip', () => {
+    const unclearStrip = {
+      run: strip.run,
+      rationale: {
+        reviewItemId: 'item-1',
+        run: { path: 'a.ts', start: 41, end: 43 },
+        reason: 'unclear' as const,
+        description: 'Removed alongside the auth refactor; could not confirm where it landed.',
+      },
+      target: { kind: 'unresolved' as const },
+    };
+    render(<RemovalStrip strip={unclearStrip} expanded onToggle={() => {}} onJump={() => {}} />);
+    expect(screen.getByText('unclear')).toHaveClass('review-removal__cat--unclear');
+    expect(screen.queryByRole('button', { name: /→/ })).toBeNull();
+    expect(screen.getByText(/could not confirm where it landed/)).toBeTruthy();
+  });
+
   it('renders nothing when a run has no rationale', () => {
     const { container } = render(
       <RemovalStrip

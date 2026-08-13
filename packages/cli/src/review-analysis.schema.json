@@ -160,7 +160,15 @@
         "reviewItemId": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "run": { "$ref": "#/$defs/removalRunRef" },
         "reason": {
-          "enum": ["moved", "merged", "replaced", "dead-code", "obsolete", "extracted-to-dep"]
+          "enum": [
+            "moved",
+            "merged",
+            "replaced",
+            "dead-code",
+            "obsolete",
+            "extracted-to-dep",
+            "unclear"
+          ]
         },
         "description": { "type": "string", "minLength": 1, "maxLength": 600, "pattern": "\\S" },
         "movedTo": { "$ref": "#/$defs/removalRunRef" }

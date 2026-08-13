@@ -25,6 +25,12 @@ const rows: ReviewDiffLineRow[] = [
   { id: 'r5', kind: 'add', oldLine: null, newLine: 42, text: 'f' },
 ];
 
+describe('RELOCATING_REMOVAL_REASONS', () => {
+  it('does not include unclear - it forbids movedTo like the terminal reasons', () => {
+    expect(RELOCATING_REMOVAL_REASONS).not.toContain('unclear');
+  });
+});
+
 describe('deriveRemovalRuns', () => {
   it('splits contiguous removed rows into separate runs', () => {
     expect(deriveRemovalRuns(rows)).toEqual([

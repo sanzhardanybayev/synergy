@@ -2039,7 +2039,8 @@ var REMOVAL_REASONS = /* @__PURE__ */ new Set([
   "replaced",
   "dead-code",
   "obsolete",
-  "extracted-to-dep"
+  "extracted-to-dep",
+  "unclear"
 ]);
 function parseRemovalRunRef(value, path) {
   assertRecord(value, path);
@@ -2327,6 +2328,7 @@ function reResolveCarriedRemovals(snapshot, removals, io) {
     }
     let lines;
     try {
+      assertSafeEvidencePath(target.path);
       lines = io.readTargetLines(target.path);
     } catch {
       lines = void 0;
