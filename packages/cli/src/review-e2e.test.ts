@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   type ProposedCodeSection,
+  type RemovalRationale,
   type ReviewRef,
   type ReviewSnapshot,
   createQuestionQueue,
   createReviewStore,
   deriveReviewReadiness,
+  deriveSnapshotRemovalRuns,
   resolveReviewItemContext,
 } from '@synergy/review-core';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -49,6 +51,18 @@ function reviewItemIdContaining(snapshot: ReviewSnapshot, text: string): string 
   return hunk.reviewItemId;
 }
 
+/** Blanket "dead-code" rationale for every derived removal run in the snapshot, sufficient to
+ * satisfy the removal-coverage gate in tests that are not themselves exercising removal
+ * semantics. */
+function removalsForSnapshot(snapshot: ReviewSnapshot): RemovalRationale[] {
+  return deriveSnapshotRemovalRuns(snapshot).map((run) => ({
+    reviewItemId: run.reviewItemId,
+    run: { path: run.path, start: run.start, end: run.end },
+    reason: 'dead-code',
+    description: 'Removed as part of this change.',
+  }));
+}
+
 async function applyCompleteDiffAnalysis(root: string, reference: ReviewRef): Promise<void> {
   const bundle = createReviewStore(root).readBundle(reference.workspaceId, reference.revisionId);
   await applyReviewAnalysis({
@@ -71,6 +85,7 @@ async function applyCompleteDiffAnalysis(root: string, reference: ReviewRef): Pr
         confidence: 'high' as const,
         evidencePaths: [item.path],
       })),
+      removals: removalsForSnapshot(bundle.snapshot),
     },
   });
 }

@@ -203,6 +203,43 @@ export interface ReviewFileInsight {
   confidence: ReviewInsightConfidence;
 }
 
+export type RemovalReason =
+  | 'moved'
+  | 'merged'
+  | 'replaced'
+  | 'dead-code'
+  | 'obsolete'
+  | 'extracted-to-dep'
+  | 'unclear';
+
+/** Reasons that assert the logic still exists somewhere and therefore require a target. */
+export const RELOCATING_REMOVAL_REASONS: readonly RemovalReason[] = ['moved', 'merged', 'replaced'];
+
+export interface RemovalRunRef {
+  path: string;
+  start: number;
+  end: number;
+}
+
+/** Exact destination text captured once at analysis time so browser hosts never need git. */
+export interface RemovalTargetExcerpt {
+  path: string;
+  start: number;
+  lines: string[];
+}
+
+export interface RemovalRationale {
+  reviewItemId: string;
+  /** Old-side line span of the removed run. */
+  run: RemovalRunRef;
+  reason: RemovalReason;
+  description: string;
+  /** New-side line span where the logic landed. Present only for relocating reasons. */
+  movedTo?: RemovalRunRef;
+  /** Present only when `movedTo` resolves outside the captured review. */
+  movedToExcerpt?: RemovalTargetExcerpt;
+}
+
 export interface ReviewInsights {
   schemaVersion: 1;
   revisionId: string;
@@ -210,6 +247,7 @@ export interface ReviewInsights {
   groups: ReviewGroup[];
   items: ReviewItemInsight[];
   files?: ReviewFileInsight[];
+  removals?: RemovalRationale[];
 }
 
 export type ReviewQuestionStatus = 'queued' | 'processing' | 'answered' | 'failed' | 'stale';

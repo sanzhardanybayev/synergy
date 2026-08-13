@@ -77,6 +77,18 @@ export {
   reviewSnapshotSchema,
   reviewWorkspaceSchema,
 } from './schema.js';
+export { RELOCATING_REMOVAL_REASONS } from './types.js';
+export {
+  buildRemovalStrips,
+  deriveRemovalRuns,
+  deriveSnapshotRemovalRuns,
+  resolveRemovalTarget,
+  type RemovalRun,
+  type RemovalStrip,
+  type ResolvedRemovalTarget,
+  type SnapshotRemovalRun,
+} from './removals.js';
+export { removalRunHash } from './removal-hash.js';
 export { createReviewStore, type ReviewStore, type ReviewStoreOptions } from './store.js';
 export {
   claimQuestion,
@@ -120,6 +132,10 @@ export type {
   ReviewItemProgress,
   ReviewItemProgressPatch,
   ReviewItemStatus,
+  RemovalRationale,
+  RemovalReason,
+  RemovalRunRef,
+  RemovalTargetExcerpt,
   ReviewDiffLineRow,
   ReviewLineRow,
   ReviewLineSelection,

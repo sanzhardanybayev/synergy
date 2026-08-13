@@ -7,5 +7,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     exclude: ['**/node_modules/**', '**/dist/**', '**/out-test/**', 'src/test/**'],
+    // `src/webview/panel.js` builds real DOM nodes (`document.createElement`, `classList`, …) -
+    // its unit tests need jsdom. Every other suite in this package is a plain Node test.
+    environmentMatchGlobs: [['src/webview/**', 'jsdom']],
   },
 });

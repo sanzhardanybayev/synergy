@@ -188,7 +188,7 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
           break;
 
         case 'openFile':
-          await this.openFullFile(message.path);
+          await this.openFullFile(message.path, message.line);
           break;
 
         case 'setDiffVisible':
@@ -271,13 +271,22 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
     if (this.diffVisible) this.applyDecorationsFor(item);
   }
 
-  /** Opens the full working-tree file (no hunk reveal) with all-hunk decorations when enabled. */
-  private async openFullFile(path: string): Promise<void> {
+  /**
+   * Opens the full working-tree file (no hunk reveal) with all-hunk decorations when enabled.
+   * `line` reveals a specific destination line - used by the removal-strip's "open in editor"
+   * action for a moved-to target that falls outside the captured review.
+   */
+  private async openFullFile(path: string, line?: number): Promise<void> {
     if (this.screen.kind !== 'bundle' || !this.currentBundle) {
       this.postError(new Error('No active session'));
       return;
     }
-    await this.host.openFile(join(this.screen.projectRoot, path));
+    const fullPath = join(this.screen.projectRoot, path);
+    if (line !== undefined) {
+      await this.host.openFileAt(fullPath, line, line);
+    } else {
+      await this.host.openFile(fullPath);
+    }
     if (!this.diffVisible || this.currentBundle.snapshot.kind !== 'diff') return;
     const file = this.currentBundle.snapshot.files.find((candidate) => candidate.path === path);
     if (!file) return;

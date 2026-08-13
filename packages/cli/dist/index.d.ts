@@ -1,5 +1,5 @@
 import { StatusValue } from '@synergy/state';
-import { ReviewInsightConfidence, ReviewGroup, ReviewItemInsight, createReviewStore, applyCodeSections, ReviewRef, CaptureReviewSourceRequest, compareReviewSourceFreshness, deriveReviewReadiness, ReviewWorkspace, ReviewCaptureSourceRequest } from '@synergy/review-core';
+import { ReviewInsightConfidence, ReviewGroup, ReviewItemInsight, RemovalRationale, createReviewStore, applyCodeSections, ReviewRef, CommandRunner, CaptureReviewSourceRequest, compareReviewSourceFreshness, deriveReviewReadiness, ReviewWorkspace, ReviewCaptureSourceRequest } from '@synergy/review-core';
 export { CaptureReviewSourceRequest, CapturedReviewSource, CommandResult, CommandRunner, capturePr, captureReviewSource, captureScope, captureStaged, captureUnstaged } from '@synergy/review-core';
 import { CAC } from 'cac';
 
@@ -124,6 +124,7 @@ type ReviewAnalysisInput = {
     kind: 'diff';
     groups: ReviewGroup[];
     items: ReviewItemInsight[];
+    removals?: RemovalRationale[];
     files?: FileAnalysisInput[];
     summary?: string;
 };
@@ -137,9 +138,15 @@ interface CreateReviewResult {
     url: string;
     analysisRequired: boolean;
     analysisGuidance?: ReviewAnalysisGuidance;
+    removals: ReviewRemovalStatus[];
 }
 interface ReviewActionDependencies {
     createStore?: typeof createReviewStore;
+    /** Reads a movedTo target's destination lines when re-resolving carried removal excerpts
+     * against the new revision's live worktree (unstaged/scope sources only - staged/PR sources
+     * read immutable Git content through `request.runner` instead). Defaults to real filesystem
+     * reads. */
+    readFile?: ReadFile;
 }
 interface ApplyReviewAnalysisDependencies {
     createStore?: typeof createReviewStore;
@@ -157,12 +164,17 @@ interface RefreshReviewRequest {
     runner?: CaptureReviewSourceRequest['runner'];
     readFile?: CaptureReviewSourceRequest['readFile'];
 }
+/** Reads a repository-relative path's full text, or undefined when it does not exist at the
+ * inspected source (a missing file is a normal outcome here, not an error). */
+type ReadFile = (path: string) => string | undefined;
 interface ApplyReviewAnalysisRequest {
     root: string;
     reference: ReviewRef;
     analysis: ReviewAnalysisInput;
     parsingInMs?: number;
     commandStartedAt?: number;
+    runner?: CommandRunner;
+    readFile?: ReadFile;
 }
 interface ReviewAnalysisTimings {
     parsingMs: number;
@@ -191,6 +203,14 @@ interface ReviewStatusRequest {
     readFile?: CaptureReviewSourceRequest['readFile'];
     compareSourceFreshness?: typeof compareReviewSourceFreshness;
 }
+interface ReviewRemovalStatus {
+    reviewItemId: string;
+    path: string;
+    start: number;
+    end: number;
+    /** Whether the currently persisted insights already carry a rationale for this exact run. */
+    covered: boolean;
+}
 interface ReviewStatusResult {
     reference: string;
     analysisRequired: boolean;
@@ -198,6 +218,7 @@ interface ReviewStatusResult {
     captureFailed: boolean;
     url: string;
     analysisGuidance?: ReviewAnalysisGuidance;
+    removals: ReviewRemovalStatus[];
 }
 declare function createOrResumeReview(request: CreateReviewRequest, dependencies?: ReviewActionDependencies): CreateReviewResult;
 declare function refreshReview(request: RefreshReviewRequest): CreateReviewResult;

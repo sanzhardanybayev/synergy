@@ -1,11 +1,15 @@
-import { mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  type RemovalRationale,
   ReviewCoreError,
+  type ReviewSnapshot,
   applyCodeSections as applyCoreCodeSections,
   createReviewStore,
+  deriveSnapshotRemovalRuns,
   repositoryName,
+  reviewRevisionDir,
 } from '@synergy/review-core';
 import { describe, expect, it } from 'vitest';
 import {
@@ -14,6 +18,7 @@ import {
   applyReviewAnalysis,
   createOrResumeReview,
   formatReviewStatusJson,
+  getReviewStatus,
   openReview,
   printReviewStatus,
 } from './review-actions.js';
@@ -53,6 +58,279 @@ function createRequest(root: string): CreateReviewRequest {
   return { root, source: { kind: 'staged' }, runner: createRunner() };
 }
 
+/** Blanket "dead-code" rationale for every derived removal run, sufficient to satisfy the
+ * removal-coverage gate in tests that are not themselves exercising removal semantics. */
+function removalsForSnapshot(snapshot: ReviewSnapshot): RemovalRationale[] {
+  return deriveSnapshotRemovalRuns(snapshot).map((run) => ({
+    reviewItemId: run.reviewItemId,
+    run: { path: run.path, start: run.start, end: run.end },
+    reason: 'dead-code',
+    description: 'Removed as part of this change.',
+  }));
+}
+
+/** A single "moved" rationale for the snapshot's one derived removal run, pointed at a target
+ * outside the captured review so `resolveRemovalExcerpts` must read through the injected io. */
+function movedOutsideRationale(
+  snapshot: ReviewSnapshot,
+  reviewItemId: string,
+  movedTo: { path: string; start: number; end: number },
+): RemovalRationale[] {
+  const [run, ...rest] = deriveSnapshotRemovalRuns(snapshot);
+  if (!run || rest.length > 0) {
+    throw new Error('fixture must derive exactly one removal run');
+  }
+  return [
+    {
+      reviewItemId,
+      run: { path: run.path, start: run.start, end: run.end },
+      reason: 'moved',
+      description: 'Moved to another module.',
+      movedTo,
+    },
+  ];
+}
+
+/** Wraps a runner to record every command key it receives, in order, for assertions on which
+ * git spec a read seam actually used. */
+function recordingRunner(base: CommandRunner, calls: string[]): CommandRunner {
+  return {
+    run(command, args, options): CommandResult {
+      calls.push([command, ...args].join(' '));
+      return base.run(command, args, options);
+    },
+  };
+}
+
+/** Two files, each with a one-line removal run. `patch` is mutable (a `let` binding the runner
+ * reads live) so a test can capture the review, finalize it, then refresh with only file a's
+ * content changed - byte-identical file b carries its review item, progress, and removal
+ * rationale forward into the refreshed revision. */
+function twoFileRemovalPatch(bValue: number): string {
+  return [
+    'diff --git a/src/a.ts b/src/a.ts',
+    'index 1111111..2222222 100644',
+    '--- a/src/a.ts',
+    '+++ b/src/a.ts',
+    '@@ -1 +1 @@',
+    '-export const a = 1;',
+    '+export const a = 2;',
+    'diff --git a/src/b.ts b/src/b.ts',
+    'index 3333333..4444444 100644',
+    '--- a/src/b.ts',
+    '+++ b/src/b.ts',
+    '@@ -1 +1 @@',
+    '-export const b = 1;',
+    `+export const b = ${bValue};`,
+    '',
+  ].join('\n');
+}
+
+function twoFileRunner(getPatch: () => string): CommandRunner {
+  return {
+    run(command, args, options): CommandResult {
+      const key = [command, ...args].join(' ');
+      if (key === 'git diff --cached --no-ext-diff --binary') {
+        return { exitCode: 0, stdout: getPatch(), stderr: '' };
+      }
+      if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+      if (key === 'git rev-parse --show-toplevel') {
+        return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+      }
+      if (key === 'git config --get remote.origin.url') {
+        return { exitCode: 1, stdout: '', stderr: '' };
+      }
+      throw new Error(`missing fixture for ${key}`);
+    },
+  };
+}
+
+/** Captures, finalizes (with a removal rationale per file), and reviews item b so it carries
+ * forward on refresh; then refreshes with only file a's content changed. Returns everything a
+ * carry-forward test needs: the refreshed (unfinalized) revision's reference, its bundle, and
+ * both review items. */
+async function setupRefreshedReviewWithCarriedRemoval(root: string): Promise<{
+  refreshed: { reference: { workspaceId: string; revisionId: string } };
+  store: ReturnType<typeof createReviewStore>;
+  refreshedBundle: ReturnType<ReturnType<typeof createReviewStore>['readBundle']>;
+  refreshedItemA: { id: string; path: string };
+  refreshedItemB: { id: string; path: string };
+}> {
+  let patch = twoFileRemovalPatch(2);
+  const runner = twoFileRunner(() => patch);
+  const first = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+  const store = createReviewStore(root);
+  const firstSnapshot = store.readBundle(
+    first.reference.workspaceId,
+    first.reference.revisionId,
+  ).snapshot;
+  const itemA = firstSnapshot.items.find((item) => item.path === 'src/a.ts');
+  const itemB = firstSnapshot.items.find((item) => item.path === 'src/b.ts');
+  if (!itemA || !itemB) throw new Error('fixture capture must create two review items');
+
+  await applyReviewAnalysis({
+    root,
+    reference: first.reference,
+    analysis: {
+      kind: 'diff',
+      groups: [{ id: 'core', label: 'Core', reviewItemIds: [itemA.id, itemB.id] }],
+      items: [
+        {
+          reviewItemId: itemA.id,
+          description: 'Updates constant a.',
+          confidence: 'high',
+          evidencePaths: ['src/a.ts'],
+        },
+        {
+          reviewItemId: itemB.id,
+          description: 'Updates constant b.',
+          confidence: 'high',
+          evidencePaths: ['src/b.ts'],
+        },
+      ],
+      removals: removalsForSnapshot(firstSnapshot),
+    },
+  });
+  store.patchItemProgress(first.reference.workspaceId, first.reference.revisionId, itemB.id, {
+    status: 'reviewed',
+  });
+
+  // Refresh: only file a's content changes; file b's hunk is byte-identical, so its review item
+  // (and the removal rationale for it) carries forward into the new revision.
+  patch = twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;');
+  const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+  const refreshedBundle = store.readBundle(
+    refreshed.reference.workspaceId,
+    refreshed.reference.revisionId,
+  );
+  const refreshedItemA = refreshedBundle.snapshot.items.find((item) => item.path === 'src/a.ts');
+  const refreshedItemB = refreshedBundle.snapshot.items.find((item) => item.path === 'src/b.ts');
+  if (!refreshedItemA || !refreshedItemB) {
+    throw new Error('refreshed snapshot must retain both review items');
+  }
+  return { refreshed, store, refreshedBundle, refreshedItemA, refreshedItemB };
+}
+
+/** A staged runner over the two-file removal patch that also answers `git show :src/other.ts`
+ * from a mutable getter, so a test can change what the "moved to" destination contains (or make
+ * it unreadable) between the initial capture/finalize and a later refresh. */
+function stagedMovedRunner(
+  getPatch: () => string,
+  getOtherContent: () => string | undefined,
+): CommandRunner {
+  return {
+    run(command, args, options): CommandResult {
+      const key = [command, ...args].join(' ');
+      if (key === 'git diff --cached --no-ext-diff --binary') {
+        return { exitCode: 0, stdout: getPatch(), stderr: '' };
+      }
+      if (key === 'git show :src/other.ts') {
+        const content = getOtherContent();
+        return content === undefined
+          ? { exitCode: 1, stdout: '', stderr: 'fatal: path does not exist' }
+          : { exitCode: 0, stdout: content, stderr: '' };
+      }
+      if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+      if (key === 'git rev-parse --show-toplevel') {
+        return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+      }
+      if (key === 'git config --get remote.origin.url') {
+        return { exitCode: 1, stdout: '', stderr: '' };
+      }
+      throw new Error(`missing fixture for ${key}`);
+    },
+  };
+}
+
+/** Sets up revision 1 (files a and b) with item a explained by a plain rationale and item b
+ * explained by a "moved" rationale pointing outside the captured review at `src/other.ts:5-6`,
+ * marks item b reviewed so it carries forward, and finalizes. Returns the runner (so the caller
+ * can mutate `patch`/`otherContent` and trigger a refresh) plus the store and both item ids. */
+async function setupCarriedMovedRationale(
+  root: string,
+  otherContent: { value: string | undefined },
+): Promise<{
+  store: ReturnType<typeof createReviewStore>;
+  runner: CommandRunner;
+  patch: { value: string };
+  firstReference: { workspaceId: string; revisionId: string };
+  itemAId: string;
+  itemBId: string;
+}> {
+  const patch = { value: twoFileRemovalPatch(2) };
+  const runner = stagedMovedRunner(
+    () => patch.value,
+    () => otherContent.value,
+  );
+  const first = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+  const store = createReviewStore(root);
+  const firstSnapshot = store.readBundle(
+    first.reference.workspaceId,
+    first.reference.revisionId,
+  ).snapshot;
+  const itemA = firstSnapshot.items.find((item) => item.path === 'src/a.ts');
+  const itemB = firstSnapshot.items.find((item) => item.path === 'src/b.ts');
+  if (!itemA || !itemB) throw new Error('fixture capture must create two review items');
+  const [runA] = deriveSnapshotRemovalRuns(firstSnapshot).filter(
+    (run) => run.reviewItemId === itemA.id,
+  );
+  const [runB] = deriveSnapshotRemovalRuns(firstSnapshot).filter(
+    (run) => run.reviewItemId === itemB.id,
+  );
+  if (!runA || !runB) throw new Error('fixture must derive removal runs for both items');
+
+  await applyReviewAnalysis({
+    root,
+    reference: first.reference,
+    analysis: {
+      kind: 'diff',
+      groups: [{ id: 'core', label: 'Core', reviewItemIds: [itemA.id, itemB.id] }],
+      items: [
+        {
+          reviewItemId: itemA.id,
+          description: 'Updates constant a.',
+          confidence: 'high',
+          evidencePaths: ['src/a.ts'],
+        },
+        {
+          reviewItemId: itemB.id,
+          description: 'Updates constant b.',
+          confidence: 'high',
+          evidencePaths: ['src/b.ts'],
+        },
+      ],
+      removals: [
+        {
+          reviewItemId: itemA.id,
+          run: { path: runA.path, start: runA.start, end: runA.end },
+          reason: 'dead-code',
+          description: 'Removed as part of this change.',
+        },
+        {
+          reviewItemId: itemB.id,
+          run: { path: runB.path, start: runB.start, end: runB.end },
+          reason: 'moved',
+          description: 'Moved to another module.',
+          movedTo: { path: 'src/other.ts', start: 5, end: 6 },
+        },
+      ],
+    },
+    runner,
+  });
+  store.patchItemProgress(first.reference.workspaceId, first.reference.revisionId, itemB.id, {
+    status: 'reviewed',
+  });
+
+  return {
+    store,
+    runner,
+    patch,
+    firstReference: first.reference,
+    itemAId: itemA.id,
+    itemBId: itemB.id,
+  };
+}
+
 describe('review lifecycle actions', () => {
   it('uses canonical shared freshness for text and JSON readiness, failing capture closed', async () => {
     const root = join(tmpdir(), `synergy-review-status-${Date.now()}`);
@@ -70,8 +348,11 @@ describe('review lifecycle actions', () => {
     try {
       const created = createOrResumeReview(createRequest(root));
       const store = createReviewStore(root);
-      const item = store.readBundle(created.reference.workspaceId, created.reference.revisionId)
-        .snapshot.items[0]!;
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
       await applyReviewAnalysis({
         root,
         reference: created.reference,
@@ -86,6 +367,7 @@ describe('review lifecycle actions', () => {
               evidencePaths: [item.path],
             },
           ],
+          removals: removalsForSnapshot(snapshot),
         },
       });
       store.patchItemProgress(
@@ -169,6 +451,696 @@ describe('review lifecycle actions', () => {
     }
   });
 
+  it('reports every derived removal run and its coverage in create and status', () => {
+    const root = join(tmpdir(), `synergy-review-removals-status-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const snapshot = createReviewStore(root).readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const [run, ...rest] = deriveSnapshotRemovalRuns(snapshot);
+      if (!run || rest.length > 0) throw new Error('fixture must derive exactly one removal run');
+      const expected = [
+        {
+          reviewItemId: run.reviewItemId,
+          path: run.path,
+          start: run.start,
+          end: run.end,
+          covered: false,
+        },
+      ];
+
+      expect(created.removals).toEqual(expected);
+      expect(
+        getReviewStatus({ root, reference: created.reference, runner: createRunner() }).removals,
+      ).toEqual(expected);
+      expect(
+        printReviewStatus({ root, reference: created.reference, runner: createRunner() }),
+      ).toContain('removals: 0/1 explained');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('marks removal runs covered once analysis is finalized', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-covered-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const snapshot = createReviewStore(root).readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const reviewItemId = snapshot.items[0]?.id;
+      if (!reviewItemId) throw new Error('fixture capture must create one review item');
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [reviewItemId] }],
+          items: [
+            {
+              reviewItemId,
+              description: 'Updates the staged fixture value.',
+              confidence: 'high',
+              evidencePaths: [snapshot.items[0]!.path],
+            },
+          ],
+          removals: removalsForSnapshot(snapshot),
+        },
+      });
+
+      const status = getReviewStatus({
+        root,
+        reference: created.reference,
+        runner: createRunner(),
+      });
+      expect(status.removals[0]?.covered).toBe(true);
+      expect(
+        printReviewStatus({ root, reference: created.reference, runner: createRunner() }),
+      ).toContain('removals: 1/1 explained');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts a finalize payload that omits a carried removal rationale, keeping it covered and persisted', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-carry-omit-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const { refreshed, store, refreshedBundle, refreshedItemA, refreshedItemB } =
+        await setupRefreshedReviewWithCarriedRemoval(root);
+
+      // Before finalizing: status must already report item b's run as covered (carried) and
+      // item a's as not - this is the prediction that finalize-time acceptance must honor.
+      const preFinalizeRunner = twoFileRunner(() =>
+        twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;'),
+      );
+      const preStatus = getReviewStatus({
+        root,
+        reference: refreshed.reference,
+        runner: preFinalizeRunner,
+      });
+      const removalForA = preStatus.removals.find((r) => r.reviewItemId === refreshedItemA.id);
+      const removalForB = preStatus.removals.find((r) => r.reviewItemId === refreshedItemB.id);
+      expect(removalForA?.covered).toBe(false);
+      expect(removalForB?.covered).toBe(true);
+
+      const [runB] = deriveSnapshotRemovalRuns(refreshedBundle.snapshot).filter(
+        (run) => run.reviewItemId === refreshedItemB.id,
+      );
+      if (!runB) throw new Error('fixture must derive a removal run for item b');
+      const carriedRationale = refreshedBundle.insights.removals?.find(
+        (rationale) => rationale.reviewItemId === refreshedItemB.id,
+      );
+      expect(carriedRationale).toEqual({
+        reviewItemId: refreshedItemB.id,
+        run: { path: runB.path, start: runB.start, end: runB.end },
+        reason: 'dead-code',
+        description: 'Removed as part of this change.',
+      });
+
+      // Finalize with a payload that only explains item a's removal run - item b's carried
+      // rationale is omitted, exactly as an agent trusting `covered: true` would do.
+      const [runA] = deriveSnapshotRemovalRuns(refreshedBundle.snapshot).filter(
+        (run) => run.reviewItemId === refreshedItemA.id,
+      );
+      if (!runA) throw new Error('fixture must derive a removal run for item a');
+      await applyReviewAnalysis({
+        root,
+        reference: refreshed.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [
+            { id: 'core', label: 'Core', reviewItemIds: [refreshedItemA.id, refreshedItemB.id] },
+          ],
+          items: [
+            {
+              reviewItemId: refreshedItemA.id,
+              description: 'Updates constant a again.',
+              confidence: 'high',
+              evidencePaths: ['src/a.ts'],
+            },
+            {
+              reviewItemId: refreshedItemB.id,
+              description: 'Updates constant b.',
+              confidence: 'high',
+              evidencePaths: ['src/b.ts'],
+            },
+          ],
+          removals: [
+            {
+              reviewItemId: refreshedItemA.id,
+              run: { path: runA.path, start: runA.start, end: runA.end },
+              reason: 'dead-code',
+              description: 'Removed as part of the refreshed change.',
+            },
+          ],
+        },
+      });
+
+      const finalized = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      expect(finalized.insights.removals).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            reviewItemId: refreshedItemA.id,
+            description: 'Removed as part of the refreshed change.',
+          }),
+          carriedRationale,
+        ]),
+      );
+      expect(finalized.insights.removals).toHaveLength(2);
+
+      const postStatus = getReviewStatus({
+        root,
+        reference: refreshed.reference,
+        runner: preFinalizeRunner,
+      });
+      expect(postStatus.removals.every((r) => r.covered)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('overrides a carried removal rationale when the finalize payload includes a fresh one for the same run', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-carry-override-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const { refreshed, store, refreshedBundle, refreshedItemA, refreshedItemB } =
+        await setupRefreshedReviewWithCarriedRemoval(root);
+      const [runA] = deriveSnapshotRemovalRuns(refreshedBundle.snapshot).filter(
+        (run) => run.reviewItemId === refreshedItemA.id,
+      );
+      const [runB] = deriveSnapshotRemovalRuns(refreshedBundle.snapshot).filter(
+        (run) => run.reviewItemId === refreshedItemB.id,
+      );
+      if (!runA || !runB) throw new Error('fixture must derive removal runs for both items');
+
+      await applyReviewAnalysis({
+        root,
+        reference: refreshed.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [
+            { id: 'core', label: 'Core', reviewItemIds: [refreshedItemA.id, refreshedItemB.id] },
+          ],
+          items: [
+            {
+              reviewItemId: refreshedItemA.id,
+              description: 'Updates constant a again.',
+              confidence: 'high',
+              evidencePaths: ['src/a.ts'],
+            },
+            {
+              reviewItemId: refreshedItemB.id,
+              description: 'Updates constant b.',
+              confidence: 'high',
+              evidencePaths: ['src/b.ts'],
+            },
+          ],
+          removals: [
+            {
+              reviewItemId: refreshedItemA.id,
+              run: { path: runA.path, start: runA.start, end: runA.end },
+              reason: 'dead-code',
+              description: 'Removed as part of the refreshed change.',
+            },
+            {
+              reviewItemId: refreshedItemB.id,
+              run: { path: runB.path, start: runB.start, end: runB.end },
+              reason: 'obsolete',
+              description: 'Superseded rationale authored on the refreshed revision.',
+            },
+          ],
+        },
+      });
+
+      const finalized = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const persistedForB = finalized.insights.removals?.find(
+        (rationale) => rationale.reviewItemId === refreshedItemB.id,
+      );
+      expect(persistedForB).toEqual({
+        reviewItemId: refreshedItemB.id,
+        run: { path: runB.path, start: runB.start, end: runB.end },
+        reason: 'obsolete',
+        description: 'Superseded rationale authored on the refreshed revision.',
+      });
+      expect(finalized.insights.removals).toHaveLength(2);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('re-resolves a carried moved-to excerpt against the new revision, replacing stale text', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-excerpt-refresh-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const otherContent: { value: string | undefined } = { value: 'l1\nl2\nl3\nl4\nl5\nl6\n' };
+      const { store, runner, patch, firstReference, itemBId } = await setupCarriedMovedRationale(
+        root,
+        otherContent,
+      );
+      const firstBundle = store.readBundle(firstReference.workspaceId, firstReference.revisionId);
+      const originalExcerpt = firstBundle.insights.removals?.find(
+        (rationale) => rationale.reviewItemId === itemBId,
+      )?.movedToExcerpt;
+      expect(originalExcerpt).toEqual({ path: 'src/other.ts', start: 5, lines: ['l5', 'l6'] });
+
+      // Refresh: file a changes (so a new revision is created); the destination file's content
+      // also changed since the first revision was captured.
+      patch.value = twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;');
+      otherContent.value = 'm1\nm2\nm3\nm4\nm5\nm6\n';
+      const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemB) throw new Error('refreshed snapshot must retain item b');
+      const carried = refreshedBundle.insights.removals?.find(
+        (rationale) => rationale.reviewItemId === refreshedItemB.id,
+      );
+      expect(carried?.movedToExcerpt).toEqual({
+        path: 'src/other.ts',
+        start: 5,
+        lines: ['m5', 'm6'],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('drops a carried removal rationale whose moved-to destination can no longer be read', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-excerpt-missing-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const otherContent: { value: string | undefined } = { value: 'l1\nl2\nl3\nl4\nl5\nl6\n' };
+      const { store, runner, patch } = await setupCarriedMovedRationale(root, otherContent);
+
+      // Refresh: file a changes, and the destination file has disappeared.
+      patch.value = twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;');
+      otherContent.value = undefined;
+      const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemB) throw new Error('refreshed snapshot must retain item b');
+      expect(
+        (refreshedBundle.insights.removals ?? []).some(
+          (rationale) => rationale.reviewItemId === refreshedItemB.id,
+        ),
+      ).toBe(false);
+
+      const status = getReviewStatus({ root, reference: refreshed.reference, runner });
+      const removalForB = status.removals.find((r) => r.reviewItemId === refreshedItemB.id);
+      expect(removalForB?.covered).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('drops a carried removal rationale whose moved-to range now overruns the destination file', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-excerpt-overrun-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const otherContent: { value: string | undefined } = { value: 'l1\nl2\nl3\nl4\nl5\nl6\n' };
+      const { store, runner, patch } = await setupCarriedMovedRationale(root, otherContent);
+
+      // Refresh: file a changes, and the destination file shrank below the rationale's range
+      // (start 5, end 6).
+      patch.value = twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;');
+      otherContent.value = 'm1\nm2\nm3\n';
+      const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemB) throw new Error('refreshed snapshot must retain item b');
+      expect(
+        (refreshedBundle.insights.removals ?? []).some(
+          (rationale) => rationale.reviewItemId === refreshedItemB.id,
+        ),
+      ).toBe(false);
+
+      const status = getReviewStatus({ root, reference: refreshed.reference, runner });
+      const removalForB = status.removals.find((r) => r.reviewItemId === refreshedItemB.id);
+      expect(removalForB?.covered).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('sheds a carried moved-to excerpt once the destination lands inside the new capture', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-excerpt-inreview-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const otherContent: { value: string | undefined } = { value: 'l1\nl2\nl3\nl4\nl5\nl6\n' };
+      const { store, runner, patch } = await setupCarriedMovedRationale(root, otherContent);
+
+      // Refresh: file a changes, and the destination file (src/other.ts) is now itself part of
+      // the captured diff, with ADDED new-side lines 5 and 6 falling inside its hunk - the same
+      // span the carried rationale's movedTo already names. (Context rows sharing those new-side
+      // line numbers would not count: an in-review jump must land on lines that were actually
+      // added, not merely present.)
+      const otherHunk = [
+        'diff --git a/src/other.ts b/src/other.ts',
+        'index 7777777..8888888 100644',
+        '--- a/src/other.ts',
+        '+++ b/src/other.ts',
+        '@@ -1,6 +1,6 @@',
+        '-old1',
+        '+new1',
+        ' ctx2',
+        ' ctx3',
+        ' ctx4',
+        '-old5',
+        '+new5',
+        '-old6',
+        '+new6',
+      ].join('\n');
+      patch.value = `${twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;').trimEnd()}\n${otherHunk}\n`;
+      const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemB) throw new Error('refreshed snapshot must retain item b');
+      const carried = refreshedBundle.insights.removals?.find(
+        (rationale) => rationale.reviewItemId === refreshedItemB.id,
+      );
+      expect(carried).toEqual({
+        reviewItemId: refreshedItemB.id,
+        run: expect.objectContaining({ path: 'src/b.ts' }),
+        reason: 'moved',
+        description: 'Moved to another module.',
+        movedTo: { path: 'src/other.ts', start: 5, end: 6 },
+      });
+      expect(carried).not.toHaveProperty('movedToExcerpt');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('drops a carried removal rationale whose moved-to path fails the safety guard on refresh, without aborting the refresh', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-excerpt-unsafe-path-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const otherContent: { value: string | undefined } = { value: 'l1\nl2\nl3\nl4\nl5\nl6\n' };
+      const { store, runner, patch, firstReference, itemBId } = await setupCarriedMovedRationale(
+        root,
+        otherContent,
+      );
+
+      // Simulate a rationale persisted by a pre-fix build: hand-edit the already-finalized
+      // revision's bundle on disk so item b's carried `movedTo.path` is a path-traversal escape.
+      // `applyReviewAnalysis` itself would reject this at creation time (the same
+      // `assertSafeEvidencePath` guard runs there too), so this bypasses that seam on purpose to
+      // exercise the defence-in-depth re-check inside `reResolveCarriedRemovals` on refresh.
+      const bundlePath = join(
+        reviewRevisionDir(root, firstReference.workspaceId, firstReference.revisionId),
+        'bundle.json',
+      );
+      const bundle = JSON.parse(readFileSync(bundlePath, 'utf8')) as {
+        insights: { removals?: RemovalRationale[] };
+      };
+      const rationale = bundle.insights.removals?.find((r) => r.reviewItemId === itemBId);
+      if (!rationale?.movedTo) {
+        throw new Error('fixture must persist a moved-to rationale for item b');
+      }
+      rationale.movedTo = { ...rationale.movedTo, path: '../../.ssh/id_rsa' };
+      writeFileSync(bundlePath, JSON.stringify(bundle));
+
+      // Refresh: file a changes; file b's byte-identical hunk carries forward, dragging the
+      // now-unsafe rationale along with it.
+      patch.value = twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;');
+      const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemB) throw new Error('refreshed snapshot must retain item b');
+
+      // 1. Dropped: the unsafe rationale does not appear in the new revision's insights.removals.
+      expect(
+        (refreshedBundle.insights.removals ?? []).some(
+          (rationale) => rationale.reviewItemId === refreshedItemB.id,
+        ),
+      ).toBe(false);
+
+      // 2. The refresh itself succeeded rather than throwing, and its run reports uncovered.
+      const status = getReviewStatus({ root, reference: refreshed.reference, runner });
+      const removalForB = status.removals.find((r) => r.reviewItemId === refreshedItemB.id);
+      expect(removalForB?.covered).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('drops a carried removal rationale when its target read throws instead of resolving, without aborting the refresh', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-excerpt-throws-create-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const unstagedDiffCommand = [
+      'git',
+      'diff',
+      '--no-ext-diff',
+      '--binary',
+      '--',
+      ':(exclude).synergy/preview.runtime.json',
+      ':(exclude).synergy/preview.runtime.json.*',
+      ':(exclude).synergy/.preview.runtime.json.*.tmp',
+      ':(exclude).synergy/preview.start.lock',
+      ':(exclude).synergy/preview.start.lock.*',
+      ':(exclude).synergy/preview.pid',
+      ':(exclude).synergy/preview.log',
+    ].join(' ');
+    try {
+      let patch = twoFileRemovalPatch(2);
+      const runner: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'git rev-parse --show-toplevel') {
+            return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+          }
+          if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+          if (key === unstagedDiffCommand) return { exitCode: 0, stdout: patch, stderr: '' };
+          if (key === 'git ls-files --others --exclude-standard -z') {
+            return { exitCode: 0, stdout: '', stderr: '' };
+          }
+          throw new Error(`missing fixture for ${key}`);
+        },
+      };
+      const first = createOrResumeReview({
+        root,
+        source: { kind: 'unstaged' },
+        runner,
+        readFile: () => 'unused',
+      });
+      const store = createReviewStore(root);
+      const firstSnapshot = store.readBundle(
+        first.reference.workspaceId,
+        first.reference.revisionId,
+      ).snapshot;
+      const itemA = firstSnapshot.items.find((item) => item.path === 'src/a.ts');
+      const itemB = firstSnapshot.items.find((item) => item.path === 'src/b.ts');
+      if (!itemA || !itemB) throw new Error('fixture capture must create two review items');
+      const [runA] = deriveSnapshotRemovalRuns(firstSnapshot).filter(
+        (run) => run.reviewItemId === itemA.id,
+      );
+      const [runB] = deriveSnapshotRemovalRuns(firstSnapshot).filter(
+        (run) => run.reviewItemId === itemB.id,
+      );
+      if (!runA || !runB) throw new Error('fixture must derive removal runs for both items');
+      const targetPath = join(root, 'src/other.ts');
+
+      await applyReviewAnalysis({
+        root,
+        reference: first.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [itemA.id, itemB.id] }],
+          items: [
+            {
+              reviewItemId: itemA.id,
+              description: 'Updates constant a.',
+              confidence: 'high',
+              evidencePaths: ['src/a.ts'],
+            },
+            {
+              reviewItemId: itemB.id,
+              description: 'Updates constant b.',
+              confidence: 'high',
+              evidencePaths: ['src/b.ts'],
+            },
+          ],
+          removals: [
+            {
+              reviewItemId: itemA.id,
+              run: { path: runA.path, start: runA.start, end: runA.end },
+              reason: 'dead-code',
+              description: 'Removed as part of this change.',
+            },
+            {
+              reviewItemId: itemB.id,
+              run: { path: runB.path, start: runB.start, end: runB.end },
+              reason: 'moved',
+              description: 'Moved to another module.',
+              movedTo: { path: 'src/other.ts', start: 5, end: 6 },
+            },
+          ],
+        },
+        runner,
+        readFile: (path) => (path === targetPath ? 'l1\nl2\nl3\nl4\nl5\nl6\n' : undefined),
+      });
+      store.patchItemProgress(first.reference.workspaceId, first.reference.revisionId, itemB.id, {
+        status: 'reviewed',
+      });
+
+      // Refresh: file a changes; the destination read now throws a non-ENOENT error (EACCES),
+      // exercising the unstaged/scope `readFile` seam directly rather than the staged `git show`
+      // path exercised by the other carry-forward excerpt tests.
+      patch = twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;');
+      const refreshed = createOrResumeReview(
+        { root, source: { kind: 'unstaged' }, runner, readFile: () => 'unused' },
+        {
+          readFile: (path) => {
+            if (path === targetPath) {
+              throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+            }
+            return undefined;
+          },
+        },
+      );
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemB) throw new Error('refreshed snapshot must retain item b');
+      expect(
+        (refreshedBundle.insights.removals ?? []).some(
+          (rationale) => rationale.reviewItemId === refreshedItemB.id,
+        ),
+      ).toBe(false);
+
+      const status = getReviewStatus({ root, reference: refreshed.reference, runner });
+      const removalForB = status.removals.find((r) => r.reviewItemId === refreshedItemB.id);
+      expect(removalForB?.covered).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('still rejects a live analysis submission when a moved-to target read throws, not just when it is missing', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-excerpt-throws-finalize-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const unstagedDiffCommand = [
+      'git',
+      'diff',
+      '--no-ext-diff',
+      '--binary',
+      '--',
+      ':(exclude).synergy/preview.runtime.json',
+      ':(exclude).synergy/preview.runtime.json.*',
+      ':(exclude).synergy/.preview.runtime.json.*.tmp',
+      ':(exclude).synergy/preview.start.lock',
+      ':(exclude).synergy/preview.start.lock.*',
+      ':(exclude).synergy/preview.pid',
+      ':(exclude).synergy/preview.log',
+    ].join(' ');
+    try {
+      const fixture: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'git rev-parse --show-toplevel') {
+            return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+          }
+          if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+          if (key === unstagedDiffCommand) return { exitCode: 0, stdout: PATCH, stderr: '' };
+          if (key === 'git ls-files --others --exclude-standard -z') {
+            return { exitCode: 0, stdout: '', stderr: '' };
+          }
+          throw new Error(`missing fixture for ${key}`);
+        },
+      };
+      const created = createOrResumeReview({
+        root,
+        source: { kind: 'unstaged' },
+        runner: fixture,
+        readFile: () => 'unused',
+      });
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = movedOutsideRationale(snapshot, item.id, {
+        path: 'src/other.ts',
+        start: 5,
+        end: 6,
+      });
+      const targetPath = join(root, 'src/other.ts');
+
+      await expect(
+        applyReviewAnalysis({
+          root,
+          reference: created.reference,
+          analysis: {
+            kind: 'diff',
+            groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+            items: [
+              {
+                reviewItemId: item.id,
+                description: 'Updates the unstaged fixture value.',
+                confidence: 'high',
+                evidencePaths: [item.path],
+              },
+            ],
+            removals,
+          },
+          runner: fixture,
+          readFile: (path) => {
+            if (path === targetPath) {
+              throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+            }
+            return undefined;
+          },
+        }),
+      ).rejects.toThrow(/permission denied/);
+      expect(
+        store.isAnalysisFinalized(created.reference.workspaceId, created.reference.revisionId),
+      ).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('resumes an initial revision orphaned before workspace pointer publication', () => {
     const root = join(tmpdir(), `Synergy Review Orphan ${Date.now()}`);
     mkdirSync(root, { recursive: true });
@@ -244,10 +1216,11 @@ describe('review lifecycle actions', () => {
     mkdirSync(root, { recursive: true });
     try {
       const created = createOrResumeReview(createRequest(root));
-      const reviewItemId = createReviewStore(root).readBundle(
+      const snapshot = createReviewStore(root).readBundle(
         created.reference.workspaceId,
         created.reference.revisionId,
-      ).snapshot.items[0]?.id;
+      ).snapshot;
+      const reviewItemId = snapshot.items[0]?.id;
       if (!reviewItemId) throw new Error('fixture capture must create one review item');
       const analysis = {
         kind: 'diff' as const,
@@ -260,6 +1233,7 @@ describe('review lifecycle actions', () => {
             evidencePaths: ['src/example.ts'],
           },
         ],
+        removals: removalsForSnapshot(snapshot),
       };
       const result = await applyReviewAnalysis({
         root,
@@ -289,10 +1263,11 @@ describe('review lifecycle actions', () => {
     mkdirSync(root, { recursive: true });
     try {
       const created = createOrResumeReview(createRequest(root));
-      const reviewItemId = createReviewStore(root).readBundle(
+      const snapshot = createReviewStore(root).readBundle(
         created.reference.workspaceId,
         created.reference.revisionId,
-      ).snapshot.items[0]?.id;
+      ).snapshot;
+      const reviewItemId = snapshot.items[0]?.id;
       if (!reviewItemId) throw new Error('fixture capture must create one review item');
       await applyReviewAnalysis({
         root,
@@ -316,6 +1291,7 @@ describe('review lifecycle actions', () => {
               evidencePaths: ['src/example.ts'],
             },
           ],
+          removals: removalsForSnapshot(snapshot),
         },
       });
       const finalized = createReviewStore(root).readBundle(
@@ -336,10 +1312,11 @@ describe('review lifecycle actions', () => {
     mkdirSync(root, { recursive: true });
     try {
       const created = createOrResumeReview(createRequest(root));
-      const reviewItemId = createReviewStore(root).readBundle(
+      const snapshot = createReviewStore(root).readBundle(
         created.reference.workspaceId,
         created.reference.revisionId,
-      ).snapshot.items[0]?.id;
+      ).snapshot;
+      const reviewItemId = snapshot.items[0]?.id;
       if (!reviewItemId) throw new Error('fixture capture must create one review item');
       await applyReviewAnalysis({
         root,
@@ -362,6 +1339,7 @@ describe('review lifecycle actions', () => {
               confidence: 'high',
             },
           ],
+          removals: removalsForSnapshot(snapshot),
         },
       });
       const finalized = createReviewStore(root).readBundle(
@@ -450,6 +1428,7 @@ describe('review lifecycle actions', () => {
             },
           ],
           files: [{ path: 'src/b.ts', description: 'File b summary.', confidence: 'high' }],
+          removals: removalsForSnapshot(firstSnapshot),
         },
       });
       store.patchItemProgress(first.reference.workspaceId, first.reference.revisionId, itemB.id, {
@@ -503,6 +1482,7 @@ describe('review lifecycle actions', () => {
               evidencePaths: ['src/b.ts'],
             },
           ],
+          removals: removalsForSnapshot(refreshedBundle.snapshot),
         },
       });
       const finalizedRefreshed = store.readBundle(
@@ -552,6 +1532,7 @@ describe('review lifecycle actions', () => {
                 evidencePaths: [reviewItem.path],
               },
             ],
+            removals: removalsForSnapshot(snapshot),
           },
           parsingInMs: 7,
         },
@@ -627,6 +1608,7 @@ describe('review lifecycle actions', () => {
                 evidencePaths: [reviewItem.path],
               },
             ],
+            removals: removalsForSnapshot(snapshot),
           },
         },
         {
@@ -724,10 +1706,11 @@ describe('review lifecycle actions', () => {
     for (const root of roots) mkdirSync(root, { recursive: true });
     try {
       const accepted = createOrResumeReview(createRequest(roots[0]!));
-      const acceptedItem = createReviewStore(roots[0]!).readBundle(
+      const acceptedSnapshot = createReviewStore(roots[0]!).readBundle(
         accepted.reference.workspaceId,
         accepted.reference.revisionId,
-      ).snapshot.items[0]!;
+      ).snapshot;
+      const acceptedItem = acceptedSnapshot.items[0]!;
       await expect(
         applyReviewAnalysis({
           root: roots[0]!,
@@ -743,6 +1726,7 @@ describe('review lifecycle actions', () => {
                 evidencePaths: [acceptedItem.path],
               },
             ],
+            removals: removalsForSnapshot(acceptedSnapshot),
           },
         }),
       ).resolves.toMatchObject({ analysisFinalized: true });
@@ -1450,6 +2434,426 @@ describe('review lifecycle actions', () => {
       expect(thirdBundle.insights.files).toEqual([
         { path: 'src/b.ts', description: 'Updated file b summary.', confidence: 'high' },
       ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('persists removal rationales onto the finalized diff insights', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-persist-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = removalsForSnapshot(snapshot);
+      expect(removals).toHaveLength(1);
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+          items: [
+            {
+              reviewItemId: item.id,
+              description: 'Updates the staged fixture value.',
+              confidence: 'high',
+              evidencePaths: [item.path],
+            },
+          ],
+          removals,
+        },
+      });
+      const finalized = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.removals).toEqual(removals);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a diff analysis that omits a rationale for a captured removal', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-incomplete-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const created = createOrResumeReview(createRequest(root));
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      await expect(
+        applyReviewAnalysis({
+          root,
+          reference: created.reference,
+          analysis: {
+            kind: 'diff',
+            groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+            items: [
+              {
+                reviewItemId: item.id,
+                description: 'Updates the staged fixture value.',
+                confidence: 'high',
+                evidencePaths: [item.path],
+              },
+            ],
+            // Missing `removals` entirely - the captured hunk includes a one-line removal run.
+          },
+        }),
+      ).rejects.toThrow(/removal runs are missing a rationale/);
+      expect(
+        store.isAnalysisFinalized(created.reference.workspaceId, created.reference.revisionId),
+      ).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves a moved-to excerpt for a staged review by reading git's index", async () => {
+    const root = join(tmpdir(), `synergy-review-removals-excerpt-staged-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const calls: string[] = [];
+      const fixture: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'git show :src/other.ts') {
+            return { exitCode: 0, stdout: 'l1\nl2\nl3\nl4\nl5\nl6\n', stderr: '' };
+          }
+          return createRunner().run(command, args, options);
+        },
+      };
+      const runner = recordingRunner(fixture, calls);
+      const created = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = movedOutsideRationale(snapshot, item.id, {
+        path: 'src/other.ts',
+        start: 5,
+        end: 6,
+      });
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+          items: [
+            {
+              reviewItemId: item.id,
+              description: 'Updates the staged fixture value.',
+              confidence: 'high',
+              evidencePaths: [item.path],
+            },
+          ],
+          removals,
+        },
+        runner,
+      });
+      const finalized = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.removals?.[0]?.movedToExcerpt).toEqual({
+        path: 'src/other.ts',
+        start: 5,
+        lines: ['l5', 'l6'],
+      });
+      // The staged read seam must ask git for the indexed blob (":<path>"), not the worktree.
+      expect(calls).toContain('git show :src/other.ts');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves a moved-to excerpt for a PR review by reading the head commit', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-excerpt-pr-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const metadata = JSON.stringify({
+        number: 42,
+        title: 'Moved logic',
+        url: 'https://github.com/acme/repo/pull/42',
+        baseRefOid: 'base123',
+        headRefOid: 'head123',
+      });
+      const calls: string[] = [];
+      const fixture: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'gh pr view 42 --json number,title,url,baseRefOid,headRefOid') {
+            return { exitCode: 0, stdout: metadata, stderr: '' };
+          }
+          if (key === 'gh pr diff https://github.com/acme/repo/pull/42') {
+            return { exitCode: 0, stdout: PATCH, stderr: '' };
+          }
+          if (
+            key ===
+            'gh pr view https://github.com/acme/repo/pull/42 --json number,title,url,baseRefOid,headRefOid'
+          ) {
+            return { exitCode: 0, stdout: metadata, stderr: '' };
+          }
+          if (key === 'git rev-parse --show-toplevel') {
+            return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+          }
+          if (key === 'git show head123:src/other.ts') {
+            return { exitCode: 0, stdout: 'l1\nl2\nl3\nl4\nl5\nl6\n', stderr: '' };
+          }
+          throw new Error(`missing fixture for ${key}`);
+        },
+      };
+      const runner = recordingRunner(fixture, calls);
+      const created = createOrResumeReview({
+        root,
+        source: { kind: 'pr', selector: '42' },
+        runner,
+      });
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = movedOutsideRationale(snapshot, item.id, {
+        path: 'src/other.ts',
+        start: 5,
+        end: 6,
+      });
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+          items: [
+            {
+              reviewItemId: item.id,
+              description: 'Updates the PR fixture value.',
+              confidence: 'high',
+              evidencePaths: [item.path],
+            },
+          ],
+          removals,
+        },
+        runner,
+      });
+      const finalized = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.removals?.[0]?.movedToExcerpt).toEqual({
+        path: 'src/other.ts',
+        start: 5,
+        lines: ['l5', 'l6'],
+      });
+      // The PR read seam must pin to the captured head SHA, not the (possibly since-moved) branch tip.
+      expect(calls).toContain('git show head123:src/other.ts');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves a moved-to excerpt for an unstaged review by reading the worktree file', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-excerpt-unstaged-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const unstagedDiffCommand = [
+      'git',
+      'diff',
+      '--no-ext-diff',
+      '--binary',
+      '--',
+      ':(exclude).synergy/preview.runtime.json',
+      ':(exclude).synergy/preview.runtime.json.*',
+      ':(exclude).synergy/.preview.runtime.json.*.tmp',
+      ':(exclude).synergy/preview.start.lock',
+      ':(exclude).synergy/preview.start.lock.*',
+      ':(exclude).synergy/preview.pid',
+      ':(exclude).synergy/preview.log',
+    ].join(' ');
+    try {
+      const calls: string[] = [];
+      const fixture: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'git rev-parse --show-toplevel') {
+            return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+          }
+          if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+          if (key === unstagedDiffCommand) return { exitCode: 0, stdout: PATCH, stderr: '' };
+          if (key === 'git ls-files --others --exclude-standard -z') {
+            return { exitCode: 0, stdout: '', stderr: '' };
+          }
+          throw new Error(`missing fixture for ${key}`);
+        },
+      };
+      const runner = recordingRunner(fixture, calls);
+      const created = createOrResumeReview({
+        root,
+        source: { kind: 'unstaged' },
+        runner,
+        readFile: () => 'unused',
+      });
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = movedOutsideRationale(snapshot, item.id, {
+        path: 'src/other.ts',
+        start: 5,
+        end: 6,
+      });
+      const targetPath = join(root, 'src/other.ts');
+      await applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: {
+          kind: 'diff',
+          groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+          items: [
+            {
+              reviewItemId: item.id,
+              description: 'Updates the unstaged fixture value.',
+              confidence: 'high',
+              evidencePaths: [item.path],
+            },
+          ],
+          removals,
+        },
+        runner,
+        readFile: (path) => (path === targetPath ? 'l1\nl2\nl3\nl4\nl5\nl6\n' : undefined),
+      });
+      const finalized = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      );
+      expect(finalized.insights.removals?.[0]?.movedToExcerpt).toEqual({
+        path: 'src/other.ts',
+        start: 5,
+        lines: ['l5', 'l6'],
+      });
+      // Unstaged has no immutable Git pointer to read from, so the seam must be the worktree file
+      // (via readFile), never a git show.
+      expect(calls.some((call) => call.startsWith('git show'))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects analysis end-to-end when a moved-to target file cannot be read', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-excerpt-missing-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const runner: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'git show :src/missing.ts') {
+            return { exitCode: 1, stdout: '', stderr: 'fatal: path does not exist' };
+          }
+          return createRunner().run(command, args, options);
+        },
+      };
+      const created = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = movedOutsideRationale(snapshot, item.id, {
+        path: 'src/missing.ts',
+        start: 1,
+        end: 2,
+      });
+      await expect(
+        applyReviewAnalysis({
+          root,
+          reference: created.reference,
+          analysis: {
+            kind: 'diff',
+            groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+            items: [
+              {
+                reviewItemId: item.id,
+                description: 'Updates the staged fixture value.',
+                confidence: 'high',
+                evidencePaths: [item.path],
+              },
+            ],
+            removals,
+          },
+          runner,
+        }),
+      ).rejects.toThrow(/movedTo target was not found/);
+      expect(
+        store.isAnalysisFinalized(created.reference.workspaceId, created.reference.revisionId),
+      ).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects analysis end-to-end when a moved-to target range exceeds the file', async () => {
+    const root = join(tmpdir(), `synergy-review-removals-excerpt-oversized-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const runner: CommandRunner = {
+        run(command, args, options): CommandResult {
+          const key = [command, ...args].join(' ');
+          if (key === 'git show :src/other.ts') {
+            return { exitCode: 0, stdout: 'only one line\n', stderr: '' };
+          }
+          return createRunner().run(command, args, options);
+        },
+      };
+      const created = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const store = createReviewStore(root);
+      const snapshot = store.readBundle(
+        created.reference.workspaceId,
+        created.reference.revisionId,
+      ).snapshot;
+      const item = snapshot.items[0]!;
+      const removals = movedOutsideRationale(snapshot, item.id, {
+        path: 'src/other.ts',
+        start: 5,
+        end: 6,
+      });
+      await expect(
+        applyReviewAnalysis({
+          root,
+          reference: created.reference,
+          analysis: {
+            kind: 'diff',
+            groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+            items: [
+              {
+                reviewItemId: item.id,
+                description: 'Updates the staged fixture value.',
+                confidence: 'high',
+                evidencePaths: [item.path],
+              },
+            ],
+            removals,
+          },
+          runner,
+        }),
+      ).rejects.toThrow(/is out of range/);
+      expect(
+        store.isAnalysisFinalized(created.reference.workspaceId, created.reference.revisionId),
+      ).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

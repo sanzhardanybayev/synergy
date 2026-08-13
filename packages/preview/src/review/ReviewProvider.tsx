@@ -8,6 +8,7 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from 'react';
 import {
   getReviewBundle,
@@ -18,7 +19,12 @@ import {
   postReviewQuestion,
 } from '../api.js';
 import { EMPTY_REVIEW_STATE, reviewReducer } from './review-state.js';
-import type { ReviewClient, ReviewContextValue } from './types.js';
+import type {
+  InReviewRemovalTarget,
+  JumpOrigin,
+  ReviewClient,
+  ReviewContextValue,
+} from './types.js';
 import { useReviewOperations } from './useReviewOperations.js';
 import { useReviewStream } from './useReviewStream.js';
 import {
@@ -91,6 +97,30 @@ export function ReviewProvider({
     }
   }, [currentReferenceKey]);
 
+  // Jump navigation is session-local, view-only state: it never reaches progress.json or the
+  // server. `jumpOrigin` persists until the next jump (or an explicit dismiss); `flashedRowIds`
+  // is a transient ~1.2s highlight that a pending timeout clears, and that timeout is cleaned up
+  // both on unmount and whenever the revision identity changes underneath it.
+  const [jumpOrigin, setJumpOrigin] = useState<JumpOrigin | null>(null);
+  const [flashedRowIds, setFlashedRowIds] = useState<string[]>([]);
+  const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearFlashTimeout = useCallback((): void => {
+    if (flashTimeoutRef.current !== null) {
+      clearTimeout(flashTimeoutRef.current);
+      flashTimeoutRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearFlashTimeout, [clearFlashTimeout]);
+  const jumpReferenceKeyRef = useRef(currentReferenceKey);
+  useEffect(() => {
+    if (jumpReferenceKeyRef.current !== currentReferenceKey) {
+      jumpReferenceKeyRef.current = currentReferenceKey;
+      clearFlashTimeout();
+      setJumpOrigin(null);
+      setFlashedRowIds([]);
+    }
+  }, [currentReferenceKey, clearFlashTimeout]);
+
   const insights = state.bundle?.insights;
   const items = state.bundle?.snapshot.items;
   const chapters = useMemo(
@@ -122,6 +152,31 @@ export function ReviewProvider({
     dispatch({ type: 'walkthrough-reveal-all' });
   }, []);
 
+  const jumpTo = useCallback(
+    (target: InReviewRemovalTarget, origin: JumpOrigin): void => {
+      // A jump touches only the LOCAL reveal floor, never persisted walkthrough progress: it
+      // sets the active item (session-local, view-only) and raises `localFloorRef` directly so
+      // the target chapter is revealed, but it deliberately skips `advanceTo`/
+      // `operations.advanceWalkthrough` - that would PATCH `activeGroupId`/`activeReviewItemId`
+      // to the server and, because the advance is monotonic, permanently move the reviewer's
+      // stored story position with no way for a later "jump back" to undo it.
+      operations.setActiveItem(target.reviewItemId);
+      const chapter = chapterOf(chapters, target.reviewItemId);
+      if (chapter && chapter.index + 1 > localFloorRef.current) {
+        localFloorRef.current = chapter.index + 1;
+      }
+      setJumpOrigin(origin);
+      setFlashedRowIds(target.rowIds);
+      clearFlashTimeout();
+      flashTimeoutRef.current = setTimeout(() => {
+        flashTimeoutRef.current = null;
+        setFlashedRowIds([]);
+      }, 1200);
+    },
+    [chapters, clearFlashTimeout, operations],
+  );
+  const clearJumpOrigin = useCallback((): void => setJumpOrigin(null), []);
+
   const selectedLineIds = state.activeItemId ? (state.selections[state.activeItemId] ?? []) : [];
   const questionDraft = state.activeItemId ? (state.questionDrafts[state.activeItemId] ?? '') : '';
   const value = useMemo<ReviewContextValue>(
@@ -150,11 +205,21 @@ export function ReviewProvider({
         advanceTo,
         setRevealAll,
       },
+      jump: {
+        origin: jumpOrigin,
+        flashedRowIds,
+        jumpTo,
+        clearOrigin: clearJumpOrigin,
+      },
       ...operations,
     }),
     [
       advanceTo,
       chapters,
+      clearJumpOrigin,
+      flashedRowIds,
+      jumpOrigin,
+      jumpTo,
       operations,
       questionDraft,
       revealedCount,

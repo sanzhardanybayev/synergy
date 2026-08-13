@@ -16,9 +16,275 @@
  * @property {Record<string, 'clean'|'drifted'|'missing'>} drift
  * @property {string} projectRoot
  */
+import { buildRemovalStrips, resolveBrowserReviewItemContext } from '@synergy/review-core/browser';
 import { highlightHunk, resolveLanguage } from '@synergy/review-core/highlight';
 
-(() => {
+/**
+ * Module-scope DOM helpers live outside `startWebview()` (rather than in the IIFE the rest of
+ * this file used to be, before removal-strip rendering needed to be unit-testable) so
+ * `renderDiffLines`/`renderRemovalStrip` can be imported and exercised directly under vitest +
+ * jsdom without executing `startWebview()` - which calls `acquireVsCodeApi()`, a global that
+ * only exists inside a real VS Code webview. See the `export` and the guarded call at the
+ * bottom of this file.
+ */
+
+function el(tag, props, children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (key === 'style') {
+      // The CSP declares `style-src` without 'unsafe-inline', so a `style` ATTRIBUTE is
+      // blocked and silently no-ops. Set `node.style.<property>` (CSSOM) on the returned
+      // element instead - CSSOM writes are not subject to style-src.
+      throw new Error('el(): "style" is not supported - set node.style.<property> instead');
+    }
+    if (key === 'className') node.className = value;
+    else if (key.startsWith('on') && typeof value === 'function') {
+      node.addEventListener(key.slice(2).toLowerCase(), value);
+    } else if (value !== undefined && value !== null && value !== false) {
+      node.setAttribute(key, value === true ? '' : String(value));
+    }
+  }
+  for (const child of children || []) {
+    if (child === null || child === undefined) continue;
+    node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+  }
+  return node;
+}
+
+/** VS Code stamps `vscode-light` / `vscode-dark` / `vscode-high-contrast` on <body>. */
+function themeMode() {
+  return document.body.classList.contains('vscode-light') ? 'light' : 'dark';
+}
+
+/**
+ * Replaces a line's plain text with syntax token spans.
+ *
+ * The CSP forbids inline `style` ATTRIBUTES, so each token color is written through CSSOM. The
+ * `+`/`-` marker keeps no inline color, so it still inherits the add/remove color from panel.css
+ * while the code itself takes the syntax palette; the row background carries add/remove either way.
+ */
+function paintTokens(textEl, marker, tokens) {
+  if (!textEl.isConnected || !tokens || tokens.length === 0) return;
+  const markerEl = el('span', { className: 'diff-marker' }, [marker]);
+  const spans = tokens.map((token) => {
+    const span = el('span', {}, [token.text]);
+    if (token.color) span.style.color = token.color;
+    if (token.italic) span.style.fontStyle = 'italic';
+    if (token.bold) span.style.fontWeight = '600';
+    return span;
+  });
+  textEl.replaceChildren(markerEl, ...spans);
+}
+
+/** Human label for each removal reason; mirrors REASON_LABEL in packages/preview/src/review/RemovalStrip.tsx. */
+const REMOVAL_REASON_LABEL = {
+  moved: 'moved',
+  merged: 'merged',
+  replaced: 'replaced',
+  'dead-code': 'dead-code',
+  obsolete: 'obsolete',
+  'extracted-to-dep': 'extracted to dep',
+  unclear: 'unclear',
+};
+
+/**
+ * One collapsed row per removal run: category, size, and (when resolvable) a jump destination
+ * stay visible while scanning. Expanding reveals the rationale sentence and, for a target outside
+ * the captured review, a read-only peek of the destination lines plus an "open in editor" action.
+ * Mirrors packages/preview/src/review/RemovalStrip.tsx; class names follow this file's existing
+ * (unprefixed, single-hyphen) naming instead of that file's `review-removal__` BEM convention.
+ *
+ * A run with no rationale renders nothing - returns `null`, same contract as the preview.
+ *
+ * @param {import('@synergy/review-core/browser').RemovalStrip} strip
+ * @param {{onJumpToReviewItem:(reviewItemId:string)=>void, onOpenFile:(path:string, line:number)=>void}} handlers
+ */
+function renderRemovalStrip(strip, handlers) {
+  const { rationale, run, target } = strip;
+  if (!rationale) return null;
+  const count = run.end - run.start + 1;
+
+  const caret = el('span', { className: 'removal-caret', 'aria-hidden': 'true' }, ['▸']);
+  const cat = el('span', { className: `removal-cat removal-cat-${rationale.reason}` }, [
+    REMOVAL_REASON_LABEL[rationale.reason] ?? rationale.reason,
+  ]);
+  const countLabel = el('span', { className: 'removal-count' }, [
+    `${count} ${count === 1 ? 'line' : 'lines'} removed`,
+  ]);
+
+  const detail = el('div', { className: 'removal-detail' }, [el('p', {}, [rationale.description])]);
+  if (target.kind === 'excerpt') {
+    const peekHead = el('div', { className: 'removal-peek-head' }, [
+      `${target.path} · lines ${target.start}-${target.start + target.lines.length - 1}`,
+    ]);
+    const pre = el(
+      'pre',
+      {},
+      target.lines.map((line) => el('div', {}, [line])),
+    );
+    const openButton = el(
+      'button',
+      {
+        type: 'button',
+        className: 'removal-open-file',
+        'data-open-path': target.path,
+        'data-open-line': String(target.start),
+        onClick: (event) => {
+          event.stopPropagation();
+          handlers.onOpenFile(target.path, target.start);
+        },
+      },
+      ['Open in editor'],
+    );
+    detail.appendChild(el('div', { className: 'removal-peek' }, [peekHead, pre]));
+    detail.appendChild(openButton);
+  }
+
+  const toggle = el(
+    'button',
+    {
+      type: 'button',
+      className: 'removal-toggle',
+      'aria-expanded': 'false',
+      onClick: (event) => {
+        event.stopPropagation();
+        const expanded = toggle.getAttribute('aria-expanded') !== 'true';
+        toggle.setAttribute('aria-expanded', String(expanded));
+        caret.textContent = expanded ? '▾' : '▸';
+        container.classList.toggle('is-expanded', expanded);
+      },
+    },
+    [caret, cat, countLabel],
+  );
+
+  const rowChildren = [toggle];
+  if (target.kind === 'in-review') {
+    rowChildren.push(
+      el(
+        'button',
+        {
+          type: 'button',
+          className: 'removal-jump',
+          onClick: (event) => {
+            event.stopPropagation();
+            handlers.onJumpToReviewItem(target.reviewItemId);
+          },
+        },
+        [`→ ${target.path}:${target.start}`],
+      ),
+    );
+  }
+  const row = el('div', { className: 'removal-row' }, rowChildren);
+  const container = el('div', { className: 'removal-strip' }, [row, detail]);
+  return container;
+}
+
+/**
+ * Renders the hunk body with its captured text, then upgrades it to syntax-highlighted spans
+ * once the grammar resolves. Highlighting is asynchronous and best-effort: if it never resolves,
+ * or the language is unsupported, the reviewer keeps looking at the exact captured lines.
+ *
+ * When `context` is supplied, also renders one removal-rationale strip (see `renderRemovalStrip`)
+ * above each removed run that carries agent-authored rationale - mirrors how
+ * packages/preview/src/review/DiffViewer.tsx places `<RemovalStrip>` above its run's first row.
+ * Deriving the strips reuses the exact same rows `resolveBrowserReviewItemContext` would hand the
+ * preview, so a mismatch between `hunk` and the snapshot (should never happen, but the two are
+ * looked up independently) fails soft: no strips, not a broken diff.
+ *
+ * @param {any} hunk
+ * @param {string} path
+ * @param {{reviewItemId:string, snapshot:any, insights:any, onJumpToReviewItem:(reviewItemId:string)=>void, onOpenFile:(path:string, line:number)=>void}} [context]
+ */
+function renderDiffLines(hunk, path, context) {
+  const textEls = [];
+  let rows = [];
+  let strips = [];
+  if (context) {
+    try {
+      const itemContext = resolveBrowserReviewItemContext(context.snapshot, context.reviewItemId);
+      rows = itemContext.rows.filter((row) => row.kind !== 'scope');
+      strips = buildRemovalStrips(rows, context.reviewItemId, context.snapshot, context.insights);
+    } catch {
+      rows = [];
+      strips = [];
+    }
+  }
+  const stripByRowId = new Map(strips.map((strip) => [strip.run.lineIds[0], strip]));
+
+  const rowNodes = [];
+  hunk.lines.forEach((line, index) => {
+    const rowId = rows[index]?.id;
+    const strip = rowId !== undefined ? stripByRowId.get(rowId) : undefined;
+    if (strip && context) {
+      const stripEl = renderRemovalStrip(strip, context);
+      if (stripEl) rowNodes.push(stripEl);
+    }
+    const kindClass =
+      line.kind === 'add' ? 'diff-line-add' : line.kind === 'remove' ? 'diff-line-remove' : '';
+    const marker = line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' ';
+    const textEl = el('span', { className: 'diff-text' }, [`${marker}${line.text}`]);
+    textEls.push({ textEl, marker });
+    rowNodes.push(
+      el('div', { className: `diff-line ${kindClass}` }, [
+        el('span', { className: 'diff-gutter' }, [
+          line.oldLine === null ? '' : String(line.oldLine),
+        ]),
+        el('span', { className: 'diff-gutter' }, [
+          line.newLine === null ? '' : String(line.newLine),
+        ]),
+        textEl,
+      ]),
+    );
+  });
+
+  const lang = resolveLanguage(path);
+  if (lang) {
+    const rowsForHighlight = hunk.lines.map((line) => ({ kind: line.kind, text: line.text }));
+    highlightHunk(rowsForHighlight, lang, themeMode())
+      .then((lines) => {
+        lines.forEach((tokens, index) => {
+          const target = textEls[index];
+          if (target) paintTokens(target.textEl, target.marker, tokens);
+        });
+      })
+      .catch(() => {
+        // Presentation only - the captured text is already on screen.
+      });
+  }
+
+  return el('div', { className: 'hunk-diff' }, rowNodes);
+}
+
+/**
+ * Renders JUST the removal strips for a review item - no diff line bodies - so a reviewer with
+ * the diff toggle OFF still sees that a removal run exists and carries a rationale. Without this,
+ * collapsing the diff hid every removal strip along with it, silently defeating the coverage gate
+ * the whole feature exists to guarantee (every removed run must carry a typed reason). This is
+ * the least intrusive presentation available: it reuses `renderRemovalStrip` as-is (same collapsed
+ * category/count row, same expand-to-read-the-sentence interaction) rather than inventing a new
+ * summary widget, so the strip looks and behaves identically whether the diff is open or closed.
+ *
+ * @param {{reviewItemId:string, snapshot:any, insights:any, onJumpToReviewItem:(reviewItemId:string)=>void, onOpenFile:(path:string, line:number)=>void}} [context]
+ */
+function renderRemovalSummary(context) {
+  if (!context) return null;
+  let rows = [];
+  let strips = [];
+  try {
+    const itemContext = resolveBrowserReviewItemContext(context.snapshot, context.reviewItemId);
+    rows = itemContext.rows.filter((row) => row.kind !== 'scope');
+    strips = buildRemovalStrips(rows, context.reviewItemId, context.snapshot, context.insights);
+  } catch {
+    strips = [];
+  }
+  const stripEls = strips
+    .map((strip) => renderRemovalStrip(strip, context))
+    .filter((node) => node !== null);
+  if (stripEls.length === 0) return null;
+  return el('div', { className: 'hunk-diff hunk-diff-collapsed' }, stripEls);
+}
+
+function startWebview() {
   const vscode = acquireVsCodeApi();
   const app = document.getElementById('app');
 
@@ -55,29 +321,6 @@ import { highlightHunk, resolveLanguage } from '@synergy/review-core/highlight';
 
   function post(message) {
     vscode.postMessage(message);
-  }
-
-  function el(tag, props, children) {
-    const node = document.createElement(tag);
-    for (const [key, value] of Object.entries(props || {})) {
-      if (key === 'style') {
-        // The CSP declares `style-src` without 'unsafe-inline', so a `style` ATTRIBUTE is
-        // blocked and silently no-ops. Set `node.style.<property>` (CSSOM) on the returned
-        // element instead - CSSOM writes are not subject to style-src.
-        throw new Error('el(): "style" is not supported - set node.style.<property> instead');
-      }
-      if (key === 'className') node.className = value;
-      else if (key.startsWith('on') && typeof value === 'function') {
-        node.addEventListener(key.slice(2).toLowerCase(), value);
-      } else if (value !== undefined && value !== null && value !== false) {
-        node.setAttribute(key, value === true ? '' : String(value));
-      }
-    }
-    for (const child of children || []) {
-      if (child === null || child === undefined) continue;
-      node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
-    }
-    return node;
   }
 
   function formatTime(iso) {
@@ -221,73 +464,6 @@ import { highlightHunk, resolveLanguage } from '@synergy/review-core/highlight';
     return file.hunks.find((hunk) => hunk.reviewItemId === item.id);
   }
 
-  /** VS Code stamps `vscode-light` / `vscode-dark` / `vscode-high-contrast` on <body>. */
-  function themeMode() {
-    return document.body.classList.contains('vscode-light') ? 'light' : 'dark';
-  }
-
-  /**
-   * Replaces a line's plain text with syntax token spans.
-   *
-   * The CSP forbids inline `style` ATTRIBUTES, so each token color is written through CSSOM. The
-   * `+`/`-` marker keeps no inline color, so it still inherits the add/remove color from panel.css
-   * while the code itself takes the syntax palette; the row background carries add/remove either way.
-   */
-  function paintTokens(textEl, marker, tokens) {
-    if (!textEl.isConnected || !tokens || tokens.length === 0) return;
-    const markerEl = el('span', { className: 'diff-marker' }, [marker]);
-    const spans = tokens.map((token) => {
-      const span = el('span', {}, [token.text]);
-      if (token.color) span.style.color = token.color;
-      if (token.italic) span.style.fontStyle = 'italic';
-      if (token.bold) span.style.fontWeight = '600';
-      return span;
-    });
-    textEl.replaceChildren(markerEl, ...spans);
-  }
-
-  /**
-   * Renders the hunk body with its captured text, then upgrades it to syntax-highlighted spans
-   * once the grammar resolves. Highlighting is asynchronous and best-effort: if it never resolves,
-   * or the language is unsupported, the reviewer keeps looking at the exact captured lines.
-   */
-  function renderDiffLines(hunk, path) {
-    const textEls = [];
-    const rows = hunk.lines.map((line) => {
-      const kindClass =
-        line.kind === 'add' ? 'diff-line-add' : line.kind === 'remove' ? 'diff-line-remove' : '';
-      const marker = line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' ';
-      const textEl = el('span', { className: 'diff-text' }, [`${marker}${line.text}`]);
-      textEls.push({ textEl, marker });
-      return el('div', { className: `diff-line ${kindClass}` }, [
-        el('span', { className: 'diff-gutter' }, [
-          line.oldLine === null ? '' : String(line.oldLine),
-        ]),
-        el('span', { className: 'diff-gutter' }, [
-          line.newLine === null ? '' : String(line.newLine),
-        ]),
-        textEl,
-      ]);
-    });
-
-    const lang = resolveLanguage(path);
-    if (lang) {
-      const rowsForHighlight = hunk.lines.map((line) => ({ kind: line.kind, text: line.text }));
-      highlightHunk(rowsForHighlight, lang, themeMode())
-        .then((lines) => {
-          lines.forEach((tokens, index) => {
-            const target = textEls[index];
-            if (target) paintTokens(target.textEl, target.marker, tokens);
-          });
-        })
-        .catch(() => {
-          // Presentation only - the captured text is already on screen.
-        });
-    }
-
-    return el('div', { className: 'hunk-diff' }, rows);
-  }
-
   /** @param {SerializedBundle} bundle */
   function renderHunkRow(bundle, item) {
     const reviewed = isReviewed(bundle, item.id);
@@ -331,6 +507,24 @@ import { highlightHunk, resolveLanguage } from '@synergy/review-core/highlight';
       ['diff'],
     );
     const hunk = state.diffVisible ? hunkForItem(bundle, item) : undefined;
+    // The jump affordance reuses the existing `openHunk` message (same as the "diff" button and
+    // the row click) - it already opens the target hunk's range in the editor with decorations,
+    // which is exactly what "jump to the moved-to location" means for this host. The "open in
+    // editor" action on an out-of-review excerpt is a plain `openFile` with a destination line.
+    //
+    // Built for every diff-snapshot hunk item regardless of `state.diffVisible`: removal strips
+    // must stay reachable with the diff toggle off, not vanish along with the diff body (see
+    // `renderRemovalSummary` below for the collapsed presentation).
+    const removalContext =
+      bundle.bundle.snapshot.kind === 'diff'
+        ? {
+            reviewItemId: item.id,
+            snapshot: bundle.bundle.snapshot,
+            insights: bundle.bundle.insights,
+            onJumpToReviewItem: (reviewItemId) => post({ kind: 'openHunk', reviewItemId }),
+            onOpenFile: (path, line) => post({ kind: 'openFile', path, line }),
+          }
+        : undefined;
 
     return el(
       'div',
@@ -345,7 +539,9 @@ import { highlightHunk, resolveLanguage } from '@synergy/review-core/highlight';
           diffButton,
         ]),
         insight ? el('div', { className: 'hunk-description' }, [insight.description]) : null,
-        hunk ? renderDiffLines(hunk, item.path) : null,
+        hunk
+          ? renderDiffLines(hunk, item.path, removalContext)
+          : renderRemovalSummary(removalContext),
         note,
       ],
     );
@@ -734,4 +930,11 @@ import { highlightHunk, resolveLanguage } from '@synergy/review-core/highlight';
   // The extension host resets its toggle to `true` on activation; replay the persisted value so
   // editor decorations stay in sync with what this panel shows.
   if (!state.diffVisible) post({ kind: 'setDiffVisible', value: false });
-})();
+}
+
+// `acquireVsCodeApi` exists only inside a real VS Code webview - guard the bootstrap so this
+// module can be imported under vitest + jsdom (see `renderDiffLines`/`renderRemovalStrip` tests)
+// without it throwing immediately on import.
+if (typeof acquireVsCodeApi === 'function') startWebview();
+
+export { renderDiffLines, renderRemovalStrip, renderRemovalSummary };

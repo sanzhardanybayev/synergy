@@ -6,6 +6,7 @@ import type {
   ReviewRef,
   WalkthroughPosition,
 } from '@synergy/review-core';
+import type { ResolvedRemovalTarget } from '@synergy/review-core/browser';
 import type {
   ReviewBundleResponse,
   ReviewQuestionResponse,
@@ -45,6 +46,15 @@ export interface FileChangeViewerProps {
 export type ReviewLoadStatus = 'loading' | 'ready' | 'error';
 export type ReviewStreamStatus = 'connecting' | 'connected' | 'interrupted';
 
+/** The only removal target shape a jump can land on - the other two kinds have nothing to jump to. */
+export type InReviewRemovalTarget = Extract<ResolvedRemovalTarget, { kind: 'in-review' }>;
+
+export interface JumpOrigin {
+  reviewItemId: string;
+  /** `path:line` - names where the jump came from so the back chip is self-explanatory. */
+  label: string;
+}
+
 export interface ReviewContextValue {
   status: ReviewLoadStatus;
   error: string | null;
@@ -69,6 +79,15 @@ export interface ReviewContextValue {
     revealAll: boolean;
     advanceTo(reviewItemId: string): void;
     setRevealAll(): void;
+  };
+  jump: {
+    /** Set by the most recent `jumpTo`; persists until the next jump or `clearOrigin`. */
+    origin: JumpOrigin | null;
+    /** Row ids to render with a transient flash; cleared automatically ~1.2s after a jump. */
+    flashedRowIds: string[];
+    /** Moves the walkthrough cursor to the target item and records where the jump came from. Never touches review status. */
+    jumpTo(target: InReviewRemovalTarget, origin: JumpOrigin): void;
+    clearOrigin(): void;
   };
   retry(): Promise<void>;
   setActiveItem(reviewItemId: string): void;

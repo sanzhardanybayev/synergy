@@ -390,6 +390,19 @@ describe('ReviewViewProvider', () => {
     expect(bundle?.bundle.bundle.progress.items['item-1']?.note).toBe('Check the edge case.');
   });
 
+  it('openFile with a destination line opens the file at that line via the Host seam', () => {
+    webview.send({ kind: 'ready' });
+    webview.send({ kind: 'openSession', workspaceId: ref.workspaceId, revisionId: ref.revisionId });
+
+    webview.send({ kind: 'openFile', path: 'src/example.ts', line: 2 });
+
+    expect(host.openFileAtCalls).toContainEqual({
+      absPath: join(root, 'src/example.ts'),
+      startLine: 2,
+      endLine: 2,
+    });
+  });
+
   it('advanceWalkthrough patches the walkthrough cursor and triggers exactly one refresh', () => {
     // Seed a second workspace whose insights carry two groups, so patchWalkthroughPosition has
     // somewhere valid to move the cursor.

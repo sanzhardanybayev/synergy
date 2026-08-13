@@ -34,6 +34,7 @@ body.vscode-light {
   --syn-status-in-progress: #a16207;
   --syn-status-blocked: #c03a2b;
   --syn-status-done: #22794a;
+  --syn-status-shipped: #17708b;
 
   --syn-danger: #c03a2b;
   --syn-danger-soft: rgba(192, 58, 43, 0.1);
@@ -75,6 +76,7 @@ body.vscode-high-contrast {
   --syn-status-in-progress: #d9a13c;
   --syn-status-blocked: #e0644e;
   --syn-status-done: #55b47c;
+  --syn-status-shipped: #56aec9;
 
   --syn-danger: #e0644e;
   --syn-danger-soft: rgba(224, 100, 78, 0.14);
@@ -120,6 +122,7 @@ body.vscode-high-contrast-light {
   --syn-status-in-progress: #a16207;
   --syn-status-blocked: #c03a2b;
   --syn-status-done: #22794a;
+  --syn-status-shipped: #17708b;
 
   --syn-danger: #c03a2b;
   --syn-danger-soft: rgba(192, 58, 43, 0.1);
@@ -632,4 +635,146 @@ input[type="checkbox"] {
 .drift-badge-missing {
   background: var(--syn-danger-soft);
   color: var(--syn-danger);
+}
+
+/* ---- Removal rationale strips ----
+ * Ports packages/preview/src/review/review.css's `.review-removal*` rules to this pane's plain
+ * (unprefixed, single-hyphen) class-naming convention. Same "Ember & Graphite" tokens, so the
+ * strip reads as the same product in both hosts.
+ */
+
+.removal-strip {
+  display: grid;
+  gap: 2px;
+  padding: 2px 8px;
+  margin: 4px 0 0;
+  background: linear-gradient(to right, var(--syn-danger-soft), transparent 60%);
+  border-top: 1px solid var(--syn-border);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 11px;
+  color: var(--syn-fg-muted);
+}
+
+.removal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.removal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.removal-caret {
+  width: 1em;
+  text-align: center;
+  color: var(--syn-fg-muted);
+}
+
+/* CSS-only reveal for the toggle's class swap (see panel.js's `renderRemovalStrip`) - no JS
+ * re-render needed to expand/collapse a strip. */
+.removal-strip:not(.is-expanded) .removal-detail {
+  display: none;
+}
+
+.removal-cat {
+  border-radius: var(--syn-radius-full);
+  border: 1px solid var(--syn-border-strong);
+  padding: 0 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Two-tier coloring is intentional, not a placeholder: moved/merged are hued because the logic
+ * still exists somewhere and can be navigated to; dead-code/obsolete/extracted-to-dep stay
+ * neutral (the default `.removal-cat` border/text) because nothing survives to jump to. unclear
+ * also stays neutral - it isn't a claim that nothing survives, only that the agent could not
+ * verify a destination, so it is not navigable either and gets no hue of its own. That split IS
+ * the signal - don't give all seven reasons their own color. See the matching comment in
+ * packages/preview/src/review/review.css. */
+.removal-cat-moved,
+.removal-cat-merged {
+  color: var(--syn-status-shipped);
+  border-color: var(--syn-status-shipped);
+}
+
+.removal-cat-replaced {
+  color: var(--syn-warn);
+  border-color: var(--syn-warn);
+}
+
+.removal-count {
+  color: var(--syn-fg-subtle);
+}
+
+.removal-jump {
+  border: 0;
+  border-bottom: 1px dashed var(--syn-accent-border);
+  background: transparent;
+  padding: 0;
+  color: var(--syn-accent-fg);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.removal-detail {
+  display: flex;
+  flex-direction: column;
+  padding-left: calc(1em + 6px);
+  color: var(--syn-fg);
+}
+
+.removal-detail p {
+  margin: 4px 0;
+}
+
+.removal-peek {
+  border: 1px solid var(--syn-border-strong);
+  border-radius: var(--syn-radius-sm);
+  background: var(--syn-bg-sunken);
+  overflow-x: auto;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
+
+.removal-peek-head {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--syn-border-strong);
+  color: var(--syn-fg-muted);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 10px;
+}
+
+.removal-peek pre {
+  margin: 0;
+  padding: 6px;
+}
+
+.removal-open-file {
+  align-self: flex-start;
+  border: 1px solid var(--syn-border-strong);
+  background: var(--syn-bg-raised);
+  color: var(--syn-fg);
+  border-radius: var(--syn-radius-sm);
+  padding: 2px 8px;
+  margin: 4px 0 0;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.removal-open-file:hover {
+  border-color: var(--syn-accent-border);
+  color: var(--syn-accent-fg);
 }

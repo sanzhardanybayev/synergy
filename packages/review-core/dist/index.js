@@ -1,7 +1,11 @@
 import {
+  buildRemovalStrips,
+  deriveRemovalRuns,
   deriveReviewReadiness,
+  deriveSnapshotRemovalRuns,
+  resolveRemovalTarget,
   reviewRowId
-} from "./chunk-VDPZNTKV.js";
+} from "./chunk-XNYFNTV3.js";
 import {
   buildDiffSnapshot,
   capturePr,
@@ -124,6 +128,11 @@ function compareReviewSourceFreshnessAsync(snapshot, root, options = {}) {
   });
 }
 
+// src/removal-hash.ts
+function removalRunHash(texts) {
+  return hashText(texts.join("\n"));
+}
+
 // src/reconcile.ts
 function isCarryable(progress) {
   return progress?.status === "reviewed" || progress?.status === "carried-forward";
@@ -158,6 +167,41 @@ function carryForwardFileInsights(previousInsights, nextSnapshot, carriedItemIds
     const items = nextItemsByPath.get(file.path);
     return items?.every((item) => carriedItemIds.has(item.id)) ?? false;
   });
+  return carried.length > 0 ? carried : void 0;
+}
+function carryForwardRemovals(previousInsights, previousSnapshot, currentSnapshot, inheritance) {
+  const previousRemovals = previousInsights.removals ?? [];
+  if (previousRemovals.length === 0) return void 0;
+  const byItem = (runs) => {
+    const index = /* @__PURE__ */ new Map();
+    for (const run of runs) {
+      const list = index.get(run.reviewItemId) ?? [];
+      list.push(run);
+      index.set(run.reviewItemId, list);
+    }
+    return index;
+  };
+  const previousRuns = byItem(deriveSnapshotRemovalRuns(previousSnapshot));
+  const currentRuns = byItem(deriveSnapshotRemovalRuns(currentSnapshot));
+  const carried = [];
+  for (const [currentItemId, previousItemId] of inheritance) {
+    const before = previousRuns.get(previousItemId) ?? [];
+    const after = currentRuns.get(currentItemId) ?? [];
+    if (before.length !== after.length) continue;
+    for (const [ordinal, beforeRun] of before.entries()) {
+      const afterRun = after[ordinal];
+      if (removalRunHash(beforeRun.texts) !== removalRunHash(afterRun.texts)) continue;
+      const rationale = previousRemovals.find(
+        (candidate) => candidate.reviewItemId === previousItemId && candidate.run.start === beforeRun.start && candidate.run.end === beforeRun.end
+      );
+      if (!rationale) continue;
+      carried.push({
+        ...rationale,
+        reviewItemId: currentItemId,
+        run: { path: afterRun.path, start: afterRun.start, end: afterRun.end }
+      });
+    }
+  }
   return carried.length > 0 ? carried : void 0;
 }
 function reconcileReview(previous, currentSnapshot, now) {
@@ -208,7 +252,26 @@ function reconcileReview(previous, currentSnapshot, now) {
     Object.entries(items).filter(([, itemProgress]) => itemProgress.status === "carried-forward").map(([id]) => id)
   );
   const files = carryForwardFileInsights(previous.insights, currentSnapshot, carriedItemIds);
-  return { schemaVersion: 1, updatedAt: now, items, insights: { files } };
+  const inheritance = /* @__PURE__ */ new Map();
+  for (const id of exactStateIds) {
+    inheritance.set(id, id);
+  }
+  for (const id of carriedItemIds) {
+    const inheritedFrom = items[id]?.inheritedFrom;
+    if (inheritedFrom) inheritance.set(id, inheritedFrom.reviewItemId);
+  }
+  const removals = carryForwardRemovals(
+    previous.insights,
+    previous.snapshot,
+    currentSnapshot,
+    inheritance
+  );
+  return {
+    schemaVersion: 1,
+    updatedAt: now,
+    items,
+    insights: { files, ...removals ? { removals } : {} }
+  };
 }
 
 // src/review-lines.ts
@@ -798,6 +861,40 @@ var fileInsightSchema = {
     confidence: { enum: ["high", "medium", "low"] }
   }
 };
+var removalRunRefSchema = {
+  type: "object",
+  required: ["path", "start", "end"],
+  additionalProperties: false,
+  properties: {
+    path: nonEmptyString,
+    start: { type: "integer", minimum: 1 },
+    end: { type: "integer", minimum: 1 }
+  }
+};
+var removalRationaleSchema = {
+  type: "object",
+  required: ["reviewItemId", "run", "reason", "description"],
+  additionalProperties: false,
+  properties: {
+    reviewItemId: nonEmptyString,
+    run: removalRunRefSchema,
+    reason: {
+      enum: ["moved", "merged", "replaced", "dead-code", "obsolete", "extracted-to-dep", "unclear"]
+    },
+    description: nonEmptyString,
+    movedTo: removalRunRefSchema,
+    movedToExcerpt: {
+      type: "object",
+      required: ["path", "start", "lines"],
+      additionalProperties: false,
+      properties: {
+        path: nonEmptyString,
+        start: { type: "integer", minimum: 1 },
+        lines: { type: "array", items: string }
+      }
+    }
+  }
+};
 var reviewInsightsSchema = {
   type: "object",
   required: ["schemaVersion", "revisionId", "groups", "items"],
@@ -834,7 +931,8 @@ var reviewInsightsSchema = {
         }
       }
     },
-    files: { type: "array", items: fileInsightSchema }
+    files: { type: "array", items: fileInsightSchema },
+    removals: { type: "array", items: removalRationaleSchema }
   }
 };
 var itemProgressSchema = {
@@ -1094,6 +1192,9 @@ function assertReviewAnswer(value) {
   assertSchema(value, validators.answer, "answer");
   assertSafeReviewSegment(value.id, "answer");
 }
+
+// src/types.ts
+var RELOCATING_REMOVAL_REASONS = ["moved", "merged", "replaced"];
 
 // src/store.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
@@ -2962,6 +3063,7 @@ function createReviewStore(projectRoot, options = {}) {
   };
 }
 export {
+  RELOCATING_REMOVAL_REASONS,
   ReviewCoreError,
   ReviewFreshnessAsyncError,
   SAFE_SEGMENT,
@@ -2978,6 +3080,7 @@ export {
   assertSafeReviewSegment,
   atomicWriteJson,
   buildDiffSnapshot,
+  buildRemovalStrips,
   buildScopeSnapshot,
   capturePr,
   captureReviewSource,
@@ -2991,7 +3094,9 @@ export {
   createHunkReviewItem,
   createQuestionQueue,
   createReviewStore,
+  deriveRemovalRuns,
   deriveReviewReadiness,
+  deriveSnapshotRemovalRuns,
   enqueueQuestion,
   failQuestion,
   formatReviewRef,
@@ -3008,9 +3113,11 @@ export {
   reconcileReview,
   reconciliationKey,
   releaseClaim,
+  removalRunHash,
   removeReviewListener,
   renewClaim,
   repositoryName,
+  resolveRemovalTarget,
   resolveRepositoryRoot,
   resolveReviewItemContext,
   resolveReviewLineSelection,

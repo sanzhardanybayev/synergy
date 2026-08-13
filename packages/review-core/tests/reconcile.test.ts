@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type DiffFile,
+  type DiffHunk,
+  type DiffReviewSnapshot,
+  type RemovalRationale,
   type ReviewBundle,
   type ReviewItem,
   type ReviewItemProgress,
@@ -58,6 +62,164 @@ function makePrevious(
     answers: [],
     sourceChanged: false,
   };
+}
+
+/**
+ * Builds one hunk review item plus its matching `DiffFile` fixture with a single contiguous
+ * removal run, wired so `resolveBrowserReviewItemContext` (which `deriveSnapshotRemovalRuns`
+ * relies on) accepts the pairing: the hunk's `reviewItemId`/hashes/header/range must equal the
+ * item's own fields exactly. `oldStart` and `removedTexts` are the two knobs the removal-carry
+ * tests turn independently of each other and of the item's id/content/location hashes, letting a
+ * single helper model both an id change and an unrelated line-number shift.
+ */
+function makeRemovalHunkItem(input: {
+  itemId: string;
+  contentHash: string;
+  locationHash: string;
+  path: string;
+  oldStart: number;
+  newStart: number;
+  removedTexts: string[];
+}): { item: ReviewItem; file: DiffFile } {
+  const header = `@@ -${input.oldStart},${input.removedTexts.length + 2} +${input.newStart},2 @@`;
+  const removedLines = input.removedTexts.map((text, index) => ({
+    kind: 'remove' as const,
+    text,
+    oldLine: input.oldStart + 1 + index,
+    newLine: null,
+  }));
+  const lines: DiffHunk['lines'] = [
+    { kind: 'context', text: 'before', oldLine: input.oldStart, newLine: input.newStart },
+    ...removedLines,
+    {
+      kind: 'context',
+      text: 'after',
+      oldLine: input.oldStart + 1 + input.removedTexts.length,
+      newLine: input.newStart + 1,
+    },
+  ];
+  const range = { start: input.newStart, end: input.newStart + 1 };
+  const item: ReviewItem = {
+    id: input.itemId,
+    kind: 'hunk',
+    path: input.path,
+    label: header,
+    range,
+    contentHash: input.contentHash,
+    locationHash: input.locationHash,
+  };
+  const hunk: DiffHunk = {
+    reviewItemId: input.itemId,
+    reviewItemContentHash: input.contentHash,
+    reviewItemLocationHash: input.locationHash,
+    header,
+    oldStart: input.oldStart,
+    oldLines: input.removedTexts.length + 2,
+    newStart: input.newStart,
+    newLines: 2,
+    lines,
+  };
+  const file: DiffFile = {
+    path: input.path,
+    status: 'modified',
+    additions: 0,
+    deletions: input.removedTexts.length,
+    binary: false,
+    hunks: [hunk],
+  };
+  return { item, file };
+}
+
+function makeRemovalSnapshot(
+  revisionId: string,
+  entries: { item: ReviewItem; file: DiffFile }[],
+): DiffReviewSnapshot {
+  return {
+    schemaVersion: 1,
+    revisionId,
+    source: SOURCE,
+    fingerprint: `fingerprint-${revisionId}`,
+    createdAt: NOW,
+    kind: 'diff',
+    files: entries.map((entry) => entry.file),
+    items: entries.map((entry) => entry.item),
+  };
+}
+
+function makePreviousWithRemovals(
+  snapshot: DiffReviewSnapshot,
+  progressItems: Record<string, ReviewItemProgress>,
+  removals: RemovalRationale[],
+): ReviewBundle {
+  const previous = makePrevious(snapshot.items, progressItems);
+  previous.snapshot = snapshot;
+  previous.insights = { ...previous.insights, revisionId: snapshot.revisionId, removals };
+  return previous;
+}
+
+/**
+ * Builds one hunk review item with either one or two discontiguous removal runs (separated by a
+ * context line), holding the item's id/content/location hash and old-side numbering fixed either
+ * way - the exact-match carry-forward path only cares about those, not run topology. Used to
+ * prove `carryForwardRemovals` skips an item outright when its removal-run count changed, rather
+ * than guessing a pairing between mismatched run lists.
+ */
+function makeVariableRunHunkItem(input: {
+  itemId: string;
+  contentHash: string;
+  locationHash: string;
+  path: string;
+  runCount: 1 | 2;
+}): { item: ReviewItem; file: DiffFile } {
+  const oldStart = 10;
+  const lines: DiffHunk['lines'] =
+    input.runCount === 2
+      ? [
+          { kind: 'context', text: 'ctxA', oldLine: 10, newLine: 10 },
+          { kind: 'remove', text: 'removed-1', oldLine: 11, newLine: null },
+          { kind: 'context', text: 'ctxB', oldLine: 12, newLine: 11 },
+          { kind: 'remove', text: 'removed-2', oldLine: 13, newLine: null },
+          { kind: 'context', text: 'ctxC', oldLine: 14, newLine: 12 },
+        ]
+      : [
+          { kind: 'context', text: 'ctxA', oldLine: 10, newLine: 10 },
+          { kind: 'remove', text: 'removed-1', oldLine: 11, newLine: null },
+          { kind: 'context', text: 'ctxB', oldLine: 12, newLine: 11 },
+          { kind: 'context', text: 'ctxC', oldLine: 13, newLine: 12 },
+        ];
+  const newStart = 10;
+  const newLines = input.runCount === 2 ? 3 : 3;
+  const header = `@@ -${oldStart},${lines.length} +${newStart},${newLines} @@`;
+  const range = { start: newStart, end: newStart + newLines - 1 };
+  const item: ReviewItem = {
+    id: input.itemId,
+    kind: 'hunk',
+    path: input.path,
+    label: header,
+    range,
+    contentHash: input.contentHash,
+    locationHash: input.locationHash,
+  };
+  const hunk: DiffHunk = {
+    reviewItemId: input.itemId,
+    reviewItemContentHash: input.contentHash,
+    reviewItemLocationHash: input.locationHash,
+    header,
+    oldStart,
+    oldLines: lines.length,
+    newStart,
+    newLines,
+    lines,
+  };
+  const file: DiffFile = {
+    path: input.path,
+    status: 'modified',
+    additions: 0,
+    deletions: input.runCount,
+    binary: false,
+    hunks: [hunk],
+  };
+  return { item, file };
 }
 
 describe('review reconciliation', () => {
@@ -355,6 +517,311 @@ describe('review reconciliation', () => {
 
     expect(reconcileReview(previous, currentSnapshot, NOW).items).toEqual({
       [currentSnapshot.items[0]!.id]: { status: 'needs-review' },
+    });
+  });
+
+  describe('removal rationale carry-forward', () => {
+    it('carries a removal rationale when its item and run text are unchanged', () => {
+      const previousEntry = makeRemovalHunkItem({
+        itemId: 'item-old',
+        contentHash: 'content-x',
+        locationHash: 'location-x',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['foo', 'bar', 'baz'],
+      });
+      const rationale: RemovalRationale = {
+        reviewItemId: 'item-old',
+        run: { path: 'src/a.ts', start: 41, end: 43 },
+        reason: 'dead-code',
+        description: 'Removed unused helper.',
+      };
+      const previous = makePreviousWithRemovals(
+        makeRemovalSnapshot('old-revision', [previousEntry]),
+        { 'item-old': { status: 'reviewed', reviewedAt: '2026-07-19T10:00:00.000Z' } },
+        [rationale],
+      );
+      const currentEntry = makeRemovalHunkItem({
+        itemId: 'item-old',
+        contentHash: 'content-x',
+        locationHash: 'location-x',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['foo', 'bar', 'baz'],
+      });
+
+      const result = reconcileReview(
+        previous,
+        makeRemovalSnapshot('current-revision', [currentEntry]),
+        NOW,
+      );
+
+      expect(result.insights.removals).toEqual([rationale]);
+    });
+
+    it('carries a removal rationale for a byte-identical item that no human has reviewed yet', () => {
+      // Reproduces the common "review refresh after new commits, before any human review"
+      // workflow: the item's content/location hash matches exactly (same reconciliationKey and
+      // even the same item id), so it lands on the `exactStateIds` path, but its PREVIOUS status
+      // was `needs-review` - not `reviewed`/`carried-forward` - so it must never enter
+      // `carriedItemIds`. Content identity, not human review status, is what should keep the
+      // rationale alive.
+      const previousEntry = makeRemovalHunkItem({
+        itemId: 'item-fresh',
+        contentHash: 'content-fresh',
+        locationHash: 'location-fresh',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['foo', 'bar', 'baz'],
+      });
+      const rationale: RemovalRationale = {
+        reviewItemId: 'item-fresh',
+        run: { path: 'src/a.ts', start: 41, end: 43 },
+        reason: 'dead-code',
+        description: 'Removed unused helper.',
+      };
+      const previous = makePreviousWithRemovals(
+        makeRemovalSnapshot('old-revision', [previousEntry]),
+        { 'item-fresh': { status: 'needs-review' } },
+        [rationale],
+      );
+      const currentEntry = makeRemovalHunkItem({
+        itemId: 'item-fresh',
+        contentHash: 'content-fresh',
+        locationHash: 'location-fresh',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['foo', 'bar', 'baz'],
+      });
+
+      const result = reconcileReview(
+        previous,
+        makeRemovalSnapshot('current-revision', [currentEntry]),
+        NOW,
+      );
+
+      expect(result.items['item-fresh']).toEqual({ status: 'needs-review' });
+      expect(result.insights.removals).toEqual([rationale]);
+    });
+
+    it('rewrites the rationale onto the new review item id when the owning item id changes across revisions', () => {
+      // Same reconciliationKey (contentHash/locationHash), different item id: exactly the
+      // fuzzy carry-forward path that changes a review item's id between revisions.
+      const previousEntry = makeRemovalHunkItem({
+        itemId: 'item-old',
+        contentHash: 'content-x',
+        locationHash: 'location-x',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['foo', 'bar', 'baz'],
+      });
+      const rationale: RemovalRationale = {
+        reviewItemId: 'item-old',
+        run: { path: 'src/a.ts', start: 41, end: 43 },
+        reason: 'dead-code',
+        description: 'Removed unused helper.',
+      };
+      const previous = makePreviousWithRemovals(
+        makeRemovalSnapshot('old-revision', [previousEntry]),
+        { 'item-old': { status: 'reviewed', reviewedAt: '2026-07-19T10:00:00.000Z' } },
+        [rationale],
+      );
+      const currentEntry = makeRemovalHunkItem({
+        itemId: 'item-new',
+        contentHash: 'content-x',
+        locationHash: 'location-x',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['foo', 'bar', 'baz'],
+      });
+
+      const result = reconcileReview(
+        previous,
+        makeRemovalSnapshot('current-revision', [currentEntry]),
+        NOW,
+      );
+
+      expect(result.insights.removals).toEqual([{ ...rationale, reviewItemId: 'item-new' }]);
+    });
+
+    it('rewrites the rationale line numbers when an unrelated earlier edit shifts them but the removed text is identical', () => {
+      // Same item id/content/location hash (exact carry-forward path) but the run's old-side
+      // line numbers shift, as they would when an earlier, unrelated edit changed the file
+      // above this hunk in the new revision's diff capture.
+      const previousEntry = makeRemovalHunkItem({
+        itemId: 'item-shift',
+        contentHash: 'content-y',
+        locationHash: 'location-y',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['x1', 'x2'],
+      });
+      const rationale: RemovalRationale = {
+        reviewItemId: 'item-shift',
+        run: { path: 'src/a.ts', start: 41, end: 42 },
+        reason: 'dead-code',
+        description: 'Removed unused helper.',
+      };
+      const previous = makePreviousWithRemovals(
+        makeRemovalSnapshot('old-revision', [previousEntry]),
+        { 'item-shift': { status: 'reviewed', reviewedAt: '2026-07-19T10:00:00.000Z' } },
+        [rationale],
+      );
+      const currentEntry = makeRemovalHunkItem({
+        itemId: 'item-shift',
+        contentHash: 'content-y',
+        locationHash: 'location-y',
+        path: 'src/a.ts',
+        oldStart: 50,
+        newStart: 45,
+        removedTexts: ['x1', 'x2'],
+      });
+
+      const result = reconcileReview(
+        previous,
+        makeRemovalSnapshot('current-revision', [currentEntry]),
+        NOW,
+      );
+
+      expect(result.insights.removals).toEqual([
+        { ...rationale, run: { path: 'src/a.ts', start: 51, end: 52 } },
+      ]);
+    });
+
+    it('drops a removal rationale when the removed text changed', () => {
+      const previousEntry = makeRemovalHunkItem({
+        itemId: 'item-text',
+        contentHash: 'content-z',
+        locationHash: 'location-z',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['x1', 'x2'],
+      });
+      const rationale: RemovalRationale = {
+        reviewItemId: 'item-text',
+        run: { path: 'src/a.ts', start: 41, end: 42 },
+        reason: 'dead-code',
+        description: 'Removed unused helper.',
+      };
+      const previous = makePreviousWithRemovals(
+        makeRemovalSnapshot('old-revision', [previousEntry]),
+        { 'item-text': { status: 'reviewed', reviewedAt: '2026-07-19T10:00:00.000Z' } },
+        [rationale],
+      );
+      const currentEntry = makeRemovalHunkItem({
+        itemId: 'item-text',
+        contentHash: 'content-z',
+        locationHash: 'location-z',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['x1', 'x2-changed'],
+      });
+
+      const result = reconcileReview(
+        previous,
+        makeRemovalSnapshot('current-revision', [currentEntry]),
+        NOW,
+      );
+
+      expect(result.insights.removals ?? []).toEqual([]);
+    });
+
+    it('drops a removal rationale whose review item did not carry forward', () => {
+      const previousEntry = makeRemovalHunkItem({
+        itemId: 'item-gone',
+        contentHash: 'content-w',
+        locationHash: 'location-w',
+        path: 'src/a.ts',
+        oldStart: 40,
+        newStart: 40,
+        removedTexts: ['x1', 'x2'],
+      });
+      const rationale: RemovalRationale = {
+        reviewItemId: 'item-gone',
+        run: { path: 'src/a.ts', start: 41, end: 42 },
+        reason: 'dead-code',
+        description: 'Removed unused helper.',
+      };
+      const previous = makePreviousWithRemovals(
+        makeRemovalSnapshot('old-revision', [previousEntry]),
+        { 'item-gone': { status: 'reviewed', reviewedAt: '2026-07-19T10:00:00.000Z' } },
+        [rationale],
+      );
+      const unrelatedEntry = makeRemovalHunkItem({
+        itemId: 'item-unrelated',
+        contentHash: 'content-unrelated',
+        locationHash: 'location-unrelated',
+        path: 'src/b.ts',
+        oldStart: 10,
+        newStart: 10,
+        removedTexts: ['y1'],
+      });
+
+      const result = reconcileReview(
+        previous,
+        makeRemovalSnapshot('current-revision', [unrelatedEntry]),
+        NOW,
+      );
+
+      expect(result.insights.removals ?? []).toEqual([]);
+    });
+
+    it('drops all removal rationales for an item whose removal-run count changed, rather than guessing a pairing', () => {
+      const previousEntry = makeVariableRunHunkItem({
+        itemId: 'item-recount',
+        contentHash: 'content-r',
+        locationHash: 'location-r',
+        path: 'src/a.ts',
+        runCount: 2,
+      });
+      const rationales: RemovalRationale[] = [
+        {
+          reviewItemId: 'item-recount',
+          run: { path: 'src/a.ts', start: 11, end: 11 },
+          reason: 'dead-code',
+          description: 'First removed block.',
+        },
+        {
+          reviewItemId: 'item-recount',
+          run: { path: 'src/a.ts', start: 13, end: 13 },
+          reason: 'dead-code',
+          description: 'Second removed block.',
+        },
+      ];
+      const previous = makePreviousWithRemovals(
+        makeRemovalSnapshot('old-revision', [previousEntry]),
+        { 'item-recount': { status: 'reviewed', reviewedAt: '2026-07-19T10:00:00.000Z' } },
+        rationales,
+      );
+      const currentEntry = makeVariableRunHunkItem({
+        itemId: 'item-recount',
+        contentHash: 'content-r',
+        locationHash: 'location-r',
+        path: 'src/a.ts',
+        runCount: 1,
+      });
+
+      const result = reconcileReview(
+        previous,
+        makeRemovalSnapshot('current-revision', [currentEntry]),
+        NOW,
+      );
+
+      // Same item id/content/location hash (so it does carry forward as a review item), but the
+      // new hunk derives one removal run where the old one derived two: `carryForwardRemovals`
+      // must not guess which old rationale (if either) pairs with the surviving run, so it drops
+      // both rather than carrying a possibly-mismatched one.
+      expect(result.items['item-recount']?.status).toBe('carried-forward');
+      expect(result.insights.removals ?? []).toEqual([]);
     });
   });
 });

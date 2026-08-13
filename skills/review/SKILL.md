@@ -3,7 +3,7 @@ name: review
 description: Use when the user wants a guided human review of a GitHub PR, staged changes, unstaged changes, or a bounded current-code scope, or wants to resume an exact Synergy review and answer browser questions. Captures immutable revisions, creates repository-aware review groups and concise item descriptions, opens the local portal, and runs the durable question loop.
 ---
 
-<!-- synergy-version: 0.19.0 -->
+<!-- synergy-version: 0.20.0 -->
 
 ## Step 0 — Freshness check
 
@@ -11,7 +11,7 @@ This skill may remain loaded after Synergy is updated. Set `MINE` from the marke
 run the installed-version check used by the other Synergy skills:
 
 ```bash
-MINE="0.19.0"
+MINE="0.20.0"
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -213,6 +213,50 @@ Write the scoped payload in this shape:
 Descriptions must be one or two sentences explaining the section's application role using the
 repository context gathered above. Do not merely paraphrase the selected syntax. Diff reviews
 keep the existing `groups` plus `items` payload and use the captured diff item IDs as-is.
+
+### Removal rationale
+
+`review create --json` and `review status --json` list every captured removal run as
+`removals: [{reviewItemId, path, start, end, covered}]`. A run with `covered: true` already has a
+rationale - either freshly submitted or carried forward from the predecessor revision - and needs
+no resubmission; submitting a fresh entry for that same run replaces the carried one. When the
+diff has no removal runs at all, omit `removals` from the payload entirely - do not submit
+`"removals": []`; the schema requires at least one entry when the key is present. Submit an
+entry under `removals` for every `covered: false` run, matching its `reviewItemId`, `path`,
+`start`, and `end` exactly - `reviewItemId` is checked separately from the run coordinates, so a
+mismatched item ID is rejected even when the range is right:
+
+```json
+{
+  "reviewItemId": "<captured id>",
+  "run": { "path": "src/auth/session.ts", "start": 41, "end": 43 },
+  "reason": "moved",
+  "description": "One sentence explaining why these lines are gone.",
+  "movedTo": { "path": "src/http/interceptor.ts", "start": 88, "end": 91 }
+}
+```
+
+Use `moved`, `merged`, or `replaced` only after inspecting the destination at the captured
+source (`git show <headSha>:<path>` for a PR, `git show :<path>` for staged, the worktree file
+for unstaged and scope) and confirming the logic is actually there. `dead-code`, `obsolete`, and
+`extracted-to-dep` are STRONGER claims than a relocation - each asserts the removed code went
+nowhere - so they are never a fallback for "I couldn't verify where it went." If inspection does
+not confirm a destination, re-investigate (search the diff, the destination file, the commit
+history) before concluding anything. If you still cannot verify it after re-investigating, use
+`unclear` - it admits "this code is gone and I could not determine where it went" without
+claiming either a destination or that nothing survives. It is a last resort after honest effort,
+not a cheap default: reach for `unclear` only once re-investigation has genuinely failed. Like
+the terminal reasons, `unclear` forbids `movedTo` - if you could name a destination, it would not
+be unclear. When you do use it, say in the `description` what you did observe, e.g. "removed
+alongside the auth refactor; could not confirm where it landed" - not just "unclear" restated -
+so a human reviewer knows what you already ruled out. `analysis-set` rejects the whole payload
+when a run is uncovered, when a run has two rationales, when a claimed target does not resolve,
+or when the reason and `movedTo` disagree. `movedTo` may span at most 40 lines and must land
+entirely on ADDED lines to resolve as an in-review jump; a span that includes unchanged context
+lines silently degrades to an excerpt (the content still shows, but the jump affordance is lost),
+so target only the lines that were actually added. Never author `movedToExcerpt` - it is derived
+and persisted by the CLI at `analysis-set` time, and the schema rejects it on an authored payload.
+Scope reviews have no removal runs.
 
 For every file that appears in the review, also emit a `files[]` entry:
 `{ "path": "<file path>", "description": "<one broad sentence or two on what changed in this file and why>", "confidence": "high" | "medium" | "low" }`.

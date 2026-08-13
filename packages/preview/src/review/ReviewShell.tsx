@@ -233,6 +233,7 @@ export function ReviewShell() {
           noteDraft={review.noteDrafts[activeItem.id]}
           saving={review.savingItemIds.has(activeItem.id)}
           walkthrough={review.walkthrough}
+          jump={review.jump}
           onToggleLine={review.toggleSelectedLine}
           onNoteChange={(value) => review.setNoteDraft(activeItem.id, value)}
           onSaveNote={() => review.saveNote(activeItem.id)}

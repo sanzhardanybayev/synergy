@@ -170,6 +170,13 @@ PR, staged changes, unstaged changes, and a bounded current-code scope.
 - Browser questions are durable. The agent runs `review wait` in the foreground, answers the
   exact revision through `review answer`, then waits again. It never changes application code
   merely because a question was asked.
+- **Removal rationale.** Every contiguous run of removed lines carries a typed reason and one
+  sentence, gated at `review analysis-set`. Relocating reasons carry a `movedTo` reference that
+  resolves to an in-review jump or, when the destination is outside the capture, to an excerpt
+  captured once at analysis time. Derivation and resolution live in
+  `packages/review-core/src/removals.ts`, exported through the package's root
+  `@synergy/review-core` entry (browser-safe pieces re-export from `@synergy/review-core/browser`);
+  add categories there, never per host.
 - **Syntax highlighting** for both review panes lives in `@synergy/review-core/highlight` (Shiki,
   JS raw engine + precompiled grammars — no WASM, so the VS Code webview CSP stays strict). Add a
   language there, never per-host. The "Ember & Graphite" theme pair is a projection of the

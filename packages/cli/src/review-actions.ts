@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   type ProposedCodeSection,
+  type RemovalRationale,
   type ReviewBundle,
   type ReviewFileInsight,
   type ReviewGroup,
@@ -9,6 +12,7 @@ import {
   type ReviewProgress,
   type ReviewRef,
   type ReviewSnapshot,
+  type ReviewSource,
   type ReviewSourceFreshness,
   type ReviewWorkspace,
   applyCodeSections,
@@ -17,6 +21,7 @@ import {
   compareReviewSourceFreshness,
   createReviewStore,
   deriveReviewReadiness,
+  deriveSnapshotRemovalRuns,
   formatReviewRef,
   hashText,
   isReviewCoreError,
@@ -36,11 +41,20 @@ import {
 import {
   type CaptureReviewSourceRequest,
   type CapturedReviewSource,
+  type CommandRunner,
   captureReviewSource,
   repositoryName,
   resolveRepositoryRoot,
+  systemCommandRunner,
 } from './review-capture.js';
 import { assertCompleteScopeCoverage } from './review-coverage.js';
+import {
+  type RemovalExcerptIo,
+  assertCompleteRemovalCoverage,
+  assertSafeEvidencePath,
+  reResolveCarriedRemovals,
+  resolveRemovalExcerpts,
+} from './review-removals.js';
 
 export interface CreateReviewRequest extends CaptureReviewSourceRequest {}
 
@@ -50,10 +64,16 @@ export interface CreateReviewResult {
   url: string;
   analysisRequired: boolean;
   analysisGuidance?: ReviewAnalysisGuidance;
+  removals: ReviewRemovalStatus[];
 }
 
 export interface ReviewActionDependencies {
   createStore?: typeof createReviewStore;
+  /** Reads a movedTo target's destination lines when re-resolving carried removal excerpts
+   * against the new revision's live worktree (unstaged/scope sources only - staged/PR sources
+   * read immutable Git content through `request.runner` instead). Defaults to real filesystem
+   * reads. */
+  readFile?: ReadFile;
 }
 
 export interface ApplyReviewAnalysisDependencies {
@@ -97,8 +117,13 @@ export interface RefreshReviewRequest {
 interface CanonicalReviewAnalysis {
   groups: ReviewGroup[];
   items: ReviewItemInsight[];
+  removals?: RemovalRationale[];
   summary?: string;
 }
+
+/** Reads a repository-relative path's full text, or undefined when it does not exist at the
+ * inspected source (a missing file is a normal outcome here, not an error). */
+export type ReadFile = (path: string) => string | undefined;
 
 export interface ApplyReviewAnalysisRequest {
   root: string;
@@ -106,6 +131,8 @@ export interface ApplyReviewAnalysisRequest {
   analysis: ReviewAnalysisInput;
   parsingInMs?: number;
   commandStartedAt?: number;
+  runner?: CommandRunner;
+  readFile?: ReadFile;
 }
 
 export interface ReviewAnalysisTimings {
@@ -138,6 +165,15 @@ export interface ReviewStatusRequest {
   compareSourceFreshness?: typeof compareReviewSourceFreshness;
 }
 
+export interface ReviewRemovalStatus {
+  reviewItemId: string;
+  path: string;
+  start: number;
+  end: number;
+  /** Whether the currently persisted insights already carry a rationale for this exact run. */
+  covered: boolean;
+}
+
 export interface ReviewStatusResult {
   reference: string;
   analysisRequired: boolean;
@@ -145,6 +181,7 @@ export interface ReviewStatusResult {
   captureFailed: boolean;
   url: string;
   analysisGuidance?: ReviewAnalysisGuidance;
+  removals: ReviewRemovalStatus[];
 }
 
 const GROUP_ID = /^[a-z0-9][a-z0-9_-]*$/u;
@@ -181,18 +218,43 @@ function initialProgress(snapshot: ReviewSnapshot, now: string): ReviewProgress 
 }
 
 /**
- * Reconciles progress for a new snapshot against its predecessor. The carried file insights
- * that ride alongside the progress result are returned separately so callers can fold them into
- * the new revision's `ReviewInsights` document (the store's `ReviewProgress` schema rejects
- * unknown properties, so they cannot be forwarded as part of the progress object itself).
+ * Reconciles progress for a new snapshot against its predecessor. The carried file and removal
+ * insights that ride alongside the progress result are returned separately so callers can fold
+ * them into the new revision's `ReviewInsights` document (the store's `ReviewProgress` schema
+ * rejects unknown properties, so they cannot be forwarded as part of the progress object itself).
  */
-function reconcileProgressAndFiles(
+function reconcileProgressAndInsights(
   previous: ReviewBundle,
   snapshot: ReviewSnapshot,
   now: string,
-): { progress: ReviewProgress; files: ReviewFileInsight[] | undefined } {
+): {
+  progress: ReviewProgress;
+  files: ReviewFileInsight[] | undefined;
+  removals: RemovalRationale[] | undefined;
+} {
   const { insights, ...progress } = reconcileReview(previous, snapshot, now);
-  return { progress, files: insights.files };
+  return { progress, files: insights.files, removals: insights.removals };
+}
+
+/** Every derived removal run for a bundle's snapshot, flagged with whether its persisted
+ * insights already carry a rationale for that exact run - the authoring agent's checklist of
+ * what it still has to explain. Matches `mergeRemovalInsights`'s run-only key (no
+ * `reviewItemId`) deliberately: a rationale can only be persisted for a run it actually names
+ * (`assertCompleteRemovalCoverage` rejects a mismatched `reviewItemId` independently), so the
+ * ownership check does not need to be repeated here for correctness. */
+function removalsStatusFor(bundle: ReviewBundle): ReviewRemovalStatus[] {
+  const coveredRunKeys = new Set(
+    (bundle.insights.removals ?? []).map((rationale) =>
+      removalRunKey(rationale.run.path, rationale.run.start, rationale.run.end),
+    ),
+  );
+  return deriveSnapshotRemovalRuns(bundle.snapshot).map((run) => ({
+    reviewItemId: run.reviewItemId,
+    path: run.path,
+    start: run.start,
+    end: run.end,
+    covered: coveredRunKeys.has(removalRunKey(run.path, run.start, run.end)),
+  }));
 }
 
 /**
@@ -208,6 +270,36 @@ function mergeFileInsights(
   if (!carried || carried.length === 0) return fresh;
   const freshPaths = new Set(fresh.map((file) => file.path));
   const survivingCarried = carried.filter((file) => !freshPaths.has(file.path));
+  return [...fresh, ...survivingCarried];
+}
+
+function removalRunKey(path: string, start: number, end: number): string {
+  return `${path}:${start}-${end}`;
+}
+
+/**
+ * Merges freshly submitted removal rationales with the predecessor's carried-forward ones, keyed
+ * by run (`path:start-end`) rather than path: fresh entries win for the runs they cover, carried
+ * entries survive for runs the fresh payload omits. This is what makes `covered: true` in
+ * `removalsStatusFor` an accurate prediction of finalize-time acceptance - an agent that sees a
+ * carried run reported as covered may omit it from its submission and have it still count toward
+ * `assertCompleteRemovalCoverage`, exactly like `mergeFileInsights` does for file insights.
+ */
+function mergeRemovalInsights(
+  carried: RemovalRationale[] | undefined,
+  fresh: RemovalRationale[] | undefined,
+): RemovalRationale[] | undefined {
+  if (!fresh || fresh.length === 0) return carried;
+  if (!carried || carried.length === 0) return fresh;
+  const freshKeys = new Set(
+    fresh.map((rationale) =>
+      removalRunKey(rationale.run.path, rationale.run.start, rationale.run.end),
+    ),
+  );
+  const survivingCarried = carried.filter(
+    (rationale) =>
+      !freshKeys.has(removalRunKey(rationale.run.path, rationale.run.start, rationale.run.end)),
+  );
   return [...fresh, ...survivingCarried];
 }
 
@@ -247,6 +339,7 @@ function resultFor(root: string, reference: ReviewRef, resumed: boolean): Create
     resumed,
     url: reviewUrl(reference),
     analysisRequired: !store.isAnalysisFinalized(reference.workspaceId, reference.revisionId),
+    removals: removalsStatusFor(bundle),
     ...(bundle.snapshot.kind === 'scope'
       ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) }
       : {}),
@@ -304,19 +397,37 @@ export function createOrResumeReview(
     now,
   );
   const reconciliation = existingWorkspace
-    ? reconcileProgressAndFiles(
+    ? reconcileProgressAndInsights(
         store.readBundle(workspaceId, existingWorkspace.currentRevisionId),
         snapshot,
         now,
       )
     : undefined;
   const progress = reconciliation?.progress ?? initialProgress(snapshot, now);
+  // Carried removal rationales are re-resolved against THIS revision's own source here, at
+  // creation time - not deferred to finalize - so `status.removals[].covered` stays honest: a
+  // rationale that survives is one whose moved-to destination was just verified against the
+  // source `review refresh` just captured, not against a stale predecessor read.
+  const carriedRemovals =
+    reconciliation?.removals && reconciliation.removals.length > 0
+      ? reResolveCarriedRemovals(
+          snapshot,
+          reconciliation.removals,
+          removalExcerptIo(
+            root,
+            captured.source,
+            request.runner ?? systemCommandRunner,
+            dependencies.readFile ?? defaultReadFile,
+          ),
+        )
+      : undefined;
   const insights: ReviewInsights = {
     schemaVersion: 1,
     revisionId,
     groups: [],
     items: [],
     ...(reconciliation?.files ? { files: reconciliation.files } : {}),
+    ...(carriedRemovals && carriedRemovals.length > 0 ? { removals: carriedRemovals } : {}),
   };
   try {
     store.createRevision(workspace, snapshot, insights, progress);
@@ -357,18 +468,6 @@ export function refreshReview(request: RefreshReviewRequest): CreateReviewResult
     readFile: request.readFile,
     source: captureRequestFromWorkspace(workspace),
   });
-}
-
-function assertSafeEvidencePath(path: string): void {
-  if (
-    path.length === 0 ||
-    path.includes('\0') ||
-    path.startsWith('/') ||
-    path.startsWith('\\') ||
-    path.split(/[\\/]/u).some((segment) => segment === '.' || segment === '..')
-  ) {
-    throw new Error(`invalid evidence path: ${path}`);
-  }
 }
 
 function assertNarrativeText(value: string, max: number, label: string): void {
@@ -445,6 +544,11 @@ function assertValidAnalysis(snapshot: ReviewSnapshot, analysis: CanonicalReview
     if (!groupedItemIds.has(itemId)) throw new Error(`review item is missing a group: ${itemId}`);
     if (!insightIds.has(itemId)) throw new Error(`review item is missing an analysis: ${itemId}`);
   }
+
+  // Scope snapshots derive zero removal runs, so the gate is a no-op there; calling it
+  // unconditionally avoids threading the diff/scope distinction back through this shared
+  // validator, and it reads as "every analysis submission is coverage-checked."
+  assertCompleteRemovalCoverage(snapshot, analysis.removals ?? []);
 }
 
 function proposedCodeSection(section: ScopeAnalysisSectionInput): ProposedCodeSection {
@@ -501,6 +605,61 @@ function translateScopeAnalysis(
   };
 }
 
+/** Splits file text into lines without letting a trailing newline manufacture a phantom final
+ * line: "a\nb\n" is 2 lines, not 3, matching how line numbers are counted elsewhere in review
+ * captures. A single trailing empty element (the artifact of `String.split` on a
+ * newline-terminated string) is dropped; a genuine trailing blank line still survives because
+ * only the file's own terminating newline produces that artifact. */
+function splitLines(text: string): string[] {
+  const lines = text.split('\n');
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+function defaultReadFile(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+/** Runs `git -C <root> <args>`, collapsing a non-zero exit into undefined rather than throwing -
+ * a missing path at a historical revision (e.g. `git show <sha>:<path>`) is a normal outcome. */
+function runOptional(runner: CommandRunner, root: string, args: string[]): string | undefined {
+  const result = runner.run('git', args, { cwd: root });
+  if (result.exitCode !== 0) return undefined;
+  return typeof result.stdout === 'string' ? result.stdout : result.stdout.toString('utf8');
+}
+
+/**
+ * Builds the `movedTo` target reader for the review's captured source, mirroring how each
+ * source kind must be inspected: a PR or staged capture reads immutable Git content (the head
+ * commit or the index) so the target is stable even if the worktree later changes; unstaged and
+ * scope captures have no such immutable pointer, so they read the live worktree file.
+ */
+function removalExcerptIo(
+  root: string,
+  source: ReviewSource,
+  runner: CommandRunner,
+  readFile: ReadFile,
+): RemovalExcerptIo {
+  return {
+    readTargetLines(path) {
+      const spec =
+        source.kind === 'pr'
+          ? `${source.headSha}:${path}`
+          : source.kind === 'staged'
+            ? `:${path}`
+            : undefined;
+      const text =
+        spec === undefined ? readFile(join(root, path)) : runOptional(runner, root, ['show', spec]);
+      return text === undefined ? undefined : splitLines(text);
+    },
+  };
+}
+
 export async function applyReviewAnalysis(
   request: ApplyReviewAnalysisRequest,
   dependencies: ApplyReviewAnalysisDependencies = {},
@@ -550,7 +709,7 @@ export async function applyReviewAnalysis(
           progressTimestamp,
         };
       }
-      const reconciled = reconcileProgressAndFiles(
+      const reconciled = reconcileProgressAndInsights(
         store.readBundle(request.reference.workspaceId, bundle.snapshot.predecessorRevisionId),
         translated.snapshot,
         progressTimestamp,
@@ -595,8 +754,42 @@ export async function applyReviewAnalysis(
       throw new Error('diff review requires a diff analysis payload');
     }
     const diffAnalysis = request.analysis;
+    // A carried-forward rationale (seeded onto this revision's bundle at creation time, see
+    // `createOrResumeReview`) is validated against the merged set below so an agent that reads
+    // `status.removals[].covered === true` for it and omits it from this submission is still
+    // accepted - `covered` must predict finalize-time acceptance, mirroring how `diffFiles`
+    // below merges carried file insights with fresh ones.
+    const carriedRemovals = bundle.insights.removals;
+    // Excerpt resolution is folded into the validation measurement (not a separate bucket):
+    // reading a movedTo target's destination lines is itself a rejection gate - an unreadable
+    // file or an out-of-range span fails the payload exactly like assertValidAnalysis does - so
+    // its cost belongs to the same "is this payload acceptable" timing as the rest of validation.
+    // Excerpts are re-resolved only for the freshly submitted rationales: a carried rationale's
+    // `movedToExcerpt` was already re-verified against THIS revision's own source at creation
+    // time (`createOrResumeReview` -> `reResolveCarriedRemovals`), not merely carried untouched
+    // from the predecessor - a stale destination is dropped there, before it ever reaches this
+    // bundle, so `bundle.insights.removals` only ever contains carried rationales whose moved-to
+    // excerpt (if any) is already honest for this exact revision. That earned trust is what lets
+    // finalize skip re-reading it here.
+    let resolvedRemovals: RemovalRationale[] | undefined;
     validationMs += measureMonotonic(monotonicNow, () => {
-      assertValidAnalysis(bundle.snapshot, diffAnalysis);
+      assertValidAnalysis(bundle.snapshot, {
+        ...diffAnalysis,
+        removals: mergeRemovalInsights(carriedRemovals, diffAnalysis.removals) ?? [],
+      });
+      const freshRemovals = diffAnalysis.removals
+        ? resolveRemovalExcerpts(
+            bundle.snapshot,
+            diffAnalysis.removals,
+            removalExcerptIo(
+              request.root,
+              bundle.snapshot.source,
+              request.runner ?? systemCommandRunner,
+              request.readFile ?? defaultReadFile,
+            ),
+          )
+        : undefined;
+      resolvedRemovals = mergeRemovalInsights(carriedRemovals, freshRemovals);
     }).durationMs;
     const diffFiles = mergeFileInsights(bundle.insights.files, diffAnalysis.files);
     const insights: ReviewInsights = {
@@ -605,6 +798,7 @@ export async function applyReviewAnalysis(
       ...(diffAnalysis.summary === undefined ? {} : { summary: diffAnalysis.summary }),
       groups: diffAnalysis.groups,
       items: diffAnalysis.items,
+      ...(resolvedRemovals ? { removals: resolvedRemovals } : {}),
       ...(diffFiles ? { files: diffFiles } : {}),
     };
     finalizedAt = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
@@ -763,6 +957,7 @@ export function getReviewStatus(request: ReviewStatusRequest): ReviewStatusResul
     readiness,
     captureFailed: freshness.captureFailed,
     url: reviewUrl(request.reference),
+    removals: removalsStatusFor(bundle),
     ...(bundle.snapshot.kind === 'scope'
       ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) }
       : {}),
@@ -785,6 +980,7 @@ export function printReviewStatus(request: ReviewStatusRequest): string {
     : status.readiness.sourceChanged
       ? 'changed'
       : 'unchanged';
+  const coveredRemovals = status.removals.filter((removal) => removal.covered).length;
   return [
     status.reference,
     state,
@@ -792,6 +988,7 @@ export function printReviewStatus(request: ReviewStatusRequest): string {
     `pending: ${status.readiness.pending}`,
     `stale: ${status.readiness.stale}`,
     `unanswered: ${status.readiness.unanswered}`,
+    `removals: ${coveredRemovals}/${status.removals.length} explained`,
     `url: ${status.url}`,
   ].join('\n');
 }
