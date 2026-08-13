@@ -114,6 +114,78 @@ describe('ReviewStage', () => {
   });
 });
 
+describe('ReviewStage removal-rationale policy', () => {
+  const RATIONALE = {
+    reviewItemId: 'hunk-theme',
+    run: { path: 'features/plan/PlanCardToggle.tsx', start: 17, end: 17 },
+    reason: 'dead-code' as const,
+    description: 'Stale background token, superseded by the primary surface color.',
+  };
+
+  function renderStageWithBundle(bundle: ReturnType<typeof makeDiffBundle>) {
+    const item = bundle.snapshot.items[0]!;
+    render(
+      <ReviewStage
+        bundle={bundle}
+        item={item}
+        fileItems={[item]}
+        saving={false}
+        selectedLineIds={[]}
+        walkthrough={{
+          enabled: false,
+          chapters: [],
+          revealedCount: 0,
+          revealAll: false,
+          advanceTo: vi.fn(),
+          setRevealAll: vi.fn(),
+        }}
+        jump={{
+          origin: null,
+          flashedRowIds: [],
+          jumpTo: vi.fn(),
+          clearOrigin: vi.fn(),
+        }}
+        onToggleLine={vi.fn()}
+        onNoteChange={vi.fn()}
+        onSaveNote={vi.fn()}
+        onSetProgress={vi.fn()}
+        onSelectItem={vi.fn()}
+      />,
+    );
+  }
+
+  it('renders no strip and no expand-all control when the policy is off and no rationale exists', () => {
+    const bundle = makeDiffBundle({
+      workspace: { ...makeDiffBundle().workspace, analysisPolicy: { explainRemovals: false } },
+    });
+    renderStageWithBundle(bundle);
+    expect(document.querySelector('.review-removal')).toBeNull();
+    expect(screen.queryByRole('button', { name: /expand all/i })).toBeNull();
+  });
+
+  it('still renders a carried-forward rationale even though the policy is off', () => {
+    const base = makeDiffBundle();
+    const bundle = makeDiffBundle({
+      workspace: { ...base.workspace, analysisPolicy: { explainRemovals: false } },
+      insights: { ...base.insights, removals: [RATIONALE] },
+    });
+    renderStageWithBundle(bundle);
+    expect(screen.getByText('dead-code')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /expand all/i })).toBeTruthy();
+  });
+
+  it('behaves as before the policy existed when it is on', () => {
+    const base = makeDiffBundle();
+    const bundle = makeDiffBundle({
+      workspace: { ...base.workspace, analysisPolicy: { explainRemovals: true } },
+      insights: { ...base.insights, removals: [RATIONALE] },
+    });
+    renderStageWithBundle(bundle);
+    expect(screen.getByText('dead-code')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /expand all/i })).toBeTruthy();
+  });
+});
+
 describe('ReviewSidebar', () => {
   it('shows files with reviewed counts and no per-item rows', () => {
     const bundle = makeDiffBundle();
