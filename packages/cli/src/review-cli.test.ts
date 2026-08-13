@@ -93,6 +93,19 @@ describe('review CLI source flags', () => {
     );
   });
 
+  it('rejects a valueless --exclude with a usage error, not a raw stack trace', () => {
+    // CAC yields the boolean `true` for a flag given no value (e.g. `--exclude` with nothing
+    // after it, or immediately followed by another flag), even though the declared flag type is
+    // `string | string[] | undefined`. Passing that straight through used to reach
+    // `normalizeExcludes` -> `.trim()` on a boolean and throw "raw.trim is not a function".
+    expect(() =>
+      createReviewSourceFromFlags({
+        staged: true,
+        exclude: true as unknown as string,
+      }),
+    ).toThrow(/--exclude requires a pattern value/);
+  });
+
   it('rejects --exclude on actions other than create', async () => {
     const result = await runReviewCli([
       'status',

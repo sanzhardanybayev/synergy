@@ -57,10 +57,20 @@ export interface ReviewCliDependencies {
 /** Normalizes the `--exclude` flag's CAC shape (undefined, a bare string for one occurrence, or
  * an array for several) into a sorted, deduped pattern list, or `undefined` when the flag was
  * not given. Surfaces `normalizeExcludes`'s validation errors (unsafe patterns) as a usage error
- * naming the offending pattern rather than a raw stack trace. */
+ * naming the offending pattern rather than a raw stack trace.
+ *
+ * The parameter type says `string | string[] | undefined`, but CAC does not actually enforce
+ * that at runtime: a valueless occurrence (`--exclude` with nothing after it, or followed
+ * immediately by another flag) yields the boolean `true` instead. Passing that straight to
+ * `normalizeExcludes` reaches `raw.trim()` on a boolean and throws `raw.trim is not a function`,
+ * which surfaces to the user as a raw stack trace instead of a usage error - so this validates
+ * every entry is actually a string before normalizing. */
 function excludesFromFlag(value: string | string[] | undefined): string[] | undefined {
   if (value === undefined) return undefined;
   const raw = Array.isArray(value) ? value : [value];
+  if (raw.some((entry) => typeof entry !== 'string')) {
+    throw new ReviewUsageError('--exclude requires a pattern value, e.g. --exclude .vouch');
+  }
   try {
     const normalized = normalizeExcludes(raw);
     return normalized.length > 0 ? normalized : undefined;
