@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -9,6 +9,7 @@ import {
   createReviewStore,
   deriveSnapshotRemovalRuns,
   repositoryName,
+  reviewRevisionDir,
 } from '@synergy/review-core';
 import { describe, expect, it } from 'vitest';
 import {
@@ -856,6 +857,64 @@ describe('review lifecycle actions', () => {
         movedTo: { path: 'src/other.ts', start: 5, end: 6 },
       });
       expect(carried).not.toHaveProperty('movedToExcerpt');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('drops a carried removal rationale whose moved-to path fails the safety guard on refresh, without aborting the refresh', async () => {
+    const root = join(tmpdir(), `synergy-review-removal-excerpt-unsafe-path-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const otherContent: { value: string | undefined } = { value: 'l1\nl2\nl3\nl4\nl5\nl6\n' };
+      const { store, runner, patch, firstReference, itemBId } = await setupCarriedMovedRationale(
+        root,
+        otherContent,
+      );
+
+      // Simulate a rationale persisted by a pre-fix build: hand-edit the already-finalized
+      // revision's bundle on disk so item b's carried `movedTo.path` is a path-traversal escape.
+      // `applyReviewAnalysis` itself would reject this at creation time (the same
+      // `assertSafeEvidencePath` guard runs there too), so this bypasses that seam on purpose to
+      // exercise the defence-in-depth re-check inside `reResolveCarriedRemovals` on refresh.
+      const bundlePath = join(
+        reviewRevisionDir(root, firstReference.workspaceId, firstReference.revisionId),
+        'bundle.json',
+      );
+      const bundle = JSON.parse(readFileSync(bundlePath, 'utf8')) as {
+        insights: { removals?: RemovalRationale[] };
+      };
+      const rationale = bundle.insights.removals?.find((r) => r.reviewItemId === itemBId);
+      if (!rationale?.movedTo) {
+        throw new Error('fixture must persist a moved-to rationale for item b');
+      }
+      rationale.movedTo = { ...rationale.movedTo, path: '../../.ssh/id_rsa' };
+      writeFileSync(bundlePath, JSON.stringify(bundle));
+
+      // Refresh: file a changes; file b's byte-identical hunk carries forward, dragging the
+      // now-unsafe rationale along with it.
+      patch.value = twoFileRemovalPatch(2).replace('export const a = 2;', 'export const a = 3;');
+      const refreshed = createOrResumeReview({ root, source: { kind: 'staged' }, runner });
+      const refreshedBundle = store.readBundle(
+        refreshed.reference.workspaceId,
+        refreshed.reference.revisionId,
+      );
+      const refreshedItemB = refreshedBundle.snapshot.items.find(
+        (item) => item.path === 'src/b.ts',
+      );
+      if (!refreshedItemB) throw new Error('refreshed snapshot must retain item b');
+
+      // 1. Dropped: the unsafe rationale does not appear in the new revision's insights.removals.
+      expect(
+        (refreshedBundle.insights.removals ?? []).some(
+          (rationale) => rationale.reviewItemId === refreshedItemB.id,
+        ),
+      ).toBe(false);
+
+      // 2. The refresh itself succeeded rather than throwing, and its run reports uncovered.
+      const status = getReviewStatus({ root, reference: refreshed.reference, runner });
+      const removalForB = status.removals.find((r) => r.reviewItemId === refreshedItemB.id);
+      expect(removalForB?.covered).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
