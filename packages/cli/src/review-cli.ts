@@ -36,6 +36,9 @@ interface ReviewCreateFlags {
   /** Repository-relative path pattern(s) to exclude from the review. CAC yields a bare string
    * for one `--exclude` occurrence and an array for several. */
   exclude?: string | string[];
+  /** Require every derived removal run to carry a rationale before analysis can finalize.
+   * Default off - see AnalysisPolicy in @synergy/review-core. Create only. */
+  explainRemovals?: boolean;
 }
 
 interface ReviewCommandFlags extends ReviewCreateFlags {
@@ -118,8 +121,11 @@ function printCreateResult(
     result.excludedFileCount && result.excludedFileCount > 0
       ? `${dim('Excluded:')} ${result.excludedFileCount} file${result.excludedFileCount === 1 ? '' : 's'} via ${result.excludes?.length ?? 0} pattern${result.excludes?.length === 1 ? '' : 's'}\n`
       : '';
+  const lockedLine = result.analysisPolicyLocked
+    ? `${yellow('Note:')} --explain-removals was requested but the current revision's analysis is already finalized and immutable; the stored policy was left unchanged (${result.analysisPolicy.explainRemovals ? 'on' : 'off'}).\n`
+    : '';
   process.stdout.write(
-    `${green('✓')} ${bold(reference)} ${dim(result.resumed ? 'resumed' : 'created')}\n${dim('Preparation:')} ${preparation}\n${excludedLine}${dim('Open:')} ${result.url}\n`,
+    `${green('✓')} ${bold(reference)} ${dim(result.resumed ? 'resumed' : 'created')}\n${dim('Preparation:')} ${preparation}\n${excludedLine}${lockedLine}${dim('Open:')} ${result.url}\n`,
   );
 }
 
@@ -188,6 +194,10 @@ type ReviewAction = (typeof REVIEW_ACTIONS)[number];
 interface ValidatedReviewCommand {
   action: ReviewAction;
   source?: ReviewCaptureSourceRequest;
+  /** Always a definite boolean for `create` (absence of `--explain-removals` means explicit
+   * off, not "leave unchanged" - re-running `create` without the flag is the documented escape
+   * hatch for turning the policy back off). */
+  explainRemovals?: boolean;
   workspaceId?: string;
   reference?: ReturnType<typeof parseReviewRef>;
   analysis?: ReviewAnalysisInput;
@@ -222,6 +232,7 @@ function assertKnownOptions(flags: ReviewCommandFlags): void {
     'for',
     'review',
     'exclude',
+    'explainRemovals',
     '--',
   ]);
   const unknown = Object.keys(flags).find((flag) => !known.has(flag));
@@ -248,6 +259,9 @@ function assertActionOptions(action: ReviewAction, flags: ReviewCommandFlags): v
   }
   if (action !== 'create' && flags.exclude !== undefined) {
     throw new ReviewUsageError(`review ${action} does not accept --exclude`);
+  }
+  if (action !== 'create' && flags.explainRemovals !== undefined) {
+    throw new ReviewUsageError(`review ${action} does not accept --explain-removals`);
   }
   if (action !== 'analysis-set' && action !== 'answer' && flags.bodyFile !== undefined) {
     throw new ReviewUsageError(`review ${action} does not accept --body-file`);
@@ -292,7 +306,11 @@ function validateReviewCommand(
   switch (actionValue) {
     case 'create':
       assertReferenceCount(actionValue, references, 0);
-      return { action: actionValue, source: createReviewSourceFromFlags(flags) };
+      return {
+        action: actionValue,
+        source: createReviewSourceFromFlags(flags),
+        explainRemovals: flags.explainRemovals === true,
+      };
     case 'refresh':
       assertReferenceCount(actionValue, references, 1);
       return { action: actionValue, workspaceId: parseUsageWorkspaceId(references[0] ?? '') };
@@ -409,6 +427,10 @@ export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependen
       '--exclude <pattern>',
       'Repository-relative path pattern to exclude from the review (repeatable); create only',
     )
+    .option(
+      '--explain-removals',
+      'Require a rationale for every detected removal run before analysis can finalize (default: off); create only',
+    )
     .option('--json', 'Print machine-readable output')
     .option('--body-file <path>', 'Analysis or answer body file')
     .option('--for <duration>', 'Bounded question wait, e.g. 90s, 10m, 1h')
@@ -421,7 +443,11 @@ export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependen
         const root = resolveRepositoryRoot(flags.root ?? process.cwd());
         if (command.action === 'create') {
           printCreateResult(
-            createOrResumeReview({ root, source: requireValidatedValue(command.source) }),
+            createOrResumeReview({
+              root,
+              source: requireValidatedValue(command.source),
+              explainRemovals: command.explainRemovals,
+            }),
             flags.json,
           );
           return;

@@ -23,6 +23,20 @@ export interface ReviewRepository {
   remoteUrl?: string;
 }
 
+/**
+ * Reviewer-chosen analysis policy for the workspace. Deliberately NOT part of `ReviewSource`
+ * (or any input `sourceFingerprint` hashes): it governs how deeply the analysis must explain
+ * the captured diff, not what was captured, so flipping it must never change revision identity.
+ * Optional so existing on-disk workspaces (predating this field) keep validating and read as
+ * every policy being off.
+ */
+export interface AnalysisPolicy {
+  /** When true, every derived removal run must carry a rationale before analysis can finalize
+   * (today's behavior). When false or absent, removal coverage is not enforced - rationales may
+   * still be submitted and are validated for correctness, just not required. */
+  explainRemovals: boolean;
+}
+
 export interface ReviewWorkspace {
   schemaVersion: 1;
   id: string;
@@ -31,6 +45,7 @@ export interface ReviewWorkspace {
   currentRevisionId: string;
   createdAt: string;
   updatedAt: string;
+  analysisPolicy?: AnalysisPolicy;
 }
 
 export type ReviewItemKind = 'hunk' | 'code-section' | 'file';

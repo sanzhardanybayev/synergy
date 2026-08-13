@@ -35,9 +35,18 @@ export function assertSafeEvidencePath(path: string): void {
   }
 }
 
+export interface RemovalCoverageOptions {
+  /** Whether every derived removal run must carry a rationale (today's behavior, and the
+   * default for backward compatibility). When false, rationales that ARE submitted are still
+   * validated for correctness below - only the "every run must be covered" requirement is
+   * skipped. */
+  requireCoverage: boolean;
+}
+
 export function assertCompleteRemovalCoverage(
   snapshot: ReviewSnapshot,
   removals: readonly RemovalRationale[],
+  options: RemovalCoverageOptions = { requireCoverage: true },
 ): void {
   const derived = deriveSnapshotRemovalRuns(snapshot);
   if (derived.length === 0 && removals.length === 0) return;
@@ -82,6 +91,7 @@ export function assertCompleteRemovalCoverage(
     }
   }
 
+  if (!options.requireCoverage) return;
   const missing = derived
     .filter((run) => !seen.has(runKey(run.path, run.start, run.end)))
     .map((run) => runKey(run.path, run.start, run.end));

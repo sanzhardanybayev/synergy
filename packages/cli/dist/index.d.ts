@@ -1,5 +1,5 @@
 import { StatusValue } from '@synergy/state';
-import { ReviewInsightConfidence, ReviewGroup, ReviewItemInsight, RemovalRationale, createReviewStore, applyCodeSections, ReviewRef, CommandRunner, CaptureReviewSourceRequest, compareReviewSourceFreshness, deriveReviewReadiness, ReviewWorkspace, ReviewCaptureSourceRequest } from '@synergy/review-core';
+import { ReviewInsightConfidence, ReviewGroup, ReviewItemInsight, RemovalRationale, createReviewStore, applyCodeSections, ReviewRef, CommandRunner, CaptureReviewSourceRequest, AnalysisPolicy, compareReviewSourceFreshness, deriveReviewReadiness, ReviewWorkspace, ReviewCaptureSourceRequest } from '@synergy/review-core';
 export { CaptureReviewSourceRequest, CapturedReviewSource, CommandResult, CommandRunner, capturePr, captureReviewSource, captureScope, captureStaged, captureUnstaged } from '@synergy/review-core';
 import { CAC } from 'cac';
 
@@ -131,6 +131,12 @@ type ReviewAnalysisInput = {
 declare function parseReviewAnalysisInput(value: unknown): ReviewAnalysisInput;
 
 interface CreateReviewRequest extends CaptureReviewSourceRequest {
+    /** Reviewer's removal-rationale coverage policy for this call, from `--explain-removals`.
+     * Omit to leave the workspace's stored policy untouched (this is how `refreshReview` reuses
+     * it). A brand-new workspace with no explicit value defaults to off. Re-running `create` with
+     * an explicit value on an EXISTING workspace updates the stored policy, unless the current
+     * revision's analysis is already finalized (immutable) - see `analysisPolicyLocked` below. */
+    explainRemovals?: boolean;
 }
 interface CreateReviewResult {
     reference: ReviewRef;
@@ -139,6 +145,12 @@ interface CreateReviewResult {
     analysisRequired: boolean;
     analysisGuidance?: ReviewAnalysisGuidance;
     removals: ReviewRemovalStatus[];
+    /** The workspace's current removal-rationale coverage policy after this call. */
+    analysisPolicy: AnalysisPolicy;
+    /** True when this call asked to change `explainRemovals` but the target revision's analysis
+     * is already finalized, so the immutable revision was left exactly as-is instead of silently
+     * dropping the request. */
+    analysisPolicyLocked?: boolean;
     /** Repository-relative exclude patterns active for this review's source, normalized and
      * sorted. Absent when no excludes are configured. */
     excludes?: string[];
@@ -248,6 +260,9 @@ interface ReviewCreateFlags {
     /** Repository-relative path pattern(s) to exclude from the review. CAC yields a bare string
      * for one `--exclude` occurrence and an array for several. */
     exclude?: string | string[];
+    /** Require every derived removal run to carry a rationale before analysis can finalize.
+     * Default off - see AnalysisPolicy in @synergy/review-core. Create only. */
+    explainRemovals?: boolean;
 }
 interface ReviewCliDependencies {
     openReview?: typeof openReview;

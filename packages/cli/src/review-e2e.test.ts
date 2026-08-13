@@ -20,6 +20,7 @@ import {
   createOrResumeReview,
   refreshReview,
 } from './review-actions.js';
+import type { ReviewAnalysisInput } from './review-analysis.js';
 import { waitForReviewQuestions } from './review-wait.js';
 
 const repositories = new Set<string>();
@@ -546,5 +547,304 @@ describe('integrated review workflow', () => {
     });
     expect(differentSet.resumed).toBe(false);
     expect(differentSet.reference.revisionId).not.toBe(first.reference.revisionId);
+  });
+});
+
+function cloneRepository(sourceRoot: string): string {
+  const root = mkdtempSync(join(tmpdir(), 'synergy-review-e2e-clone-'));
+  repositories.add(root);
+  execFileSync('git', ['clone', '--quiet', sourceRoot, root]);
+  git(root, 'config', 'user.name', 'Synergy Test');
+  git(root, 'config', 'user.email', 'synergy@example.test');
+  return root;
+}
+
+/** A single-file staged edit whose one changed line derives exactly one removal run. */
+function createStagedRemovalReview(explainRemovals?: boolean): {
+  root: string;
+  created: ReturnType<typeof createOrResumeReview>;
+} {
+  const root = createRepository();
+  writeFileSync(join(root, 'src.ts'), 'export const value = 1;\n', 'utf8');
+  commitAll(root, 'base');
+  writeFileSync(join(root, 'src.ts'), 'export const value = 2;\n', 'utf8');
+  git(root, 'add', 'src.ts');
+  const created = createOrResumeReview({ root, source: { kind: 'staged' }, explainRemovals });
+  return { root, created };
+}
+
+function singleItemAnalysis(
+  item: { id: string; path: string },
+  removals?: RemovalRationale[],
+): ReviewAnalysisInput {
+  return {
+    kind: 'diff',
+    groups: [{ id: 'core', label: 'Core', reviewItemIds: [item.id] }],
+    items: [
+      {
+        reviewItemId: item.id,
+        description: 'Updates the staged fixture value.',
+        confidence: 'high',
+        evidencePaths: [item.path],
+      },
+    ],
+    ...(removals ? { removals } : {}),
+  };
+}
+
+describe('removal-rationale coverage policy', () => {
+  it('defaults to off and finalizes a diff analysis with no removals payload', async () => {
+    const { root, created } = await createStagedRemovalReview();
+    expect(created.analysisPolicy).toEqual({ explainRemovals: false });
+    const store = createReviewStore(root);
+    const snapshot = store.readBundle(
+      created.reference.workspaceId,
+      created.reference.revisionId,
+    ).snapshot;
+    const item = snapshot.items[0]!;
+    await expect(
+      applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: singleItemAnalysis(item),
+      }),
+    ).resolves.toMatchObject({ analysisFinalized: true });
+    const finalized = store.readBundle(created.reference.workspaceId, created.reference.revisionId);
+    expect(finalized.insights.removals ?? []).toEqual([]);
+  });
+
+  it('rejects an incomplete diff analysis until every run is covered when explainRemovals is on', async () => {
+    const { root, created } = await createStagedRemovalReview(true);
+    expect(created.analysisPolicy).toEqual({ explainRemovals: true });
+    const store = createReviewStore(root);
+    const snapshot = store.readBundle(
+      created.reference.workspaceId,
+      created.reference.revisionId,
+    ).snapshot;
+    const item = snapshot.items[0]!;
+    await expect(
+      applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: singleItemAnalysis(item),
+      }),
+    ).rejects.toThrow(/removal runs are missing a rationale/);
+    await expect(
+      applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: singleItemAnalysis(item, removalsForSnapshot(snapshot)),
+      }),
+    ).resolves.toMatchObject({ analysisFinalized: true });
+  });
+
+  it('rejects a malformed removals payload even when the policy is off', async () => {
+    const { root, created } = await createStagedRemovalReview();
+    const store = createReviewStore(root);
+    const snapshot = store.readBundle(
+      created.reference.workspaceId,
+      created.reference.revisionId,
+    ).snapshot;
+    const item = snapshot.items[0]!;
+    await expect(
+      applyReviewAnalysis({
+        root,
+        reference: created.reference,
+        analysis: singleItemAnalysis(item, [
+          {
+            reviewItemId: item.id,
+            // Off-by-one range: does not match the one captured removal run.
+            run: { path: item.path, start: 999, end: 999 },
+            reason: 'dead-code',
+            description: 'Removed as part of this change.',
+          },
+        ]),
+      }),
+    ).rejects.toThrow(/does not match a captured removal run/);
+  });
+
+  it('produces an identical revision id and fingerprint whether explainRemovals is on or off', () => {
+    const rootOff = createRepository();
+    writeFileSync(join(rootOff, 'src.ts'), 'export const value = 1;\n', 'utf8');
+    commitAll(rootOff, 'base');
+    const rootOn = cloneRepository(rootOff);
+
+    writeFileSync(join(rootOff, 'src.ts'), 'export const value = 2;\n', 'utf8');
+    git(rootOff, 'add', 'src.ts');
+    writeFileSync(join(rootOn, 'src.ts'), 'export const value = 2;\n', 'utf8');
+    git(rootOn, 'add', 'src.ts');
+
+    const off = createOrResumeReview({
+      root: rootOff,
+      source: { kind: 'staged' },
+      explainRemovals: false,
+    });
+    const on = createOrResumeReview({
+      root: rootOn,
+      source: { kind: 'staged' },
+      explainRemovals: true,
+    });
+
+    expect(off.analysisPolicy).toEqual({ explainRemovals: false });
+    expect(on.analysisPolicy).toEqual({ explainRemovals: true });
+    expect(on.reference.revisionId).toBe(off.reference.revisionId);
+
+    const fingerprintOff = createReviewStore(rootOff).readBundle(
+      off.reference.workspaceId,
+      off.reference.revisionId,
+    ).snapshot.fingerprint;
+    const fingerprintOn = createReviewStore(rootOn).readBundle(
+      on.reference.workspaceId,
+      on.reference.revisionId,
+    ).snapshot.fingerprint;
+    expect(fingerprintOn).toBe(fingerprintOff);
+  });
+
+  it('reuses the stored policy across a refresh', async () => {
+    const { root, created } = await createStagedRemovalReview(true);
+    expect(created.analysisPolicy).toEqual({ explainRemovals: true });
+
+    writeFileSync(join(root, 'src.ts'), 'export const value = 3;\n', 'utf8');
+    git(root, 'add', 'src.ts');
+    const refreshed = refreshReview({ root, workspaceId: created.reference.workspaceId });
+    expect(refreshed.reference.revisionId).not.toBe(created.reference.revisionId);
+    expect(refreshed.analysisPolicy).toEqual({ explainRemovals: true });
+
+    const store = createReviewStore(root);
+    const snapshot = store.readBundle(
+      refreshed.reference.workspaceId,
+      refreshed.reference.revisionId,
+    ).snapshot;
+    const item = snapshot.items[0]!;
+    await expect(
+      applyReviewAnalysis({
+        root,
+        reference: refreshed.reference,
+        analysis: singleItemAnalysis(item),
+      }),
+    ).rejects.toThrow(/removal runs are missing a rationale/);
+  });
+
+  it('flips the policy on an unfinalized revision when create is re-run without the flag', async () => {
+    const { root, created } = await createStagedRemovalReview(true);
+    expect(created.resumed).toBe(false);
+    expect(created.analysisPolicy).toEqual({ explainRemovals: true });
+
+    const flipped = createOrResumeReview({
+      root,
+      source: { kind: 'staged' },
+      explainRemovals: false,
+    });
+    expect(flipped.resumed).toBe(true);
+    expect(flipped.reference.revisionId).toBe(created.reference.revisionId);
+    expect(flipped.analysisPolicy).toEqual({ explainRemovals: false });
+    expect(flipped.analysisPolicyLocked).toBeUndefined();
+
+    const store = createReviewStore(root);
+    const snapshot = store.readBundle(
+      flipped.reference.workspaceId,
+      flipped.reference.revisionId,
+    ).snapshot;
+    const item = snapshot.items[0]!;
+    await expect(
+      applyReviewAnalysis({
+        root,
+        reference: flipped.reference,
+        analysis: singleItemAnalysis(item),
+      }),
+    ).resolves.toMatchObject({ analysisFinalized: true });
+  });
+
+  it('leaves a finalized revision policy untouched and reports analysisPolicyLocked', async () => {
+    const { root, created } = await createStagedRemovalReview(true);
+    const store = createReviewStore(root);
+    const snapshot = store.readBundle(
+      created.reference.workspaceId,
+      created.reference.revisionId,
+    ).snapshot;
+    const item = snapshot.items[0]!;
+    await applyReviewAnalysis({
+      root,
+      reference: created.reference,
+      analysis: singleItemAnalysis(item, removalsForSnapshot(snapshot)),
+    });
+    expect(
+      store.isAnalysisFinalized(created.reference.workspaceId, created.reference.revisionId),
+    ).toBe(true);
+
+    const attempted = createOrResumeReview({
+      root,
+      source: { kind: 'staged' },
+      explainRemovals: false,
+    });
+    expect(attempted.resumed).toBe(true);
+    expect(attempted.reference.revisionId).toBe(created.reference.revisionId);
+    expect(attempted.analysisPolicy).toEqual({ explainRemovals: true });
+    expect(attempted.analysisPolicyLocked).toBe(true);
+
+    const finalized = store.readBundle(
+      attempted.reference.workspaceId,
+      attempted.reference.revisionId,
+    );
+    expect(finalized.insights.removals).toHaveLength(1);
+  });
+
+  it('carries a voluntarily submitted rationale through a refresh even with the policy off', async () => {
+    const root = createRepository();
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(join(root, 'src', 'a.ts'), 'export const a = 1;\n', 'utf8');
+    writeFileSync(join(root, 'src', 'b.ts'), 'export const b = 1;\n', 'utf8');
+    commitAll(root, 'base');
+    writeFileSync(join(root, 'src', 'a.ts'), 'export const a = 2;\n', 'utf8');
+    writeFileSync(join(root, 'src', 'b.ts'), 'export const b = 2;\n', 'utf8');
+    git(root, 'add', 'src/a.ts', 'src/b.ts');
+
+    const created = createOrResumeReview({ root, source: { kind: 'staged' } });
+    expect(created.analysisPolicy).toEqual({ explainRemovals: false });
+    const store = createReviewStore(root);
+    const snapshot = store.readBundle(
+      created.reference.workspaceId,
+      created.reference.revisionId,
+    ).snapshot;
+    const itemA = snapshot.items.find((item) => item.path === 'src/a.ts')!;
+    const itemB = snapshot.items.find((item) => item.path === 'src/b.ts')!;
+
+    await applyReviewAnalysis({
+      root,
+      reference: created.reference,
+      analysis: {
+        kind: 'diff',
+        groups: [{ id: 'core', label: 'Core', reviewItemIds: [itemA.id, itemB.id] }],
+        items: [itemA, itemB].map((item) => ({
+          reviewItemId: item.id,
+          description: 'Updates the fixture value.',
+          confidence: 'high',
+          evidencePaths: [item.path],
+        })),
+        // Voluntarily submitted even though the gate is off: still validated, still persisted.
+        removals: removalsForSnapshot(snapshot),
+      },
+    });
+
+    // Only file a changes again; file b's review item - and its rationale - carries forward.
+    writeFileSync(join(root, 'src', 'a.ts'), 'export const a = 3;\n', 'utf8');
+    git(root, 'add', 'src/a.ts');
+    const refreshed = refreshReview({ root, workspaceId: created.reference.workspaceId });
+    expect(refreshed.analysisPolicy).toEqual({ explainRemovals: false });
+
+    const refreshedBundle = store.readBundle(
+      refreshed.reference.workspaceId,
+      refreshed.reference.revisionId,
+    );
+    if (refreshedBundle.snapshot.kind !== 'diff') throw new Error('expected a diff snapshot');
+    const refreshedItemB = refreshedBundle.snapshot.items.find((item) => item.path === 'src/b.ts');
+    if (!refreshedItemB) throw new Error('expected file b to carry forward');
+    const carriedForB = refreshedBundle.insights.removals?.find(
+      (rationale) => rationale.reviewItemId === refreshedItemB.id,
+    );
+    expect(carriedForB).toBeDefined();
+    expect(carriedForB?.description).toBe('Removed as part of this change.');
+    const statusForB = refreshed.removals.find((run) => run.reviewItemId === refreshedItemB.id);
+    expect(statusForB?.covered).toBe(true);
   });
 });

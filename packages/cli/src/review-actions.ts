@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
+  type AnalysisPolicy,
   type ProposedCodeSection,
   type RemovalRationale,
   type ReviewBundle,
@@ -56,7 +57,14 @@ import {
   resolveRemovalExcerpts,
 } from './review-removals.js';
 
-export interface CreateReviewRequest extends CaptureReviewSourceRequest {}
+export interface CreateReviewRequest extends CaptureReviewSourceRequest {
+  /** Reviewer's removal-rationale coverage policy for this call, from `--explain-removals`.
+   * Omit to leave the workspace's stored policy untouched (this is how `refreshReview` reuses
+   * it). A brand-new workspace with no explicit value defaults to off. Re-running `create` with
+   * an explicit value on an EXISTING workspace updates the stored policy, unless the current
+   * revision's analysis is already finalized (immutable) - see `analysisPolicyLocked` below. */
+  explainRemovals?: boolean;
+}
 
 export interface CreateReviewResult {
   reference: ReviewRef;
@@ -65,6 +73,12 @@ export interface CreateReviewResult {
   analysisRequired: boolean;
   analysisGuidance?: ReviewAnalysisGuidance;
   removals: ReviewRemovalStatus[];
+  /** The workspace's current removal-rationale coverage policy after this call. */
+  analysisPolicy: AnalysisPolicy;
+  /** True when this call asked to change `explainRemovals` but the target revision's analysis
+   * is already finalized, so the immutable revision was left exactly as-is instead of silently
+   * dropping the request. */
+  analysisPolicyLocked?: boolean;
   /** Repository-relative exclude patterns active for this review's source, normalized and
    * sorted. Absent when no excludes are configured. */
   excludes?: string[];
@@ -345,6 +359,7 @@ function resultFor(
   reference: ReviewRef,
   resumed: boolean,
   captured?: CapturedReviewSource,
+  analysisPolicyLocked?: boolean,
 ): CreateReviewResult {
   const store = createReviewStore(root);
   const bundle = store.readBundle(reference.workspaceId, reference.revisionId);
@@ -355,6 +370,8 @@ function resultFor(
     url: reviewUrl(reference),
     analysisRequired: !store.isAnalysisFinalized(reference.workspaceId, reference.revisionId),
     removals: removalsStatusFor(bundle),
+    analysisPolicy: bundle.workspace.analysisPolicy ?? { explainRemovals: false },
+    ...(analysisPolicyLocked ? { analysisPolicyLocked: true } : {}),
     ...(excludes && excludes.length > 0 ? { excludes } : {}),
     ...(captured?.excludedFileCount !== undefined
       ? { excludedFileCount: captured.excludedFileCount }
@@ -372,6 +389,7 @@ function createWorkspace(
   captured: CapturedReviewSource,
   existing: ReviewWorkspace | undefined,
   now: string,
+  explainRemovals: boolean | undefined,
 ): ReviewWorkspace {
   return {
     schemaVersion: 1,
@@ -381,6 +399,9 @@ function createWorkspace(
     currentRevisionId: revisionId,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
+    analysisPolicy: {
+      explainRemovals: explainRemovals ?? existing?.analysisPolicy?.explainRemovals ?? false,
+    },
   };
 }
 
@@ -394,11 +415,42 @@ export function createOrResumeReview(
   const workspaceId = workspaceIdFor(root, captured);
   const existingRevision = store.findRevisionByFingerprint(workspaceId, captured.fingerprint);
   if (existingRevision) {
-    store.setCurrentRevision(workspaceId, existingRevision, captured.source, {
+    // Re-running `create` on an identical diff is the escape hatch for a reviewer who wants to
+    // change their mind about `--explain-removals` without recapturing: it must update the
+    // stored policy here, not just resume the revision. The one case that must NOT rewrite it is
+    // an already-finalized revision - that analysis is immutable, so the request is honored by
+    // reporting `analysisPolicyLocked` rather than silently dropping it OR silently mutating a
+    // published result.
+    const finalized = store.isAnalysisFinalized(workspaceId, existingRevision);
+    const requestedPolicy = request.explainRemovals;
+    // The workspace pointer can be missing here (a crash between publishing the revision
+    // directory and publishing `workspace.json` - see `createRevision`'s orphan-recovery path),
+    // in which case there is no prior policy to compare against; treat it the same as "off",
+    // mirroring `setCurrentRevision`'s own fallback for a missing workspace file.
+    let priorExplainRemovals = false;
+    try {
+      priorExplainRemovals =
+        store.readWorkspace(workspaceId).analysisPolicy?.explainRemovals ?? false;
+    } catch (error) {
+      if (!isReviewCoreError(error) || error.code !== 'review_not_found') throw error;
+    }
+    const policyChangeRequested =
+      requestedPolicy !== undefined && requestedPolicy !== priorExplainRemovals;
+    const applyPolicy = policyChangeRequested && !finalized;
+    store.setCurrentRevision(
+      workspaceId,
+      existingRevision,
+      captured.source,
+      { root, name: repositoryName(root) },
+      applyPolicy ? { explainRemovals: requestedPolicy as boolean } : undefined,
+    );
+    return resultFor(
       root,
-      name: repositoryName(root),
-    });
-    return resultFor(root, { workspaceId, revisionId: existingRevision }, true, captured);
+      { workspaceId, revisionId: existingRevision },
+      true,
+      captured,
+      policyChangeRequested && finalized,
+    );
   }
 
   const now = new Date().toISOString();
@@ -414,6 +466,7 @@ export function createOrResumeReview(
     captured,
     existingWorkspace,
     now,
+    request.explainRemovals,
   );
   const reconciliation = existingWorkspace
     ? reconcileProgressAndInsights(
@@ -491,6 +544,9 @@ export function refreshReview(request: RefreshReviewRequest): CreateReviewResult
     runner: request.runner,
     readFile: request.readFile,
     source: captureRequestFromWorkspace(workspace),
+    // Refresh reuses the stored policy verbatim (like `--exclude`) - it is not a `create`
+    // re-run, so it must never change `explainRemovals` even implicitly.
+    explainRemovals: workspace.analysisPolicy?.explainRemovals ?? false,
   });
 }
 
@@ -500,7 +556,11 @@ function assertNarrativeText(value: string, max: number, label: string): void {
   }
 }
 
-function assertValidAnalysis(snapshot: ReviewSnapshot, analysis: CanonicalReviewAnalysis): void {
+function assertValidAnalysis(
+  snapshot: ReviewSnapshot,
+  analysis: CanonicalReviewAnalysis,
+  analysisPolicy: AnalysisPolicy | undefined,
+): void {
   if (analysis.summary !== undefined) {
     assertNarrativeText(analysis.summary, MAX_SUMMARY_LENGTH, 'review summary');
   }
@@ -569,10 +629,14 @@ function assertValidAnalysis(snapshot: ReviewSnapshot, analysis: CanonicalReview
     if (!insightIds.has(itemId)) throw new Error(`review item is missing an analysis: ${itemId}`);
   }
 
-  // Scope snapshots derive zero removal runs, so the gate is a no-op there; calling it
-  // unconditionally avoids threading the diff/scope distinction back through this shared
-  // validator, and it reads as "every analysis submission is coverage-checked."
-  assertCompleteRemovalCoverage(snapshot, analysis.removals ?? []);
+  // Scope snapshots derive zero removal runs, so the coverage requirement is a no-op there
+  // regardless of policy; calling this unconditionally avoids threading the diff/scope
+  // distinction back through this shared validator. Rationales that ARE submitted are always
+  // validated for shape/correctness - only the "every run needs one" requirement is opt-in,
+  // gated by the workspace's stored `analysisPolicy.explainRemovals`.
+  assertCompleteRemovalCoverage(snapshot, analysis.removals ?? [], {
+    requireCoverage: analysisPolicy?.explainRemovals === true,
+  });
 }
 
 function proposedCodeSection(section: ScopeAnalysisSectionInput): ProposedCodeSection {
@@ -720,7 +784,11 @@ export async function applyReviewAnalysis(
     const translated = translation.value;
     derivationMs += translation.durationMs;
     validationMs += measureMonotonic(monotonicNow, () => {
-      assertValidAnalysis(translated.snapshot, translated.analysis);
+      assertValidAnalysis(
+        translated.snapshot,
+        translated.analysis,
+        bundle.workspace.analysisPolicy,
+      );
     }).durationMs;
     const derived = measureMonotonic(monotonicNow, () => {
       const progressTimestamp = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
@@ -797,10 +865,14 @@ export async function applyReviewAnalysis(
     // finalize skip re-reading it here.
     let resolvedRemovals: RemovalRationale[] | undefined;
     validationMs += measureMonotonic(monotonicNow, () => {
-      assertValidAnalysis(bundle.snapshot, {
-        ...diffAnalysis,
-        removals: mergeRemovalInsights(carriedRemovals, diffAnalysis.removals) ?? [],
-      });
+      assertValidAnalysis(
+        bundle.snapshot,
+        {
+          ...diffAnalysis,
+          removals: mergeRemovalInsights(carriedRemovals, diffAnalysis.removals) ?? [],
+        },
+        bundle.workspace.analysisPolicy,
+      );
       const freshRemovals = diffAnalysis.removals
         ? resolveRemovalExcerpts(
             bundle.snapshot,
