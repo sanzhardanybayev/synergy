@@ -191,6 +191,16 @@ body {
   white-space: nowrap;
 }
 
+.toolbar-excludes {
+  flex: none;
+  max-width: 35%;
+  color: var(--syn-fg-subtle);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .diff-toggle {
   border: 1px solid var(--syn-border-strong);
   flex: none;

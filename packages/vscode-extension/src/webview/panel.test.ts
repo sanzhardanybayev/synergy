@@ -13,7 +13,12 @@ import { describe, expect, it, vi } from 'vitest';
 // shape can be exercised here without a real VS Code webview. Importing this module also runs
 // its top-level `if (typeof acquireVsCodeApi === 'function') startWebview();` guard, which stays
 // a no-op under vitest/jsdom because `acquireVsCodeApi` is never defined there.
-import { renderDiffLines, renderRemovalStrip, renderRemovalSummary } from './panel.js';
+import {
+  excludeSummary,
+  renderDiffLines,
+  renderRemovalStrip,
+  renderRemovalSummary,
+} from './panel.js';
 
 function diffLine(
   kind: DiffLine['kind'],
@@ -356,5 +361,18 @@ describe('renderRemovalStrip', () => {
     expect(openButton?.getAttribute('data-open-line')).toBe('88');
     openButton?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     expect(onOpenFile).toHaveBeenCalledWith('b.ts', 88);
+  });
+});
+
+describe('excludeSummary', () => {
+  it('returns null when the source carries no excludes', () => {
+    expect(excludeSummary({ kind: 'staged', headSha: 'a' })).toBeNull();
+    expect(excludeSummary({ kind: 'staged', headSha: 'a', excludes: [] })).toBeNull();
+  });
+
+  it('joins configured excludes into a labeled summary so the reviewer sees what was dropped', () => {
+    expect(excludeSummary({ kind: 'staged', headSha: 'a', excludes: ['.vouch', 'dist'] })).toBe(
+      'Excluded: .vouch, dist',
+    );
   });
 });

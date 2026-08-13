@@ -284,6 +284,17 @@ function renderRemovalSummary(context) {
   return el('div', { className: 'hunk-diff hunk-diff-collapsed' }, stripEls);
 }
 
+/** Mirrors the preview's `ReviewHeader` "Excluded" fact: the person signing off on completeness
+ * must be told a review source dropped files, since the agent - not the human - chose the
+ * exclude patterns and a mis-scoped one is otherwise invisible. Returns `null` when no excludes
+ * are configured so callers can omit the badge entirely. Module-scoped (not nested inside
+ * `startWebview`) so it is directly unit-testable without a VS Code webview host. */
+function excludeSummary(source) {
+  const excludes = source.excludes;
+  if (!excludes || excludes.length === 0) return null;
+  return `Excluded: ${excludes.join(', ')}`;
+}
+
 function startWebview() {
   const vscode = acquireVsCodeApi();
   const app = document.getElementById('app');
@@ -779,6 +790,13 @@ function startWebview() {
       state.screen === 'bundle' && state.bundle
         ? subjectLabel(state.bundle.bundle.workspace.source)
         : 'Reviews';
+    const excludeText =
+      state.screen === 'bundle' && state.bundle
+        ? excludeSummary(state.bundle.bundle.workspace.source)
+        : null;
+    const excludeBadge = excludeText
+      ? el('span', { className: 'toolbar-excludes', title: excludeText }, [excludeText])
+      : null;
     const diffToggle =
       state.screen === 'bundle'
         ? el(
@@ -794,6 +812,7 @@ function startWebview() {
     return el('div', { className: 'toolbar' }, [
       back,
       el('span', { className: 'toolbar-title' }, [title]),
+      excludeBadge,
       diffToggle,
     ]);
   }
@@ -937,4 +956,4 @@ function startWebview() {
 // without it throwing immediately on import.
 if (typeof acquireVsCodeApi === 'function') startWebview();
 
-export { renderDiffLines, renderRemovalStrip, renderRemovalSummary };
+export { renderDiffLines, renderRemovalStrip, renderRemovalSummary, excludeSummary };
