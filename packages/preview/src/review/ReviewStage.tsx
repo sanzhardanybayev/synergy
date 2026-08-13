@@ -144,6 +144,7 @@ export function ReviewStage({
     if (!jump.origin) return;
     walkthrough.advanceTo(jump.origin.reviewItemId);
     jump.clearOrigin();
+    scrollStageIntoView();
   }
   const allStripKeys = strips.map((strip) => runKey(strip));
   const allStripsExpanded =

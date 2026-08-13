@@ -1,7 +1,7 @@
 import { buildDiffSnapshot } from '@synergy/review-core';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReviewProvider } from '../src/review/ReviewProvider.js';
 import { ReviewShell } from '../src/review/ReviewShell.js';
 import { makeDiffBundle, makeReviewClient } from './review-ui-fixtures.js';
@@ -108,6 +108,12 @@ describe('removal jump navigation', () => {
     localStorage.clear();
   });
 
+  afterEach(() => {
+    // jsdom has no layout engine and doesn't implement scrollIntoView at all - undo the
+    // per-test stub below so it doesn't leak into unrelated tests in this file.
+    (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView = undefined;
+  });
+
   it('jumping sets the active item, flashes the target rows, and offers a way back', async () => {
     const user = userEvent.setup();
     renderReviewAt();
@@ -146,16 +152,21 @@ describe('removal jump navigation', () => {
     expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'start' }));
   });
 
-  it('the back chip returns to the origin item and clears itself', async () => {
+  it('the back chip returns to the origin item, scrolls the stage into view, and clears itself', async () => {
+    // jsdom has no layout engine and doesn't implement scrollIntoView at all.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
     const user = userEvent.setup();
     renderReviewAt();
     await user.click(
       await screen.findByRole('button', { name: /→ src\/http\/interceptor\.ts:88/ }),
     );
+    scrollIntoView.mockClear();
     await user.click(
       await screen.findByRole('button', { name: /back to src\/auth\/session\.ts:41/i }),
     );
     expect(await screen.findByRole('region', { name: 'File src/auth/session.ts' })).toBeVisible();
+    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'start' }));
     expect(
       screen.queryByRole('button', { name: /back to src\/auth\/session\.ts:41/i }),
     ).not.toBeInTheDocument();
