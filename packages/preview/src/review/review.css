@@ -765,6 +765,9 @@
   border-radius: var(--syn-radius-lg);
   background: var(--syn-bg-raised);
   box-shadow: var(--syn-shadow-sm);
+  /* Query container for `.review-removal`: its own box size (the visible pane), not the wider
+     `max-content` scrollWidth that `.review-diff` grows to for the code rows below. */
+  container-type: inline-size;
 }
 
 .review-file-change {
@@ -1493,7 +1496,18 @@ div.review-index__card {
   }
 }
 
+/* `.review-diff` (the scroll track) is `min-width: max-content`, sized to the widest code line -
+   often much wider than the visible pane. A plain block child would inherit that width and its
+   prose would run off the right edge instead of wrapping within what the reader can actually see.
+   `100cqw` pins the strip's width to `.review-code-scroll`'s own (visible) box instead, and
+   `position: sticky; left: 0` keeps it anchored to the left edge as the reader scrolls the code
+   rows horizontally, rather than drifting out of view with them. */
 .review-removal {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 100cqw;
+  box-sizing: border-box;
   display: grid;
   gap: var(--syn-sp-1);
   padding: 2px var(--syn-sp-3);
