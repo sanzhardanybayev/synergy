@@ -959,7 +959,7 @@ async function requestPreviewShutdown(origin, instanceId, controlToken, timeoutM
 }
 
 // src/version.ts
-var SYNERGY_VERSION = "0.20.0";
+var SYNERGY_VERSION = "0.21.0";
 
 // src/preview.ts
 var START_TIMEOUT_MS = 1e4;
