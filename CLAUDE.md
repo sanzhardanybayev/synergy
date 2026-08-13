@@ -187,10 +187,11 @@ PR, staged changes, unstaged changes, and a bounded current-code scope.
   workspace source and therefore flows into the fingerprint - the same patterns in a different
   order resume the same revision, a different set produces a different one. Enforcement is
   two-layer: excluded chunks are filtered out of the captured patch (the only mechanism available
-  for PR capture, since `gh pr diff` accepts no pathspec), and wildcard-free patterns additionally
-  become `:(exclude,literal)` git pathspecs so those files are never read. Wildcard patterns
-  deliberately emit no pathspec - git's unmagicked `*` crosses `/` but the matcher's does not, and
-  letting git decide would silently over-exclude.
+  for PR capture, since `gh pr diff` accepts no pathspec, and the only mechanism staged capture
+  uses at all), and, for unstaged and scope captures, wildcard-free patterns additionally become
+  `:(exclude,literal)` git pathspecs so those files are never read off disk in the first place.
+  Wildcard patterns deliberately emit no pathspec - git's unmagicked `*` crosses `/` but the
+  matcher's does not, and letting git decide would silently over-exclude.
 - `packages/vscode-extension/media/panel.js` is a **build artifact**. The source is
   `src/webview/panel.js`; `esbuild.mjs` bundles it. Never edit the file in `media/`.
 

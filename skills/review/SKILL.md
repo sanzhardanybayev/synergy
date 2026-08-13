@@ -92,7 +92,10 @@ unanalyzed items block readiness. `--exclude` is create-only - `review refresh` 
 the excludes already stored on the workspace, and passing `--exclude` to any other action is a
 usage error. Excluded paths are never captured, so treat them as absent from the review, not
 as a gap to note or investigate: do not mention them in summaries, descriptions, or removal
-rationale as if they were skipped or missing.
+rationale as if they were skipped or missing. Excludes are part of the workspace's source
+identity: re-running `review create` for the same source with a different set of `--exclude`
+patterns produces a new revision rather than resuming the current one, so double-check the
+pattern set before re-running create on a review already in progress.
 
 For scope reviews, also read `analysisGuidance` from create or status output. Report its
 `textFiles`, `textLines`, `minimumSections`, `targetSections`, and `maximumSections` before
