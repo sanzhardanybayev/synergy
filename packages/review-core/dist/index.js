@@ -28,7 +28,7 @@ import {
   repositoryName,
   resolveRepositoryRoot,
   systemCommandRunner
-} from "./chunk-XTDJSLBW.js";
+} from "./chunk-4RU76K66.js";
 
 // src/atomic.ts
 import { renameSync, writeFileSync } from "node:fs";

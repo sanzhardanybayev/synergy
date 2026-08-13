@@ -160,27 +160,42 @@ function isPreviewRuntimePath(path: string): boolean {
   );
 }
 
+interface FilteredPatch {
+  patch: string;
+  /** True when at least one chunk was dropped because it matched a user exclude pattern. */
+  excludedAny: boolean;
+}
+
 /**
  * Drops whole-file patch chunks for Synergy's own runtime files and, when `excludes` is
- * non-empty, for any user-excluded path. This is the only enforcement mechanism available for
- * PR capture, because `gh pr diff` accepts no pathspec; other capture paths also pass `excludes`
- * as git pathspecs so excluded files are never read off disk in the first place.
+ * non-empty, for any user-excluded path - in one pass so each chunk is parsed once. This is
+ * the only enforcement mechanism available for PR capture, because `gh pr diff` accepts no
+ * pathspec; other capture paths also pass `excludes` as git pathspecs (see `excludePathspecs`)
+ * so excluded files are never read off disk in the first place, with this filter remaining the
+ * correctness backstop.
  */
-function filterPatch(patch: string, excludes: readonly string[]): string {
-  return patch
+function filterPatch(patch: string, excludes: readonly string[]): FilteredPatch {
+  let excludedAny = false;
+  const filtered = patch
     .split(/(?=^diff --git )/mu)
     .filter((chunk) => {
       const files = parseUnifiedDiff(chunk);
       if (files.length === 0) return true;
-      return files.every(
-        (file) =>
-          !isPreviewRuntimePath(file.path) &&
-          (file.previousPath === undefined || !isPreviewRuntimePath(file.previousPath)) &&
-          !isPathExcluded(file.path, excludes) &&
-          (file.previousPath === undefined || !isPathExcluded(file.previousPath, excludes)),
-      );
+      const isRuntimeMatch = (file: (typeof files)[number]) =>
+        isPreviewRuntimePath(file.path) ||
+        (file.previousPath !== undefined && isPreviewRuntimePath(file.previousPath));
+      const isUserExcludeMatch = (file: (typeof files)[number]) =>
+        isPathExcluded(file.path, excludes) ||
+        (file.previousPath !== undefined && isPathExcluded(file.previousPath, excludes));
+      if (files.some(isRuntimeMatch)) return false;
+      if (files.some(isUserExcludeMatch)) {
+        excludedAny = true;
+        return false;
+      }
+      return true;
     })
     .join('');
+  return { patch: filtered, excludedAny };
 }
 
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
@@ -408,8 +423,7 @@ export function capturePr(options: CapturePrOptions): CapturedReviewSource {
       ]),
     );
     const rawDiff = runChecked(runner, options.root, 'gh', ['pr', 'diff', before.url]);
-    const runtimeFiltered = filterPatch(rawDiff, []);
-    const patch = excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
+    const { patch, excludedAny } = filterPatch(rawDiff, excludes);
     const after = parsePullRequestView(
       runChecked(runner, options.root, 'gh', [
         'pr',
@@ -428,10 +442,7 @@ export function capturePr(options: CapturePrOptions): CapturedReviewSource {
       headSha: after.headRefOid,
       ...(excludes.length > 0 ? { excludes } : {}),
     };
-    const excludedEverything =
-      excludes.length > 0 &&
-      parseUnifiedDiff(runtimeFiltered).length > 0 &&
-      parseUnifiedDiff(patch).length === 0;
+    const excludedEverything = excludedAny && parseUnifiedDiff(patch).length === 0;
     const eligiblePaths = assertCapturedPatch(patch, 'PR', excludedEverything);
     return {
       source,
@@ -455,17 +466,13 @@ export function captureStaged(options: CaptureFileOptions): CapturedReviewSource
     '--no-ext-diff',
     '--binary',
   ]);
-  const runtimeFiltered = filterPatch(rawDiff, []);
-  const patch = excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
+  const { patch, excludedAny } = filterPatch(rawDiff, excludes);
   const source: ReviewSource = {
     kind: 'staged',
     headSha: '',
     ...(excludes.length > 0 ? { excludes } : {}),
   };
-  const excludedEverything =
-    excludes.length > 0 &&
-    parseUnifiedDiff(runtimeFiltered).length > 0 &&
-    parseUnifiedDiff(patch).length === 0;
+  const excludedEverything = excludedAny && parseUnifiedDiff(patch).length === 0;
   const eligiblePaths = assertCapturedPatch(patch, 'staged', excludedEverything);
   return { source, patch, eligiblePaths, fingerprint: sourceFingerprint(source, patch) };
 }
@@ -487,9 +494,10 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
     ':(exclude).synergy/preview.log',
     ...excludePathspecs(excludes),
   ]);
-  const runtimeFiltered = filterPatch(trackedRaw, []);
-  const trackedPatch =
-    excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
+  const { patch: trackedPatch, excludedAny: trackedExcludedAny } = filterPatch(
+    trackedRaw,
+    excludes,
+  );
   const allUntrackedPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, 'git', [
       'ls-files',
@@ -499,6 +507,7 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
     ]),
   ).filter((path) => !isPreviewRuntimePath(path));
   const untrackedPaths = allUntrackedPaths.filter((path) => !isPathExcluded(path, excludes));
+  const untrackedExcludedAny = untrackedPaths.length < allUntrackedPaths.length;
   const untrackedEntries = untrackedPaths.map((path) => ({
     path,
     entry: readRepositoryEntry(options.root, path, options.readFile),
@@ -513,9 +522,7 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
     ...(excludes.length > 0 ? { excludes } : {}),
   };
   const excludedEverything =
-    excludes.length > 0 &&
-    (parseUnifiedDiff(runtimeFiltered).length > 0 || allUntrackedPaths.length > 0) &&
-    parseUnifiedDiff(patch).length === 0;
+    (trackedExcludedAny || untrackedExcludedAny) && parseUnifiedDiff(patch).length === 0;
   const eligiblePaths = assertCapturedPatch(patch, 'unstaged', excludedEverything);
   const fingerprintContent = [
     patch,
@@ -554,9 +561,10 @@ export function captureScope(options: CaptureScopeOptions): CapturedReviewSource
   ).filter((path) => !isPreviewRuntimePath(path));
   const paths = rawPaths.filter((path) => !isPathExcluded(path, excludes));
   if (paths.length === 0) {
+    const excludedEverything = excludes.length > 0 && rawPaths.length > paths.length;
     throw new Error(
-      excludes.length > 0
-        ? 'Scope resolved to no eligible files (exclude patterns may have removed them). Choose a different path or exclude pattern.'
+      excludedEverything
+        ? 'Exclude patterns removed every scoped file; no review was created. Adjust --exclude and try again.'
         : 'Scope resolved to no eligible files. Choose a different path.',
     );
   }

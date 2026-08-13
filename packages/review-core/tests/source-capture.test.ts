@@ -1,8 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   type CommandResult,
   type CommandRunner,
   captureReviewSource,
+  captureScope,
+  captureUnstaged,
   compareReviewSourceFreshness,
   recaptureReviewSource,
 } from '../src/index.js';
@@ -50,6 +56,59 @@ function runner(fixtures: Record<string, string>): CommandRunner {
     },
   };
 }
+
+const temporaryRoots: string[] = [];
+
+function makeWildcardExcludeRepository(): string {
+  const root = join(tmpdir(), `synergy-review-exclude-glob-${Date.now()}-${Math.random()}`);
+  temporaryRoots.push(root);
+  mkdirSync(join(root, 'nested'), { recursive: true });
+  writeFileSync(join(root, 'debug.log'), 'tracked-top-v1\n');
+  writeFileSync(join(root, 'nested/debug.log'), 'tracked-nested-v1\n');
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'review@example.test'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 'Review Test'], { cwd: root });
+  execFileSync('git', ['add', 'debug.log', 'nested/debug.log'], { cwd: root });
+  execFileSync('git', ['commit', '--quiet', '-m', 'baseline'], { cwd: root });
+  // Tracked, modified-but-unstaged changes to both the top-level and nested `*.log` files.
+  writeFileSync(join(root, 'debug.log'), 'tracked-top-v2\n');
+  writeFileSync(join(root, 'nested/debug.log'), 'tracked-nested-v2\n');
+  // Untracked `*.log` files at both levels.
+  writeFileSync(join(root, 'extra.log'), 'untracked-top\n');
+  writeFileSync(join(root, 'nested/extra.log'), 'untracked-nested\n');
+  return root;
+}
+
+describe('exclude semantics against real git (not the fixture runner)', () => {
+  afterEach(() => {
+    for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  it('gives captureUnstaged the same *.log answer for tracked and untracked nested matches', () => {
+    const root = makeWildcardExcludeRepository();
+
+    const result = captureUnstaged({ root, excludes: ['*.log'] });
+
+    // Top-level debug.log/extra.log (tracked-modified and untracked) are excluded; the nested
+    // copies are NOT, because `*` is single-segment - it must not cross a `/` at either the git
+    // pathspec level (tracked diff) or the JS ls-files filter level (untracked listing).
+    expect(result.eligiblePaths).toEqual(['nested/debug.log', 'nested/extra.log']);
+    expect(result.patch).not.toMatch(/^diff --git a\/debug\.log/mu);
+    expect(result.patch).not.toMatch(/^diff --git a\/extra\.log/mu);
+  });
+
+  it('gives captureScope the same *.log answer as captureUnstaged for nested matches', () => {
+    const root = makeWildcardExcludeRepository();
+
+    const result = captureScope({
+      root,
+      patterns: ['debug.log', 'extra.log', 'nested'],
+      excludes: ['*.log'],
+    });
+
+    expect(result.eligiblePaths).toEqual(['nested/debug.log', 'nested/extra.log']);
+  });
+});
 
 describe('excludes', () => {
   it('drops PR patch chunks matching an exclude pattern, leaving survivors byte-identical', () => {
@@ -119,6 +178,35 @@ describe('excludes', () => {
     ).toThrow(/exclud/i);
   });
 
+  it('reports precisely when an exclude pattern consumed the entire scope', () => {
+    const commandRunner = runner({
+      'git rev-parse HEAD': 'abc123\n',
+      'git ls-files --cached --others --exclude-standard -z -- src': 'src/example.log\0',
+    });
+    expect(() =>
+      captureReviewSource({
+        root: '/repo',
+        runner: commandRunner,
+        readFile: () => 'content\n',
+        source: { kind: 'scope', patterns: ['src'], excludes: ['**/*.log'] },
+      }),
+    ).toThrow(/exclud/i);
+  });
+
+  it('keeps the generic message when a scope has no files for reasons other than excludes', () => {
+    const commandRunner = runner({
+      'git rev-parse HEAD': 'abc123\n',
+      'git ls-files --cached --others --exclude-standard -z -- src': '',
+    });
+    expect(() =>
+      captureReviewSource({
+        root: '/repo',
+        runner: commandRunner,
+        source: { kind: 'scope', patterns: ['src'] },
+      }),
+    ).toThrow(/choose a different path/i);
+  });
+
   it('excludes untracked files matching a user exclude pattern from unstaged capture', () => {
     const commandRunner: CommandRunner = {
       run(command, args): CommandResult {
@@ -127,8 +215,7 @@ describe('excludes', () => {
           return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
         }
         if (commandKey.startsWith('git diff --no-ext-diff --binary --')) {
-          expect(commandKey).toContain(':(exclude).vouch');
-          expect(commandKey).toContain(':(exclude,glob).vouch/**');
+          expect(commandKey).toContain(':(exclude,literal).vouch');
           return { exitCode: 0, stdout: '', stderr: '' };
         }
         if (commandKey === 'git ls-files --others --exclude-standard -z') {

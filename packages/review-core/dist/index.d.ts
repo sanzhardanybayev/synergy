@@ -139,6 +139,12 @@ declare function reconcileReview(previous: ReviewBundle, currentSnapshot: Review
  * - `**` matches any run of characters, including `/` - it crosses directory boundaries.
  * - Callers never supply git pathspec magic (a leading `:`) - pathspecs are constructed
  *   internally via `excludePathspecs`.
+ *
+ * This module is the ONLY authority on glob semantics. `excludePathspecs` never emits a git
+ * pathspec that could exclude more than this matcher would - git's own wildcard fallback
+ * (`fnmatch(3)` without `FNM_PATHNAME`, which lets a bare `*` cross `/`) does not agree with the
+ * single-segment `*` semantics documented above, so any pattern containing `*` is left for this
+ * module to filter in JS; only wildcard-free patterns get a (literal, therefore safe) pathspec.
  */
 /** Trims, strips a leading `./`, and collapses trailing slashes so directory forms collapse. */
 declare function normalizeExcludePattern(raw: string): string;
@@ -149,8 +155,14 @@ declare function normalizeExcludesOrUndefined(patterns: readonly string[] | unde
 /** True when `path` (repository-relative) matches any normalized exclude pattern. */
 declare function isPathExcluded(path: string, excludes: readonly string[]): boolean;
 /**
- * Builds git pathspec arguments that exclude each pattern exactly and everything nested
- * beneath it. Safe to append to any `git diff`/`git ls-files` invocation.
+ * Builds git pathspec arguments that pre-filter excluded files at the git level, as a
+ * performance optimization so excluded files are never read off disk. Only wildcard-free
+ * patterns are emitted, using `:(literal)` magic so git never re-interprets `*`/`?`/`[]` with
+ * its own (`*` crosses `/`) wildcard semantics - git's plain literal pathspec matching already
+ * matches a path exactly or as a leading directory component, which agrees with this module's
+ * directory-prefix rule. A pattern containing `*` is omitted here entirely and left for
+ * `isPathExcluded`/patch filtering to enforce, so this function never excludes more than the JS
+ * matcher would; that is always the correctness backstop.
  */
 declare function excludePathspecs(excludes: readonly string[]): string[];
 

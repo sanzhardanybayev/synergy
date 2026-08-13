@@ -23,6 +23,11 @@ describe('normalizeExcludes', () => {
     expect(() => normalizeExcludes(['\\etc\\passwd'])).toThrow();
   });
 
+  it('rejects windows drive-letter absolute paths', () => {
+    expect(() => normalizeExcludes(['C:\\Windows\\file'])).toThrow();
+    expect(() => normalizeExcludes(['C:/Windows/file'])).toThrow();
+  });
+
   it('rejects .. segments', () => {
     expect(() => normalizeExcludes(['../secrets'])).toThrow();
     expect(() => normalizeExcludes(['a/../b'])).toThrow();
@@ -83,16 +88,24 @@ describe('isPathExcluded', () => {
     expect(isPathExcluded('src/generated.ts', excludes)).toBe(true);
     expect(isPathExcluded('src/generated2.ts', excludes)).toBe(false);
   });
+
+  it('escapes ? so it matches only a literal question mark, not "any one character"', () => {
+    const excludes = normalizeExcludes(['weird?file.txt']);
+    expect(isPathExcluded('weird?file.txt', excludes)).toBe(true);
+    expect(isPathExcluded('weirdXfile.txt', excludes)).toBe(false);
+  });
 });
 
 describe('excludePathspecs', () => {
-  it('produces exact and recursive-glob pathspecs for each pattern', () => {
+  it('produces a literal pathspec for each wildcard-free pattern', () => {
     expect(excludePathspecs(['.vouch', '.lavish'])).toEqual([
-      ':(exclude).vouch',
-      ':(exclude,glob).vouch/**',
-      ':(exclude).lavish',
-      ':(exclude,glob).lavish/**',
+      ':(exclude,literal).vouch',
+      ':(exclude,literal).lavish',
     ]);
+  });
+
+  it('omits patterns containing * so git never re-interprets the wildcard itself', () => {
+    expect(excludePathspecs(['*.log', '**/*.log', '.vouch'])).toEqual([':(exclude,literal).vouch']);
   });
 
   it('returns an empty array for no excludes', () => {

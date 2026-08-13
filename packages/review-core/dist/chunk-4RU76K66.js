@@ -399,8 +399,9 @@ ${occurrence}`).slice(
 
 // src/path-excludes.ts
 var EXCLUDE_REGEX_CACHE = /* @__PURE__ */ new Map();
+var WINDOWS_DRIVE_ABSOLUTE = /^[A-Za-z]:[\\/]/u;
 function assertSafeExcludePattern(pattern) {
-  if (pattern.length === 0 || pattern.trim().length === 0 || pattern.includes("\0") || pattern.startsWith("/") || pattern.startsWith("\\") || pattern.startsWith(":") || pattern.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) {
+  if (pattern.length === 0 || pattern.trim().length === 0 || pattern.includes("\0") || pattern.startsWith("/") || pattern.startsWith("\\") || pattern.startsWith(":") || WINDOWS_DRIVE_ABSOLUTE.test(pattern) || pattern.split(/[\\/]/u).some((segment) => segment === "" || segment === "." || segment === "..")) {
     throw new Error(`invalid exclude pattern: ${pattern}`);
   }
 }
@@ -420,7 +421,7 @@ function normalizeExcludesOrUndefined(patterns) {
   return normalized.length === 0 ? void 0 : normalized;
 }
 function escapeRegExpChar(char) {
-  return /[.+^${}()|[\]\\]/u.test(char) ? `\\${char}` : char;
+  return /[.+^${}()|[\]\\?]/u.test(char) ? `\\${char}` : char;
 }
 function globToRegexSource(pattern) {
   let out = "";
@@ -459,7 +460,7 @@ function isPathExcluded(path, excludes) {
   return excludes.some((pattern) => compileExcludePattern(pattern).test(path));
 }
 function excludePathspecs(excludes) {
-  return excludes.flatMap((pattern) => [`:(exclude)${pattern}`, `:(exclude,glob)${pattern}/**`]);
+  return excludes.filter((pattern) => !pattern.includes("*")).map((pattern) => `:(exclude,literal)${pattern}`);
 }
 
 // src/source-capture.ts
@@ -531,13 +532,20 @@ function isPreviewRuntimePath(path) {
   return PREVIEW_RUNTIME_PATHS.has(path) || path.startsWith(".synergy/preview.runtime.json.quarantine.") || path.startsWith(".synergy/.preview.runtime.json.") && path.endsWith(".tmp") || path.startsWith(".synergy/preview.start.lock.quarantine.") || path.startsWith(".synergy/preview.start.lock.owner.tmp.");
 }
 function filterPatch(patch, excludes) {
-  return patch.split(/(?=^diff --git )/mu).filter((chunk) => {
+  let excludedAny = false;
+  const filtered = patch.split(/(?=^diff --git )/mu).filter((chunk) => {
     const files = parseUnifiedDiff(chunk);
     if (files.length === 0) return true;
-    return files.every(
-      (file) => !isPreviewRuntimePath(file.path) && (file.previousPath === void 0 || !isPreviewRuntimePath(file.previousPath)) && !isPathExcluded(file.path, excludes) && (file.previousPath === void 0 || !isPathExcluded(file.previousPath, excludes))
-    );
+    const isRuntimeMatch = (file) => isPreviewRuntimePath(file.path) || file.previousPath !== void 0 && isPreviewRuntimePath(file.previousPath);
+    const isUserExcludeMatch = (file) => isPathExcluded(file.path, excludes) || file.previousPath !== void 0 && isPathExcluded(file.previousPath, excludes);
+    if (files.some(isRuntimeMatch)) return false;
+    if (files.some(isUserExcludeMatch)) {
+      excludedAny = true;
+      return false;
+    }
+    return true;
   }).join("");
+  return { patch: filtered, excludedAny };
 }
 var UTF8_DECODER = new TextDecoder2("utf-8", { fatal: true });
 function decodeUtf8(bytes) {
@@ -717,8 +725,7 @@ function capturePr(options) {
       ])
     );
     const rawDiff = runChecked(runner, options.root, "gh", ["pr", "diff", before.url]);
-    const runtimeFiltered = filterPatch(rawDiff, []);
-    const patch = excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
+    const { patch, excludedAny } = filterPatch(rawDiff, excludes);
     const after = parsePullRequestView(
       runChecked(runner, options.root, "gh", [
         "pr",
@@ -737,7 +744,7 @@ function capturePr(options) {
       headSha: after.headRefOid,
       ...excludes.length > 0 ? { excludes } : {}
     };
-    const excludedEverything = excludes.length > 0 && parseUnifiedDiff(runtimeFiltered).length > 0 && parseUnifiedDiff(patch).length === 0;
+    const excludedEverything = excludedAny && parseUnifiedDiff(patch).length === 0;
     const eligiblePaths = assertCapturedPatch(patch, "PR", excludedEverything);
     return {
       source,
@@ -760,14 +767,13 @@ function captureStaged(options) {
     "--no-ext-diff",
     "--binary"
   ]);
-  const runtimeFiltered = filterPatch(rawDiff, []);
-  const patch = excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
+  const { patch, excludedAny } = filterPatch(rawDiff, excludes);
   const source = {
     kind: "staged",
     headSha: "",
     ...excludes.length > 0 ? { excludes } : {}
   };
-  const excludedEverything = excludes.length > 0 && parseUnifiedDiff(runtimeFiltered).length > 0 && parseUnifiedDiff(patch).length === 0;
+  const excludedEverything = excludedAny && parseUnifiedDiff(patch).length === 0;
   const eligiblePaths = assertCapturedPatch(patch, "staged", excludedEverything);
   return { source, patch, eligiblePaths, fingerprint: sourceFingerprint(source, patch) };
 }
@@ -788,8 +794,10 @@ function captureUnstaged(options) {
     ":(exclude).synergy/preview.log",
     ...excludePathspecs(excludes)
   ]);
-  const runtimeFiltered = filterPatch(trackedRaw, []);
-  const trackedPatch = excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
+  const { patch: trackedPatch, excludedAny: trackedExcludedAny } = filterPatch(
+    trackedRaw,
+    excludes
+  );
   const allUntrackedPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, "git", [
       "ls-files",
@@ -799,6 +807,7 @@ function captureUnstaged(options) {
     ])
   ).filter((path) => !isPreviewRuntimePath(path));
   const untrackedPaths = allUntrackedPaths.filter((path) => !isPathExcluded(path, excludes));
+  const untrackedExcludedAny = untrackedPaths.length < allUntrackedPaths.length;
   const untrackedEntries = untrackedPaths.map((path) => ({
     path,
     entry: readRepositoryEntry(options.root, path, options.readFile)
@@ -812,7 +821,7 @@ function captureUnstaged(options) {
     headSha: "",
     ...excludes.length > 0 ? { excludes } : {}
   };
-  const excludedEverything = excludes.length > 0 && (parseUnifiedDiff(runtimeFiltered).length > 0 || allUntrackedPaths.length > 0) && parseUnifiedDiff(patch).length === 0;
+  const excludedEverything = (trackedExcludedAny || untrackedExcludedAny) && parseUnifiedDiff(patch).length === 0;
   const eligiblePaths = assertCapturedPatch(patch, "unstaged", excludedEverything);
   const fingerprintContent = [
     patch,
@@ -849,8 +858,9 @@ function captureScope(options) {
   ).filter((path) => !isPreviewRuntimePath(path));
   const paths = rawPaths.filter((path) => !isPathExcluded(path, excludes));
   if (paths.length === 0) {
+    const excludedEverything = excludes.length > 0 && rawPaths.length > paths.length;
     throw new Error(
-      excludes.length > 0 ? "Scope resolved to no eligible files (exclude patterns may have removed them). Choose a different path or exclude pattern." : "Scope resolved to no eligible files. Choose a different path."
+      excludedEverything ? "Exclude patterns removed every scoped file; no review was created. Adjust --exclude and try again." : "Scope resolved to no eligible files. Choose a different path."
     );
   }
   const source = {
@@ -947,4 +957,4 @@ export {
   resolveRepositoryRoot,
   repositoryName
 };
-//# sourceMappingURL=chunk-XTDJSLBW.js.map
+//# sourceMappingURL=chunk-4RU76K66.js.map
