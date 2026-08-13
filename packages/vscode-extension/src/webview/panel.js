@@ -257,12 +257,13 @@ function renderDiffLines(hunk, path, context) {
 
 /**
  * Renders JUST the removal strips for a review item - no diff line bodies - so a reviewer with
- * the diff toggle OFF still sees that a removal run exists and carries a rationale. Without this,
- * collapsing the diff hid every removal strip along with it, silently defeating the coverage gate
- * the whole feature exists to guarantee (every removed run must carry a typed reason). This is
- * the least intrusive presentation available: it reuses `renderRemovalStrip` as-is (same collapsed
- * category/count row, same expand-to-read-the-sentence interaction) rather than inventing a new
- * summary widget, so the strip looks and behaves identically whether the diff is open or closed.
+ * the diff toggle OFF still sees any removal run that carries a rationale. Removal rationale is
+ * opt-in (workspace `analysisPolicy.explainRemovals`, off by default) and a run with no rationale
+ * renders nothing either way - see `renderRemovalStrip` - so this is purely about not losing
+ * strips that DO have one when the diff body collapses. This is the least intrusive presentation
+ * available: it reuses `renderRemovalStrip` as-is (same collapsed category/count row, same
+ * expand-to-read-the-sentence interaction) rather than inventing a new summary widget, so the
+ * strip looks and behaves identically whether the diff is open or closed.
  *
  * @param {{reviewItemId:string, snapshot:any, insights:any, onJumpToReviewItem:(reviewItemId:string)=>void, onOpenFile:(path:string, line:number)=>void}} [context]
  */

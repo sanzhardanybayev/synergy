@@ -192,6 +192,77 @@ describe('renderDiffLines removal strips', () => {
   });
 });
 
+describe('renderDiffLines respects the opt-in removal-rationale policy', () => {
+  // `renderDiffLines`/`renderRemovalStrip` never read `workspace.analysisPolicy` themselves -
+  // they gate purely on whether a run's insights carry a rationale, which is what makes "policy
+  // off" and "policy on" both render correctly with the same code path: with the policy off the
+  // agent simply never authors a rationale into `insights.removals`, so every run in that state
+  // naturally falls into the "no rationale" case below.
+  it('renders no strip when the policy is off and no rationale was authored', () => {
+    const hunk = twoRunsHunk();
+    const container = renderDiffLines(hunk, 'src/a.ts', {
+      reviewItemId: 'item-1',
+      snapshot: snapshotFor([twoRunsItem()], [fileFor(hunk)]),
+      insights: { removals: [] },
+      onJumpToReviewItem: () => {},
+      onOpenFile: () => {},
+    });
+    expect(container.querySelectorAll('.removal-strip')).toHaveLength(0);
+  });
+
+  it('still renders a rationale carried forward from a revision captured with the policy on', () => {
+    const hunk = twoRunsHunk();
+    const insights: Pick<ReviewInsights, 'removals'> = {
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'src/a.ts', start: 2, end: 4 },
+          reason: 'moved',
+          description: 'Moved into the interceptor.',
+        },
+      ],
+    };
+    const container = renderDiffLines(hunk, 'src/a.ts', {
+      reviewItemId: 'item-1',
+      snapshot: snapshotFor([twoRunsItem()], [fileFor(hunk)]),
+      insights,
+      onJumpToReviewItem: () => {},
+      onOpenFile: () => {},
+    });
+    const strips = container.querySelectorAll('.removal-strip');
+    expect(strips).toHaveLength(1);
+    expect(strips[0]?.textContent).toContain('moved');
+  });
+
+  it('renders every covered run when the policy is on, same as before the policy existed', () => {
+    const hunk = twoRunsHunk();
+    const insights: Pick<ReviewInsights, 'removals'> = {
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'src/a.ts', start: 2, end: 4 },
+          reason: 'moved',
+          description: 'Moved into the interceptor.',
+        },
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'src/a.ts', start: 6, end: 6 },
+          reason: 'dead-code',
+          description: 'Unreachable debug line.',
+        },
+      ],
+    };
+    const container = renderDiffLines(hunk, 'src/a.ts', {
+      reviewItemId: 'item-1',
+      snapshot: snapshotFor([twoRunsItem()], [fileFor(hunk)]),
+      insights,
+      onJumpToReviewItem: () => {},
+      onOpenFile: () => {},
+    });
+    expect(container.querySelectorAll('.removal-strip')).toHaveLength(2);
+  });
+});
+
 describe('renderRemovalSummary', () => {
   // Reproduces the diff-toggle-off host state: renderHunkRow calls this instead of
   // renderDiffLines when `state.diffVisible` is false, so a reviewer must still see that a
