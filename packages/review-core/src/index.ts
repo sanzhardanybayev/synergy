@@ -33,6 +33,13 @@ export {
   type ReviewSourceFreshnessAsyncOptions,
 } from './source-capture-async.js';
 export { reconciliationKey, reconcileReview } from './reconcile.js';
+export {
+  excludePathspecs,
+  isPathExcluded,
+  normalizeExcludePattern,
+  normalizeExcludes,
+  normalizeExcludesOrUndefined,
+} from './path-excludes.js';
 export { resolveReviewItemContext, resolveReviewLineSelection } from './review-lines.js';
 export { deriveReviewReadiness } from './readiness.js';
 export {

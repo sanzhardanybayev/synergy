@@ -1,5 +1,66 @@
 import { describe, expect, it } from 'vitest';
-import { assertReviewInsights } from '../src/index.js';
+import { assertReviewInsights, assertReviewWorkspace } from '../src/index.js';
+
+function baseWorkspace(source: Record<string, unknown>) {
+  return {
+    schemaVersion: 1,
+    id: 'workspace-1',
+    repository: { root: '/repo', name: 'repo' },
+    source,
+    currentRevisionId: 'rev-1',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+describe('review source excludes', () => {
+  it('validates a source with no excludes field (backward compatibility)', () => {
+    expect(() =>
+      assertReviewWorkspace(baseWorkspace({ kind: 'staged', headSha: 'abc' })),
+    ).not.toThrow();
+  });
+
+  it('validates each source kind with an excludes array', () => {
+    expect(() =>
+      assertReviewWorkspace(
+        baseWorkspace({
+          kind: 'pr',
+          number: 1,
+          url: 'https://github.com/acme/repo/pull/1',
+          baseSha: 'a',
+          headSha: 'b',
+          excludes: ['.vouch'],
+        }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertReviewWorkspace(
+        baseWorkspace({ kind: 'staged', headSha: 'abc', excludes: ['.vouch'] }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertReviewWorkspace(
+        baseWorkspace({ kind: 'unstaged', headSha: 'abc', excludes: ['.vouch'] }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertReviewWorkspace(
+        baseWorkspace({
+          kind: 'scope',
+          patterns: ['src'],
+          headSha: 'abc',
+          excludes: ['.vouch'],
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it('rejects a non-string entry in excludes', () => {
+    expect(() =>
+      assertReviewWorkspace(baseWorkspace({ kind: 'staged', headSha: 'abc', excludes: [1] })),
+    ).toThrow();
+  });
+});
 
 describe('assertReviewInsights narrative fields', () => {
   it('accepts insights with optional summary and group intro', () => {

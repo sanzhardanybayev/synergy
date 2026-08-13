@@ -397,6 +397,71 @@ ${occurrence}`).slice(
   };
 }
 
+// src/path-excludes.ts
+var EXCLUDE_REGEX_CACHE = /* @__PURE__ */ new Map();
+function assertSafeExcludePattern(pattern) {
+  if (pattern.length === 0 || pattern.trim().length === 0 || pattern.includes("\0") || pattern.startsWith("/") || pattern.startsWith("\\") || pattern.startsWith(":") || pattern.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) {
+    throw new Error(`invalid exclude pattern: ${pattern}`);
+  }
+}
+function normalizeExcludePattern(raw) {
+  let normalized = raw.trim();
+  while (normalized.startsWith("./")) normalized = normalized.slice(2);
+  while (normalized.length > 1 && normalized.endsWith("/")) normalized = normalized.slice(0, -1);
+  assertSafeExcludePattern(normalized);
+  return normalized;
+}
+function normalizeExcludes(patterns) {
+  return [...new Set(patterns.map(normalizeExcludePattern))].sort();
+}
+function normalizeExcludesOrUndefined(patterns) {
+  if (patterns === void 0) return void 0;
+  const normalized = normalizeExcludes(patterns);
+  return normalized.length === 0 ? void 0 : normalized;
+}
+function escapeRegExpChar(char) {
+  return /[.+^${}()|[\]\\]/u.test(char) ? `\\${char}` : char;
+}
+function globToRegexSource(pattern) {
+  let out = "";
+  let index = 0;
+  while (index < pattern.length) {
+    if (pattern.startsWith("**/", index)) {
+      out += "(?:.*/)?";
+      index += 3;
+      continue;
+    }
+    if (pattern.startsWith("/**", index)) {
+      out += "(?:/.*)?";
+      index += 3;
+      continue;
+    }
+    if (pattern.startsWith("**", index)) {
+      out += ".*";
+      index += 2;
+      continue;
+    }
+    const char = pattern[index];
+    out += char === "*" ? "[^/]*" : escapeRegExpChar(char);
+    index += 1;
+  }
+  return out;
+}
+function compileExcludePattern(pattern) {
+  const cached = EXCLUDE_REGEX_CACHE.get(pattern);
+  if (cached) return cached;
+  const regex = new RegExp(`^${globToRegexSource(pattern)}(?:/.*)?$`);
+  EXCLUDE_REGEX_CACHE.set(pattern, regex);
+  return regex;
+}
+function isPathExcluded(path, excludes) {
+  if (excludes.length === 0) return false;
+  return excludes.some((pattern) => compileExcludePattern(pattern).test(path));
+}
+function excludePathspecs(excludes) {
+  return excludes.flatMap((pattern) => [`:(exclude)${pattern}`, `:(exclude,glob)${pattern}/**`]);
+}
+
 // src/source-capture.ts
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
@@ -465,12 +530,12 @@ var PREVIEW_RUNTIME_PATHS = /* @__PURE__ */ new Set([
 function isPreviewRuntimePath(path) {
   return PREVIEW_RUNTIME_PATHS.has(path) || path.startsWith(".synergy/preview.runtime.json.quarantine.") || path.startsWith(".synergy/.preview.runtime.json.") && path.endsWith(".tmp") || path.startsWith(".synergy/preview.start.lock.quarantine.") || path.startsWith(".synergy/preview.start.lock.owner.tmp.");
 }
-function filterPreviewRuntimePatch(patch) {
+function filterPatch(patch, excludes) {
   return patch.split(/(?=^diff --git )/mu).filter((chunk) => {
     const files = parseUnifiedDiff(chunk);
     if (files.length === 0) return true;
     return files.every(
-      (file) => !isPreviewRuntimePath(file.path) && (file.previousPath === void 0 || !isPreviewRuntimePath(file.previousPath))
+      (file) => !isPreviewRuntimePath(file.path) && (file.previousPath === void 0 || !isPreviewRuntimePath(file.previousPath)) && !isPathExcluded(file.path, excludes) && (file.previousPath === void 0 || !isPathExcluded(file.previousPath, excludes))
     );
   }).join("");
 }
@@ -579,10 +644,16 @@ function runCheckedBuffer(runner, root, command, args) {
   if (result.exitCode !== 0) throw commandFailure(command, result);
   return typeof result.stdout === "string" ? Buffer.from(result.stdout, "utf8") : result.stdout;
 }
-function assertCapturedPatch(patch, source) {
+function assertCapturedPatch(patch, source, excludedEverything = false) {
   const files = parseUnifiedDiff(patch);
-  if (files.length === 0)
+  if (files.length === 0) {
+    if (excludedEverything) {
+      throw new Error(
+        `Exclude patterns removed every ${source} change; no review was created. Adjust --exclude and try again.`
+      );
+    }
     throw new Error(`No ${source} changes were found; no review was created.`);
+  }
   return files.map((file) => file.path).sort();
 }
 function sourceFingerprint(source, content) {
@@ -634,6 +705,7 @@ function parsePullRequestView(value) {
 }
 function capturePr(options) {
   const runner = options.runner ?? systemCommandRunner;
+  const excludes = normalizeExcludesOrUndefined(options.excludes) ?? [];
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const before = parsePullRequestView(
       runChecked(runner, options.root, "gh", [
@@ -644,9 +716,9 @@ function capturePr(options) {
         "number,title,url,baseRefOid,headRefOid"
       ])
     );
-    const patch = filterPreviewRuntimePatch(
-      runChecked(runner, options.root, "gh", ["pr", "diff", before.url])
-    );
+    const rawDiff = runChecked(runner, options.root, "gh", ["pr", "diff", before.url]);
+    const runtimeFiltered = filterPatch(rawDiff, []);
+    const patch = excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
     const after = parsePullRequestView(
       runChecked(runner, options.root, "gh", [
         "pr",
@@ -662,9 +734,11 @@ function capturePr(options) {
       number: after.number,
       url: after.url,
       baseSha: after.baseRefOid,
-      headSha: after.headRefOid
+      headSha: after.headRefOid,
+      ...excludes.length > 0 ? { excludes } : {}
     };
-    const eligiblePaths = assertCapturedPatch(patch, "PR");
+    const excludedEverything = excludes.length > 0 && parseUnifiedDiff(runtimeFiltered).length > 0 && parseUnifiedDiff(patch).length === 0;
+    const eligiblePaths = assertCapturedPatch(patch, "PR", excludedEverything);
     return {
       source,
       title: after.title,
@@ -679,31 +753,44 @@ function capturePr(options) {
 }
 function captureStaged(options) {
   const runner = options.runner ?? systemCommandRunner;
-  const patch = filterPreviewRuntimePatch(
-    runChecked(runner, options.root, "git", ["diff", "--cached", "--no-ext-diff", "--binary"])
-  );
-  const source = { kind: "staged", headSha: "" };
-  const eligiblePaths = assertCapturedPatch(patch, "staged");
+  const excludes = normalizeExcludesOrUndefined(options.excludes) ?? [];
+  const rawDiff = runChecked(runner, options.root, "git", [
+    "diff",
+    "--cached",
+    "--no-ext-diff",
+    "--binary"
+  ]);
+  const runtimeFiltered = filterPatch(rawDiff, []);
+  const patch = excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
+  const source = {
+    kind: "staged",
+    headSha: "",
+    ...excludes.length > 0 ? { excludes } : {}
+  };
+  const excludedEverything = excludes.length > 0 && parseUnifiedDiff(runtimeFiltered).length > 0 && parseUnifiedDiff(patch).length === 0;
+  const eligiblePaths = assertCapturedPatch(patch, "staged", excludedEverything);
   return { source, patch, eligiblePaths, fingerprint: sourceFingerprint(source, patch) };
 }
 function captureUnstaged(options) {
   const runner = options.runner ?? systemCommandRunner;
-  const trackedPatch = filterPreviewRuntimePatch(
-    runChecked(runner, options.root, "git", [
-      "diff",
-      "--no-ext-diff",
-      "--binary",
-      "--",
-      ":(exclude).synergy/preview.runtime.json",
-      ":(exclude).synergy/preview.runtime.json.*",
-      ":(exclude).synergy/.preview.runtime.json.*.tmp",
-      ":(exclude).synergy/preview.start.lock",
-      ":(exclude).synergy/preview.start.lock.*",
-      ":(exclude).synergy/preview.pid",
-      ":(exclude).synergy/preview.log"
-    ])
-  );
-  const untrackedPaths = parseNulPaths(
+  const excludes = normalizeExcludesOrUndefined(options.excludes) ?? [];
+  const trackedRaw = runChecked(runner, options.root, "git", [
+    "diff",
+    "--no-ext-diff",
+    "--binary",
+    "--",
+    ":(exclude).synergy/preview.runtime.json",
+    ":(exclude).synergy/preview.runtime.json.*",
+    ":(exclude).synergy/.preview.runtime.json.*.tmp",
+    ":(exclude).synergy/preview.start.lock",
+    ":(exclude).synergy/preview.start.lock.*",
+    ":(exclude).synergy/preview.pid",
+    ":(exclude).synergy/preview.log",
+    ...excludePathspecs(excludes)
+  ]);
+  const runtimeFiltered = filterPatch(trackedRaw, []);
+  const trackedPatch = excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
+  const allUntrackedPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, "git", [
       "ls-files",
       "--others",
@@ -711,6 +798,7 @@ function captureUnstaged(options) {
       "-z"
     ])
   ).filter((path) => !isPreviewRuntimePath(path));
+  const untrackedPaths = allUntrackedPaths.filter((path) => !isPathExcluded(path, excludes));
   const untrackedEntries = untrackedPaths.map((path) => ({
     path,
     entry: readRepositoryEntry(options.root, path, options.readFile)
@@ -719,8 +807,13 @@ function captureUnstaged(options) {
     ({ path, entry }) => syntheticAddedFilePatch(path, entry)
   );
   const patch = [trackedPatch.trimEnd(), ...untrackedPatches].filter(Boolean).join("\n");
-  const source = { kind: "unstaged", headSha: "" };
-  const eligiblePaths = assertCapturedPatch(patch, "unstaged");
+  const source = {
+    kind: "unstaged",
+    headSha: "",
+    ...excludes.length > 0 ? { excludes } : {}
+  };
+  const excludedEverything = excludes.length > 0 && (parseUnifiedDiff(runtimeFiltered).length > 0 || allUntrackedPaths.length > 0) && parseUnifiedDiff(patch).length === 0;
+  const eligiblePaths = assertCapturedPatch(patch, "unstaged", excludedEverything);
   const fingerprintContent = [
     patch,
     ...untrackedEntries.map(
@@ -740,8 +833,9 @@ function captureScope(options) {
     throw new Error("Scope review requires at least one repository-relative path.");
   const patterns = [...new Set(options.patterns.map(normalizeScopePattern))].sort();
   for (const pattern of patterns) assertSafeRepositoryPath2(pattern);
+  const excludes = normalizeExcludesOrUndefined(options.excludes) ?? [];
   const runner = options.runner ?? systemCommandRunner;
-  const paths = parseNulPaths(
+  const rawPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, "git", [
       "ls-files",
       "--cached",
@@ -749,12 +843,22 @@ function captureScope(options) {
       "--exclude-standard",
       "-z",
       "--",
-      ...patterns
+      ...patterns,
+      ...excludePathspecs(excludes)
     ])
   ).filter((path) => !isPreviewRuntimePath(path));
-  if (paths.length === 0)
-    throw new Error("Scope resolved to no eligible files. Choose a different path.");
-  const source = { kind: "scope", patterns, headSha: "" };
+  const paths = rawPaths.filter((path) => !isPathExcluded(path, excludes));
+  if (paths.length === 0) {
+    throw new Error(
+      excludes.length > 0 ? "Scope resolved to no eligible files (exclude patterns may have removed them). Choose a different path or exclude pattern." : "Scope resolved to no eligible files. Choose a different path."
+    );
+  }
+  const source = {
+    kind: "scope",
+    patterns,
+    headSha: "",
+    ...excludes.length > 0 ? { excludes } : {}
+  };
   const captured = readTextSourceFiles(options.root, paths, options.readFile);
   if (captured.files.every((file) => file.binary)) {
     throw new Error("Scope contains only binary files; choose text files to review.");
@@ -769,12 +873,20 @@ function captureScope(options) {
 }
 function captureReviewSource(request) {
   if (request.source.kind === "pr") {
-    return capturePr({ ...request, selector: request.source.selector });
+    return capturePr({
+      ...request,
+      selector: request.source.selector,
+      excludes: request.source.excludes
+    });
   }
   const runner = request.runner ?? systemCommandRunner;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const before = runChecked(runner, request.root, "git", ["rev-parse", "HEAD"]).trim();
-    const captured = request.source.kind === "staged" ? captureStaged(request) : request.source.kind === "unstaged" ? captureUnstaged(request) : captureScope({ ...request, patterns: request.source.patterns });
+    const captured = request.source.kind === "staged" ? captureStaged({ ...request, excludes: request.source.excludes }) : request.source.kind === "unstaged" ? captureUnstaged({ ...request, excludes: request.source.excludes }) : captureScope({
+      ...request,
+      patterns: request.source.patterns,
+      excludes: request.source.excludes
+    });
     const after = runChecked(runner, request.root, "git", ["rev-parse", "HEAD"]).trim();
     if (before !== after) continue;
     const source = { ...captured.source, headSha: after };
@@ -786,7 +898,7 @@ function captureReviewSource(request) {
   );
 }
 function recaptureReviewSource(source, root, dependencies = {}) {
-  const requestSource = source.kind === "pr" ? { kind: "pr", selector: source.url } : source.kind === "scope" ? { kind: "scope", patterns: source.patterns } : { kind: source.kind };
+  const requestSource = source.kind === "pr" ? { kind: "pr", selector: source.url, excludes: source.excludes } : source.kind === "scope" ? { kind: "scope", patterns: source.patterns, excludes: source.excludes } : { kind: source.kind, excludes: source.excludes };
   return captureReviewSource({ root, ...dependencies, source: requestSource });
 }
 function compareReviewSourceFreshness(snapshot, root, dependencies = {}) {
@@ -819,6 +931,11 @@ export {
   createHunkReviewItem,
   createFileReviewItem,
   buildDiffSnapshot,
+  normalizeExcludePattern,
+  normalizeExcludes,
+  normalizeExcludesOrUndefined,
+  isPathExcluded,
+  excludePathspecs,
   systemCommandRunner,
   capturePr,
   captureStaged,
@@ -830,4 +947,4 @@ export {
   resolveRepositoryRoot,
   repositoryName
 };
-//# sourceMappingURL=chunk-KWMKYFSK.js.map
+//# sourceMappingURL=chunk-XTDJSLBW.js.map

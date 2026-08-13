@@ -4,6 +4,7 @@ import { basename, join, relative, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { parseUnifiedDiff } from './diff.js';
 import { hashText } from './hash.js';
+import { excludePathspecs, isPathExcluded, normalizeExcludesOrUndefined } from './path-excludes.js';
 import type { ReviewSource, SourceFile } from './types.js';
 
 export interface CommandResult {
@@ -20,6 +21,8 @@ export interface CaptureFileOptions {
   root: string;
   runner?: CommandRunner;
   readFile?: (path: string) => string;
+  /** Repository-relative path patterns to keep out of the capture entirely. */
+  excludes?: string[];
 }
 
 export interface CapturePrOptions extends CaptureFileOptions {
@@ -31,10 +34,10 @@ export interface CaptureScopeOptions extends CaptureFileOptions {
 }
 
 export type ReviewCaptureSourceRequest =
-  | { kind: 'pr'; selector: string }
-  | { kind: 'staged' }
-  | { kind: 'unstaged' }
-  | { kind: 'scope'; patterns: string[] };
+  | { kind: 'pr'; selector: string; excludes?: string[] }
+  | { kind: 'staged'; excludes?: string[] }
+  | { kind: 'unstaged'; excludes?: string[] }
+  | { kind: 'scope'; patterns: string[]; excludes?: string[] };
 
 export interface CaptureReviewSourceRequest extends CaptureFileOptions {
   source: ReviewCaptureSourceRequest;
@@ -157,7 +160,13 @@ function isPreviewRuntimePath(path: string): boolean {
   );
 }
 
-function filterPreviewRuntimePatch(patch: string): string {
+/**
+ * Drops whole-file patch chunks for Synergy's own runtime files and, when `excludes` is
+ * non-empty, for any user-excluded path. This is the only enforcement mechanism available for
+ * PR capture, because `gh pr diff` accepts no pathspec; other capture paths also pass `excludes`
+ * as git pathspecs so excluded files are never read off disk in the first place.
+ */
+function filterPatch(patch: string, excludes: readonly string[]): string {
   return patch
     .split(/(?=^diff --git )/mu)
     .filter((chunk) => {
@@ -166,7 +175,9 @@ function filterPreviewRuntimePatch(patch: string): string {
       return files.every(
         (file) =>
           !isPreviewRuntimePath(file.path) &&
-          (file.previousPath === undefined || !isPreviewRuntimePath(file.previousPath)),
+          (file.previousPath === undefined || !isPreviewRuntimePath(file.previousPath)) &&
+          !isPathExcluded(file.path, excludes) &&
+          (file.previousPath === undefined || !isPathExcluded(file.previousPath, excludes)),
       );
     })
     .join('');
@@ -304,10 +315,16 @@ function runCheckedBuffer(
   return typeof result.stdout === 'string' ? Buffer.from(result.stdout, 'utf8') : result.stdout;
 }
 
-function assertCapturedPatch(patch: string, source: string): string[] {
+function assertCapturedPatch(patch: string, source: string, excludedEverything = false): string[] {
   const files = parseUnifiedDiff(patch);
-  if (files.length === 0)
+  if (files.length === 0) {
+    if (excludedEverything) {
+      throw new Error(
+        `Exclude patterns removed every ${source} change; no review was created. Adjust --exclude and try again.`,
+      );
+    }
     throw new Error(`No ${source} changes were found; no review was created.`);
+  }
   return files.map((file) => file.path).sort();
 }
 
@@ -379,6 +396,7 @@ function parsePullRequestView(value: string): PullRequestView {
 
 export function capturePr(options: CapturePrOptions): CapturedReviewSource {
   const runner = options.runner ?? systemCommandRunner;
+  const excludes = normalizeExcludesOrUndefined(options.excludes) ?? [];
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const before = parsePullRequestView(
       runChecked(runner, options.root, 'gh', [
@@ -389,9 +407,9 @@ export function capturePr(options: CapturePrOptions): CapturedReviewSource {
         'number,title,url,baseRefOid,headRefOid',
       ]),
     );
-    const patch = filterPreviewRuntimePatch(
-      runChecked(runner, options.root, 'gh', ['pr', 'diff', before.url]),
-    );
+    const rawDiff = runChecked(runner, options.root, 'gh', ['pr', 'diff', before.url]);
+    const runtimeFiltered = filterPatch(rawDiff, []);
+    const patch = excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
     const after = parsePullRequestView(
       runChecked(runner, options.root, 'gh', [
         'pr',
@@ -408,8 +426,13 @@ export function capturePr(options: CapturePrOptions): CapturedReviewSource {
       url: after.url,
       baseSha: after.baseRefOid,
       headSha: after.headRefOid,
+      ...(excludes.length > 0 ? { excludes } : {}),
     };
-    const eligiblePaths = assertCapturedPatch(patch, 'PR');
+    const excludedEverything =
+      excludes.length > 0 &&
+      parseUnifiedDiff(runtimeFiltered).length > 0 &&
+      parseUnifiedDiff(patch).length === 0;
+    const eligiblePaths = assertCapturedPatch(patch, 'PR', excludedEverything);
     return {
       source,
       title: after.title,
@@ -425,32 +448,49 @@ export function capturePr(options: CapturePrOptions): CapturedReviewSource {
 
 export function captureStaged(options: CaptureFileOptions): CapturedReviewSource {
   const runner = options.runner ?? systemCommandRunner;
-  const patch = filterPreviewRuntimePatch(
-    runChecked(runner, options.root, 'git', ['diff', '--cached', '--no-ext-diff', '--binary']),
-  );
-  const source: ReviewSource = { kind: 'staged', headSha: '' };
-  const eligiblePaths = assertCapturedPatch(patch, 'staged');
+  const excludes = normalizeExcludesOrUndefined(options.excludes) ?? [];
+  const rawDiff = runChecked(runner, options.root, 'git', [
+    'diff',
+    '--cached',
+    '--no-ext-diff',
+    '--binary',
+  ]);
+  const runtimeFiltered = filterPatch(rawDiff, []);
+  const patch = excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
+  const source: ReviewSource = {
+    kind: 'staged',
+    headSha: '',
+    ...(excludes.length > 0 ? { excludes } : {}),
+  };
+  const excludedEverything =
+    excludes.length > 0 &&
+    parseUnifiedDiff(runtimeFiltered).length > 0 &&
+    parseUnifiedDiff(patch).length === 0;
+  const eligiblePaths = assertCapturedPatch(patch, 'staged', excludedEverything);
   return { source, patch, eligiblePaths, fingerprint: sourceFingerprint(source, patch) };
 }
 
 export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSource {
   const runner = options.runner ?? systemCommandRunner;
-  const trackedPatch = filterPreviewRuntimePatch(
-    runChecked(runner, options.root, 'git', [
-      'diff',
-      '--no-ext-diff',
-      '--binary',
-      '--',
-      ':(exclude).synergy/preview.runtime.json',
-      ':(exclude).synergy/preview.runtime.json.*',
-      ':(exclude).synergy/.preview.runtime.json.*.tmp',
-      ':(exclude).synergy/preview.start.lock',
-      ':(exclude).synergy/preview.start.lock.*',
-      ':(exclude).synergy/preview.pid',
-      ':(exclude).synergy/preview.log',
-    ]),
-  );
-  const untrackedPaths = parseNulPaths(
+  const excludes = normalizeExcludesOrUndefined(options.excludes) ?? [];
+  const trackedRaw = runChecked(runner, options.root, 'git', [
+    'diff',
+    '--no-ext-diff',
+    '--binary',
+    '--',
+    ':(exclude).synergy/preview.runtime.json',
+    ':(exclude).synergy/preview.runtime.json.*',
+    ':(exclude).synergy/.preview.runtime.json.*.tmp',
+    ':(exclude).synergy/preview.start.lock',
+    ':(exclude).synergy/preview.start.lock.*',
+    ':(exclude).synergy/preview.pid',
+    ':(exclude).synergy/preview.log',
+    ...excludePathspecs(excludes),
+  ]);
+  const runtimeFiltered = filterPatch(trackedRaw, []);
+  const trackedPatch =
+    excludes.length > 0 ? filterPatch(runtimeFiltered, excludes) : runtimeFiltered;
+  const allUntrackedPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, 'git', [
       'ls-files',
       '--others',
@@ -458,6 +498,7 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
       '-z',
     ]),
   ).filter((path) => !isPreviewRuntimePath(path));
+  const untrackedPaths = allUntrackedPaths.filter((path) => !isPathExcluded(path, excludes));
   const untrackedEntries = untrackedPaths.map((path) => ({
     path,
     entry: readRepositoryEntry(options.root, path, options.readFile),
@@ -466,8 +507,16 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
     syntheticAddedFilePatch(path, entry),
   );
   const patch = [trackedPatch.trimEnd(), ...untrackedPatches].filter(Boolean).join('\n');
-  const source: ReviewSource = { kind: 'unstaged', headSha: '' };
-  const eligiblePaths = assertCapturedPatch(patch, 'unstaged');
+  const source: ReviewSource = {
+    kind: 'unstaged',
+    headSha: '',
+    ...(excludes.length > 0 ? { excludes } : {}),
+  };
+  const excludedEverything =
+    excludes.length > 0 &&
+    (parseUnifiedDiff(runtimeFiltered).length > 0 || allUntrackedPaths.length > 0) &&
+    parseUnifiedDiff(patch).length === 0;
+  const eligiblePaths = assertCapturedPatch(patch, 'unstaged', excludedEverything);
   const fingerprintContent = [
     patch,
     ...untrackedEntries.map(
@@ -489,8 +538,9 @@ export function captureScope(options: CaptureScopeOptions): CapturedReviewSource
     throw new Error('Scope review requires at least one repository-relative path.');
   const patterns = [...new Set(options.patterns.map(normalizeScopePattern))].sort();
   for (const pattern of patterns) assertSafeRepositoryPath(pattern);
+  const excludes = normalizeExcludesOrUndefined(options.excludes) ?? [];
   const runner = options.runner ?? systemCommandRunner;
-  const paths = parseNulPaths(
+  const rawPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, 'git', [
       'ls-files',
       '--cached',
@@ -499,11 +549,23 @@ export function captureScope(options: CaptureScopeOptions): CapturedReviewSource
       '-z',
       '--',
       ...patterns,
+      ...excludePathspecs(excludes),
     ]),
   ).filter((path) => !isPreviewRuntimePath(path));
-  if (paths.length === 0)
-    throw new Error('Scope resolved to no eligible files. Choose a different path.');
-  const source: ReviewSource = { kind: 'scope', patterns, headSha: '' };
+  const paths = rawPaths.filter((path) => !isPathExcluded(path, excludes));
+  if (paths.length === 0) {
+    throw new Error(
+      excludes.length > 0
+        ? 'Scope resolved to no eligible files (exclude patterns may have removed them). Choose a different path or exclude pattern.'
+        : 'Scope resolved to no eligible files. Choose a different path.',
+    );
+  }
+  const source: ReviewSource = {
+    kind: 'scope',
+    patterns,
+    headSha: '',
+    ...(excludes.length > 0 ? { excludes } : {}),
+  };
   const captured = readTextSourceFiles(options.root, paths, options.readFile);
   if (captured.files.every((file) => file.binary)) {
     throw new Error('Scope contains only binary files; choose text files to review.');
@@ -519,17 +581,25 @@ export function captureScope(options: CaptureScopeOptions): CapturedReviewSource
 
 export function captureReviewSource(request: CaptureReviewSourceRequest): CapturedReviewSource {
   if (request.source.kind === 'pr') {
-    return capturePr({ ...request, selector: request.source.selector });
+    return capturePr({
+      ...request,
+      selector: request.source.selector,
+      excludes: request.source.excludes,
+    });
   }
   const runner = request.runner ?? systemCommandRunner;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const before = runChecked(runner, request.root, 'git', ['rev-parse', 'HEAD']).trim();
     const captured =
       request.source.kind === 'staged'
-        ? captureStaged(request)
+        ? captureStaged({ ...request, excludes: request.source.excludes })
         : request.source.kind === 'unstaged'
-          ? captureUnstaged(request)
-          : captureScope({ ...request, patterns: request.source.patterns });
+          ? captureUnstaged({ ...request, excludes: request.source.excludes })
+          : captureScope({
+              ...request,
+              patterns: request.source.patterns,
+              excludes: request.source.excludes,
+            });
     const after = runChecked(runner, request.root, 'git', ['rev-parse', 'HEAD']).trim();
     if (before !== after) continue;
     const source = { ...captured.source, headSha: after };
@@ -549,10 +619,10 @@ export function recaptureReviewSource(
 ): CapturedReviewSource {
   const requestSource: ReviewCaptureSourceRequest =
     source.kind === 'pr'
-      ? { kind: 'pr', selector: source.url }
+      ? { kind: 'pr', selector: source.url, excludes: source.excludes }
       : source.kind === 'scope'
-        ? { kind: 'scope', patterns: source.patterns }
-        : { kind: source.kind };
+        ? { kind: 'scope', patterns: source.patterns, excludes: source.excludes }
+        : { kind: source.kind, excludes: source.excludes };
   return captureReviewSource({ root, ...dependencies, source: requestSource });
 }
 

@@ -7,6 +7,25 @@ import {
   recaptureReviewSource,
 } from '../src/index.js';
 
+const PATCH_WITH_VOUCH = [
+  'diff --git a/src/example.ts b/src/example.ts',
+  'index 1111111..2222222 100644',
+  '--- a/src/example.ts',
+  '+++ b/src/example.ts',
+  '@@ -1 +1 @@',
+  '-export const value = 1;',
+  '+export const value = 2;',
+  '',
+  'diff --git a/.vouch/report.md b/.vouch/report.md',
+  'index 3333333..4444444 100644',
+  '--- a/.vouch/report.md',
+  '+++ b/.vouch/report.md',
+  '@@ -1 +1 @@',
+  '-old report',
+  '+new report',
+  '',
+].join('\n');
+
 const PATCH = [
   'diff --git a/src/example.ts b/src/example.ts',
   'index 1111111..2222222 100644',
@@ -31,6 +50,142 @@ function runner(fixtures: Record<string, string>): CommandRunner {
     },
   };
 }
+
+describe('excludes', () => {
+  it('drops PR patch chunks matching an exclude pattern, leaving survivors byte-identical', () => {
+    const commandRunner: CommandRunner = {
+      run(command, args): CommandResult {
+        const commandKey = key(command, args);
+        if (commandKey.startsWith('gh pr view ')) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              number: 317,
+              title: 'Fixture',
+              url: 'https://github.com/acme/repo/pull/317',
+              baseRefOid: 'base-a',
+              headRefOid: 'head-a',
+            }),
+            stderr: '',
+          };
+        }
+        if (commandKey === 'gh pr diff https://github.com/acme/repo/pull/317') {
+          return { exitCode: 0, stdout: PATCH_WITH_VOUCH, stderr: '' };
+        }
+        throw new Error(`missing fixture: ${commandKey}`);
+      },
+    };
+    const captured = captureReviewSource({
+      root: '/repo',
+      runner: commandRunner,
+      source: { kind: 'pr', selector: '317', excludes: ['.vouch'] },
+    });
+    expect(captured.eligiblePaths).toEqual(['src/example.ts']);
+    expect(captured.patch).not.toContain('.vouch');
+    const survivorChunk = PATCH_WITH_VOUCH.split(/(?=^diff --git )/mu)[0];
+    expect(captured.patch).toBe(survivorChunk);
+  });
+
+  it('reports when an exclude pattern consumed the entire PR diff', () => {
+    const onlyVouchPatch = PATCH_WITH_VOUCH.split(/(?=^diff --git )/mu)[1];
+    const commandRunner: CommandRunner = {
+      run(command, args): CommandResult {
+        const commandKey = key(command, args);
+        if (commandKey.startsWith('gh pr view ')) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              number: 317,
+              title: 'Fixture',
+              url: 'https://github.com/acme/repo/pull/317',
+              baseRefOid: 'base-a',
+              headRefOid: 'head-a',
+            }),
+            stderr: '',
+          };
+        }
+        if (commandKey === 'gh pr diff https://github.com/acme/repo/pull/317') {
+          return { exitCode: 0, stdout: onlyVouchPatch, stderr: '' };
+        }
+        throw new Error(`missing fixture: ${commandKey}`);
+      },
+    };
+    expect(() =>
+      captureReviewSource({
+        root: '/repo',
+        runner: commandRunner,
+        source: { kind: 'pr', selector: '317', excludes: ['.vouch'] },
+      }),
+    ).toThrow(/exclud/i);
+  });
+
+  it('excludes untracked files matching a user exclude pattern from unstaged capture', () => {
+    const commandRunner: CommandRunner = {
+      run(command, args): CommandResult {
+        const commandKey = key(command, args);
+        if (commandKey === 'git rev-parse HEAD') {
+          return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+        }
+        if (commandKey.startsWith('git diff --no-ext-diff --binary --')) {
+          expect(commandKey).toContain(':(exclude).vouch');
+          expect(commandKey).toContain(':(exclude,glob).vouch/**');
+          return { exitCode: 0, stdout: '', stderr: '' };
+        }
+        if (commandKey === 'git ls-files --others --exclude-standard -z') {
+          return { exitCode: 0, stdout: 'src/keep.ts\0.vouch/report.md\0', stderr: '' };
+        }
+        throw new Error(`missing fixture: ${commandKey}`);
+      },
+    };
+    const captured = captureReviewSource({
+      root: '/repo',
+      runner: commandRunner,
+      readFile: () => 'kept\n',
+      source: { kind: 'unstaged', excludes: ['.vouch'] },
+    });
+    expect(captured.eligiblePaths).toEqual(['src/keep.ts']);
+    expect(captured.patch).not.toContain('.vouch');
+  });
+
+  it('produces a different fingerprint and source identity for different excludes', () => {
+    const commandRunner = runner({
+      'git rev-parse HEAD': 'abc123\n',
+      'git diff --cached --no-ext-diff --binary': PATCH,
+    });
+    const withoutExcludes = captureReviewSource({
+      root: '/repo',
+      runner: commandRunner,
+      source: { kind: 'staged' },
+    });
+    const withExcludes = captureReviewSource({
+      root: '/repo',
+      runner: commandRunner,
+      source: { kind: 'staged', excludes: ['.vouch'] },
+    });
+    expect(withoutExcludes.fingerprint).not.toBe(withExcludes.fingerprint);
+    expect(withoutExcludes.source).not.toEqual(withExcludes.source);
+    expect(withoutExcludes.source).toEqual({ kind: 'staged', headSha: 'abc123' });
+  });
+
+  it('produces the same fingerprint and source identity regardless of exclude input order', () => {
+    const commandRunner = runner({
+      'git rev-parse HEAD': 'abc123\n',
+      'git diff --cached --no-ext-diff --binary': PATCH,
+    });
+    const a = captureReviewSource({
+      root: '/repo',
+      runner: commandRunner,
+      source: { kind: 'staged', excludes: ['b', 'a'] },
+    });
+    const b = captureReviewSource({
+      root: '/repo',
+      runner: commandRunner,
+      source: { kind: 'staged', excludes: ['a', 'b'] },
+    });
+    expect(a.fingerprint).toBe(b.fingerprint);
+    expect(a.source).toEqual(b.source);
+  });
+});
 
 describe('review source freshness', () => {
   it.each(['staged', 'unstaged'] as const)(

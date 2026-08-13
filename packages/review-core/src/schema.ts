@@ -22,6 +22,7 @@ const rangeSchema = {
   additionalProperties: false,
   properties: { start: { type: 'integer', minimum: 1 }, end: { type: 'integer', minimum: 1 } },
 } as const;
+const excludesSchema = { type: 'array', items: nonEmptyString } as const;
 const sourceSchema = {
   oneOf: [
     {
@@ -34,19 +35,28 @@ const sourceSchema = {
         url: nonEmptyString,
         baseSha: nonEmptyString,
         headSha: nonEmptyString,
+        excludes: excludesSchema,
       },
     },
     {
       type: 'object',
       required: ['kind', 'headSha'],
       additionalProperties: false,
-      properties: { kind: { const: 'staged' }, headSha: nonEmptyString },
+      properties: {
+        kind: { const: 'staged' },
+        headSha: nonEmptyString,
+        excludes: excludesSchema,
+      },
     },
     {
       type: 'object',
       required: ['kind', 'headSha'],
       additionalProperties: false,
-      properties: { kind: { const: 'unstaged' }, headSha: nonEmptyString },
+      properties: {
+        kind: { const: 'unstaged' },
+        headSha: nonEmptyString,
+        excludes: excludesSchema,
+      },
     },
     {
       type: 'object',
@@ -56,6 +66,7 @@ const sourceSchema = {
         kind: { const: 'scope' },
         patterns: { type: 'array', minItems: 1, items: nonEmptyString },
         headSha: nonEmptyString,
+        excludes: excludesSchema,
       },
     },
   ],
