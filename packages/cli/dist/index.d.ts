@@ -139,6 +139,12 @@ interface CreateReviewResult {
     analysisRequired: boolean;
     analysisGuidance?: ReviewAnalysisGuidance;
     removals: ReviewRemovalStatus[];
+    /** Repository-relative exclude patterns active for this review's source, normalized and
+     * sorted. Absent when no excludes are configured. */
+    excludes?: string[];
+    /** Number of files this capture dropped because they matched an exclude pattern. Only
+     * present when excludes are configured. */
+    excludedFileCount?: number;
 }
 interface ReviewActionDependencies {
     createStore?: typeof createReviewStore;
@@ -219,6 +225,9 @@ interface ReviewStatusResult {
     url: string;
     analysisGuidance?: ReviewAnalysisGuidance;
     removals: ReviewRemovalStatus[];
+    /** Repository-relative exclude patterns active for this review's source, normalized and
+     * sorted. Absent when no excludes are configured. */
+    excludes?: string[];
 }
 declare function createOrResumeReview(request: CreateReviewRequest, dependencies?: ReviewActionDependencies): CreateReviewResult;
 declare function refreshReview(request: RefreshReviewRequest): CreateReviewResult;
@@ -236,6 +245,9 @@ interface ReviewCreateFlags {
     unstaged?: boolean;
     scope?: string;
     json?: boolean;
+    /** Repository-relative path pattern(s) to exclude from the review. CAC yields a bare string
+     * for one `--exclude` occurrence and an array for several. */
+    exclude?: string | string[];
 }
 interface ReviewCliDependencies {
     openReview?: typeof openReview;

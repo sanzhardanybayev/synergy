@@ -3,7 +3,7 @@ name: review
 description: Use when the user wants a guided human review of a GitHub PR, staged changes, unstaged changes, or a bounded current-code scope, or wants to resume an exact Synergy review and answer browser questions. Captures immutable revisions, creates repository-aware review groups and concise item descriptions, opens the local portal, and runs the durable question loop.
 ---
 
-<!-- synergy-version: 0.20.0 -->
+<!-- synergy-version: 0.21.0 -->
 
 ## Step 0 — Freshness check
 
@@ -11,7 +11,7 @@ This skill may remain loaded after Synergy is updated. Set `MINE` from the marke
 run the installed-version check used by the other Synergy skills:
 
 ```bash
-MINE="0.20.0"
+MINE="0.21.0"
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -67,10 +67,10 @@ it implicitly. A workspace-only resume means refresh/reconcile its current sourc
 Run the matching command and consume its output; use `--json` for create/status/list data:
 
 ```text
-node "<synergy-root>/packages/cli/dist/cli.js" review create --pr <number-or-url> --json --root "<project-root>"
-node "<synergy-root>/packages/cli/dist/cli.js" review create --staged --json --root "<project-root>"
-node "<synergy-root>/packages/cli/dist/cli.js" review create --unstaged --json --root "<project-root>"
-node "<synergy-root>/packages/cli/dist/cli.js" review create --scope <repository-relative-path> --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --pr <number-or-url> [--exclude <pattern>]... --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --staged [--exclude <pattern>]... --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --unstaged [--exclude <pattern>]... --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --scope <repository-relative-path> [--exclude <pattern>]... --json --root "<project-root>"
 node "<synergy-root>/packages/cli/dist/cli.js" review refresh <workspace-id> --root "<project-root>"
 node "<synergy-root>/packages/cli/dist/cli.js" review status <workspace@revision> --json --root "<project-root>"
 node "<synergy-root>/packages/cli/dist/cli.js" review open <workspace@revision> --root "<project-root>"
@@ -82,6 +82,17 @@ paths. For exact resume, run status directly. For workspace-only resume, run ref
 resulting reference, then status. Read `analysisRequired` from create/status output. When it is
 false, preserve the finalized analysis and skip step 3; never resubmit analysis to an immutable
 revision.
+
+When the user asks to ignore, skip, or exclude a folder or path (e.g. "ignore `.vouch`" or
+"leave out the generated files"), pass it as a repeatable `--exclude <pattern>` on `review
+create` (repository-relative pattern, directory form excludes everything beneath it). This is
+the only correct way to honor that request: silently skipping matched files during analysis in
+step 3 instead would leave the coverage gate permanently unsatisfiable, since captured-but-
+unanalyzed items block readiness. `--exclude` is create-only - `review refresh` always reuses
+the excludes already stored on the workspace, and passing `--exclude` to any other action is a
+usage error. Excluded paths are never captured, so treat them as absent from the review, not
+as a gap to note or investigate: do not mention them in summaries, descriptions, or removal
+rationale as if they were skipped or missing.
 
 For scope reviews, also read `analysisGuidance` from create or status output. Report its
 `textFiles`, `textLines`, `minimumSections`, `targetSections`, and `maximumSections` before

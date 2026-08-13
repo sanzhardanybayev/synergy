@@ -1761,6 +1761,7 @@ import {
   assertSafeReviewSegment,
   claimQuestion,
   failQuestion,
+  normalizeExcludes,
   parseReviewRef,
   writeAnswer
 } from "@synergy/review-core";
@@ -2457,15 +2458,18 @@ function buildSnapshot(captured, revisionId, now, predecessorRevisionId) {
     patch: captured.patch
   });
 }
-function resultFor(root, reference, resumed) {
+function resultFor(root, reference, resumed, captured) {
   const store = createReviewStore(root);
   const bundle = store.readBundle(reference.workspaceId, reference.revisionId);
+  const excludes = bundle.snapshot.source.excludes;
   return {
     reference,
     resumed,
     url: reviewUrl(reference),
     analysisRequired: !store.isAnalysisFinalized(reference.workspaceId, reference.revisionId),
     removals: removalsStatusFor(bundle),
+    ...excludes && excludes.length > 0 ? { excludes } : {},
+    ...captured?.excludedFileCount !== void 0 ? { excludedFileCount: captured.excludedFileCount } : {},
     ...bundle.snapshot.kind === "scope" ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) } : {}
   };
 }
@@ -2491,7 +2495,7 @@ function createOrResumeReview(request, dependencies = {}) {
       root,
       name: repositoryName(root)
     });
-    return resultFor(root, { workspaceId, revisionId: existingRevision }, true);
+    return resultFor(root, { workspaceId, revisionId: existingRevision }, true, captured);
   }
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const revisionId = revisionIdFor(captured);
@@ -2539,20 +2543,25 @@ function createOrResumeReview(request, dependencies = {}) {
       root,
       name: repositoryName(root)
     });
-    return resultFor(root, { workspaceId, revisionId: concurrentRevision }, true);
+    return resultFor(root, { workspaceId, revisionId: concurrentRevision }, true, captured);
   }
-  return resultFor(root, { workspaceId, revisionId }, false);
+  return resultFor(root, { workspaceId, revisionId }, false, captured);
 }
 function captureRequestFromWorkspace(workspace) {
+  const excludes = workspace.source.excludes;
   switch (workspace.source.kind) {
     case "pr":
-      return { kind: "pr", selector: workspace.source.url };
+      return { kind: "pr", selector: workspace.source.url, ...excludes ? { excludes } : {} };
     case "staged":
-      return { kind: "staged" };
+      return { kind: "staged", ...excludes ? { excludes } : {} };
     case "unstaged":
-      return { kind: "unstaged" };
+      return { kind: "unstaged", ...excludes ? { excludes } : {} };
     case "scope":
-      return { kind: "scope", patterns: workspace.source.patterns };
+      return {
+        kind: "scope",
+        patterns: workspace.source.patterns,
+        ...excludes ? { excludes } : {}
+      };
   }
 }
 function refreshReview(request) {
@@ -2949,6 +2958,7 @@ function getReviewStatus(request) {
     },
     analysisFinalized
   );
+  const excludes = bundle.snapshot.source.excludes;
   return {
     reference: formatReviewRef(request.reference.workspaceId, request.reference.revisionId),
     analysisRequired: !analysisFinalized,
@@ -2956,6 +2966,7 @@ function getReviewStatus(request) {
     captureFailed: freshness.captureFailed,
     url: reviewUrl(request.reference),
     removals: removalsStatusFor(bundle),
+    ...excludes && excludes.length > 0 ? { excludes } : {},
     ...bundle.snapshot.kind === "scope" ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) } : {}
   };
 }
@@ -2975,6 +2986,7 @@ function printReviewStatus(request) {
     `stale: ${status.readiness.stale}`,
     `unanswered: ${status.readiness.unanswered}`,
     `removals: ${coveredRemovals}/${status.removals.length} explained`,
+    ...status.excludes && status.excludes.length > 0 ? [`excludes: ${status.excludes.join(", ")}`] : [],
     `url: ${status.url}`
   ].join("\n");
 }
@@ -3115,6 +3127,17 @@ function waitForReviewQuestions(options) {
 // src/review-cli.ts
 var ReviewUsageError = class extends Error {
 };
+function excludesFromFlag(value) {
+  if (value === void 0) return void 0;
+  const raw = Array.isArray(value) ? value : [value];
+  try {
+    const normalized = normalizeExcludes(raw);
+    return normalized.length > 0 ? normalized : void 0;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "invalid exclude pattern";
+    throw new ReviewUsageError(detail);
+  }
+}
 function createReviewSourceFromFlags(flags) {
   const selected = [
     flags.pr !== void 0,
@@ -3127,13 +3150,16 @@ function createReviewSourceFromFlags(flags) {
       "review create requires exactly one of --pr, --staged, --unstaged, or --scope"
     );
   }
-  if (flags.pr !== void 0) return { kind: "pr", selector: flags.pr };
-  if (flags.staged) return { kind: "staged" };
-  if (flags.unstaged) return { kind: "unstaged" };
+  const excludes = excludesFromFlag(flags.exclude);
+  if (flags.pr !== void 0) {
+    return { kind: "pr", selector: flags.pr, ...excludes ? { excludes } : {} };
+  }
+  if (flags.staged) return { kind: "staged", ...excludes ? { excludes } : {} };
+  if (flags.unstaged) return { kind: "unstaged", ...excludes ? { excludes } : {} };
   if (!flags.scope || flags.scope.trim().length === 0) {
     throw new ReviewUsageError("--scope cannot be empty");
   }
-  return { kind: "scope", patterns: [flags.scope] };
+  return { kind: "scope", patterns: [flags.scope], ...excludes ? { excludes } : {} };
 }
 function printCreateResult(result, json) {
   const reference = `${result.reference.workspaceId}@${result.reference.revisionId}`;
@@ -3143,10 +3169,12 @@ function printCreateResult(result, json) {
     return;
   }
   const preparation = result.analysisRequired ? "analysis required" : "ready for review";
+  const excludedLine = result.excludedFileCount && result.excludedFileCount > 0 ? `${dim3("Excluded:")} ${result.excludedFileCount} file${result.excludedFileCount === 1 ? "" : "s"} via ${result.excludes?.length ?? 0} pattern${result.excludes?.length === 1 ? "" : "s"}
+` : "";
   process.stdout.write(
     `${green4("\u2713")} ${bold2(reference)} ${dim3(result.resumed ? "resumed" : "created")}
 ${dim3("Preparation:")} ${preparation}
-${dim3("Open:")} ${result.url}
+${excludedLine}${dim3("Open:")} ${result.url}
 `
   );
 }
@@ -3230,6 +3258,7 @@ function assertKnownOptions(flags) {
     "bodyFile",
     "for",
     "review",
+    "exclude",
     "--"
   ]);
   const unknown = Object.keys(flags).find((flag) => !known.has(flag));
@@ -3247,6 +3276,9 @@ function assertActionOptions(action, flags) {
   const hasSourceOption = flags.pr !== void 0 || flags.staged === true || flags.unstaged === true || flags.scope !== void 0;
   if (action !== "create" && hasSourceOption) {
     throw new ReviewUsageError(`review ${action} does not accept a source selector`);
+  }
+  if (action !== "create" && flags.exclude !== void 0) {
+    throw new ReviewUsageError(`review ${action} does not accept --exclude`);
   }
   if (action !== "analysis-set" && action !== "answer" && flags.bodyFile !== void 0) {
     throw new ReviewUsageError(`review ${action} does not accept --body-file`);
@@ -3371,6 +3403,9 @@ function registerReviewCommands(cli2, dependencies = {}) {
   cli2.command("review <action> [...references]", "Manage local guided code reviews").option("--root <dir>", "Project root (default: cwd)").option("--pr <number-or-url>", "GitHub PR number or URL").option("--staged", "Review the Git index").option("--unstaged", "Review tracked worktree and non-ignored untracked changes").option(
     "--scope <path>",
     "Review tracked and non-ignored files under a repository-relative path"
+  ).option(
+    "--exclude <pattern>",
+    "Repository-relative path pattern to exclude from the review (repeatable); create only"
   ).option("--json", "Print machine-readable output").option("--body-file <path>", "Analysis or answer body file").option("--for <duration>", "Bounded question wait, e.g. 90s, 10m, 1h").option("--review <reference>", "Review reference for review answer").allowUnknownOptions().action(async (action, references, flags) => {
     try {
       const commandStartedAt = monotonicNow();
