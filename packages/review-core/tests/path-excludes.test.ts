@@ -50,6 +50,15 @@ describe('normalizeExcludes', () => {
   it('returns an empty array for an empty input', () => {
     expect(normalizeExcludes([])).toEqual([]);
   });
+
+  it('normalizes backslash separators instead of silently matching nothing', () => {
+    // Before the fix, a backslash-separated pattern passed the safety checks unchanged, then
+    // compiled to a regex matching a literal `\` character - which no repository-relative path
+    // (this matcher is POSIX-only) ever contains, so the pattern excluded nothing at all.
+    expect(normalizeExcludes(['.vouch\\sub'])).toEqual(['.vouch/sub']);
+    const excludes = normalizeExcludes(['.vouch\\sub']);
+    expect(isPathExcluded('.vouch/sub/file.ts', excludes)).toBe(true);
+  });
 });
 
 describe('isPathExcluded', () => {

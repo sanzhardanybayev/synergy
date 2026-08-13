@@ -18,6 +18,11 @@
  * module to filter in JS; only wildcard-free patterns get a (literal, therefore safe) pathspec.
  */
 
+/** Bounded so a long-lived process (the preview daemon) that sees many distinct patterns across
+ * requests cannot grow this cache without limit. Patterns are short and the working set of
+ * distinct excludes in practice is tiny, so evicting the oldest entry on overflow is sufficient -
+ * there is no meaningful "hot pattern" to protect against eviction. */
+const EXCLUDE_REGEX_CACHE_LIMIT = 500;
 const EXCLUDE_REGEX_CACHE = new Map<string, RegExp>();
 const WINDOWS_DRIVE_ABSOLUTE = /^[A-Za-z]:[\\/]/u;
 
@@ -36,9 +41,15 @@ function assertSafeExcludePattern(pattern: string): void {
   }
 }
 
-/** Trims, strips a leading `./`, and collapses trailing slashes so directory forms collapse. */
+/** Trims, converts backslash separators to forward slashes, strips a leading `./`, and collapses
+ * trailing slashes so directory forms collapse. Without the backslash conversion, a pattern like
+ * `.vouch\sub` (typed on Windows, or by an agent unaware the matcher is POSIX-only) would pass
+ * `assertSafeExcludePattern` unchanged, then compile to a regex matching a literal backslash
+ * character - which no repository-relative path ever contains, so the pattern silently excludes
+ * nothing. Normalizing the separator first means it matches the same path a `/`-separated
+ * pattern would. */
 export function normalizeExcludePattern(raw: string): string {
-  let normalized = raw.trim();
+  let normalized = raw.trim().replace(/\\/g, '/');
   while (normalized.startsWith('./')) normalized = normalized.slice(2);
   while (normalized.length > 1 && normalized.endsWith('/')) normalized = normalized.slice(0, -1);
   assertSafeExcludePattern(normalized);
@@ -95,6 +106,10 @@ function compileExcludePattern(pattern: string): RegExp {
   const cached = EXCLUDE_REGEX_CACHE.get(pattern);
   if (cached) return cached;
   const regex = new RegExp(`^${globToRegexSource(pattern)}(?:/.*)?$`);
+  if (EXCLUDE_REGEX_CACHE.size >= EXCLUDE_REGEX_CACHE_LIMIT) {
+    const oldest = EXCLUDE_REGEX_CACHE.keys().next().value;
+    if (oldest !== undefined) EXCLUDE_REGEX_CACHE.delete(oldest);
+  }
   EXCLUDE_REGEX_CACHE.set(pattern, regex);
   return regex;
 }
