@@ -792,7 +792,7 @@ function startWebview() {
         : 'Reviews';
     const excludeText =
       state.screen === 'bundle' && state.bundle
-        ? excludeSummary(state.bundle.bundle.workspace.source)
+        ? excludeSummary(state.bundle.bundle.snapshot.source)
         : null;
     const excludeBadge = excludeText
       ? el('span', { className: 'toolbar-excludes', title: excludeText }, [excludeText])

@@ -87,6 +87,10 @@ function initRepository(prefix: string): string {
   execFileSync('git', ['init', '--quiet'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 'review@example.test'], { cwd: root });
   execFileSync('git', ['config', 'user.name', 'Review Test'], { cwd: root });
+  // Pin rename detection on so the C1 regression test's premise doesn't depend on inherited
+  // developer/global git config (e.g. `diff.renames=false` would make git emit a delete+add
+  // instead of a single rename chunk, letting the test pass vacuously).
+  execFileSync('git', ['config', 'diff.renames', 'true'], { cwd: root });
   return root;
 }
 
