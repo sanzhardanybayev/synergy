@@ -118,6 +118,7 @@ export {
   type QuestionPublication,
 } from './questions.js';
 export type {
+  AnalysisPolicy,
   DiffFile,
   DiffFileStatus,
   DiffHunk,

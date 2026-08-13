@@ -24,6 +24,13 @@ export function ReviewHeader({ bundle, readiness, captureFailed, walkthrough }: 
   const completed = bundle.snapshot.items.length - readiness.pending - readiness.stale;
   const total = bundle.snapshot.items.length;
   const source = sourceLabel(bundle);
+  // `insights.analysisPolicy` is stamped once at finalize time, so it stays true to what THIS
+  // revision was actually analyzed under even if a later `review create` moves the workspace's
+  // current policy. It is absent for an unfinalized revision (nothing stamped yet) or one
+  // finalized before this field existed - both fall back to the workspace's live policy.
+  const explainRemovals = Boolean(
+    (bundle.insights.analysisPolicy ?? bundle.workspace.analysisPolicy)?.explainRemovals,
+  );
   return (
     <header className={`review-header${walkthrough?.enabled ? ' review-header--walkthrough' : ''}`}>
       <div className="review-header__identity">
@@ -83,6 +90,15 @@ export function ReviewHeader({ bundle, readiness, captureFailed, walkthrough }: 
             </dd>
           </div>
         ) : null}
+        <div className="review-header__fact--removal-policy">
+          <dt>Removals</dt>
+          <dd
+            className={explainRemovals ? 'review-tone--success' : undefined}
+            title="Whether every removal run captured by this review must carry a rationale before analysis can finalize."
+          >
+            {explainRemovals ? 'Required' : 'Optional'}
+          </dd>
+        </div>
       </dl>
       {walkthrough?.enabled ? (
         <div className="review-header__reveal">

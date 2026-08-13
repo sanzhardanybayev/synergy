@@ -658,6 +658,12 @@ var itemSchema = {
     locationHash: nonEmptyString
   }
 };
+var analysisPolicySchema = {
+  type: "object",
+  required: ["explainRemovals"],
+  additionalProperties: false,
+  properties: { explainRemovals: { type: "boolean" } }
+};
 var reviewWorkspaceSchema = {
   type: "object",
   required: [
@@ -682,7 +688,8 @@ var reviewWorkspaceSchema = {
     source: sourceSchema,
     currentRevisionId: nonEmptyString,
     createdAt: timestamp,
-    updatedAt: timestamp
+    updatedAt: timestamp,
+    analysisPolicy: analysisPolicySchema
   }
 };
 var diffLineSchema = {
@@ -948,7 +955,8 @@ var reviewInsightsSchema = {
       }
     },
     files: { type: "array", items: fileInsightSchema },
-    removals: { type: "array", items: removalRationaleSchema }
+    removals: { type: "array", items: removalRationaleSchema },
+    analysisPolicy: analysisPolicySchema
   }
 };
 var itemProgressSchema = {
@@ -2892,7 +2900,7 @@ function createReviewStore(projectRoot, options = {}) {
         );
       });
     },
-    setCurrentRevision(workspaceId, revisionId, source, repository) {
+    setCurrentRevision(workspaceId, revisionId, source, repository, analysisPolicy) {
       withLock(workspaceId, () => {
         const snapshot = readValidated(
           snapshotFile(projectRoot, workspaceId, revisionId),
@@ -2940,6 +2948,7 @@ function createReviewStore(projectRoot, options = {}) {
           ...workspace,
           source,
           currentRevisionId: revisionId,
+          ...analysisPolicy !== void 0 ? { analysisPolicy } : {},
           updatedAt: nextProgressUpdatedAt(workspace.updatedAt, options.now?.() ?? Date.now())
         };
         assertReviewWorkspace(next);

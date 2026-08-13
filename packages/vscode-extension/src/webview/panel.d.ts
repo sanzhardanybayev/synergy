@@ -43,4 +43,9 @@ export function renderRemovalSummary(context?: {
 
 export function excludeSummary(source: ReviewSource): string | null;
 
+export function removalPolicySummary(bundle: {
+  workspace: { analysisPolicy?: { explainRemovals: boolean } };
+  insights: { analysisPolicy?: { explainRemovals: boolean } };
+}): string;
+
 export type { RemovalStrip, ResolvedRemovalTarget };

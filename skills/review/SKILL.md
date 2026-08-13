@@ -3,7 +3,7 @@ name: review
 description: Use when the user wants a guided human review of a GitHub PR, staged changes, unstaged changes, or a bounded current-code scope, or wants to resume an exact Synergy review and answer browser questions. Captures immutable revisions, creates repository-aware review groups and concise item descriptions, opens the local portal, and runs the durable question loop.
 ---
 
-<!-- synergy-version: 0.21.0 -->
+<!-- synergy-version: 0.22.0 -->
 
 ## Step 0 — Freshness check
 
@@ -11,7 +11,7 @@ This skill may remain loaded after Synergy is updated. Set `MINE` from the marke
 run the installed-version check used by the other Synergy skills:
 
 ```bash
-MINE="0.21.0"
+MINE="0.22.0"
 CACHE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}/cache/synergy/synergy"
 NEWEST="$(ls "$CACHE" 2>/dev/null | sort -V | tail -1)"
 if [ -n "$NEWEST" ] && [ "$NEWEST" != "$MINE" ] && \
@@ -67,10 +67,10 @@ it implicitly. A workspace-only resume means refresh/reconcile its current sourc
 Run the matching command and consume its output; use `--json` for create/status/list data:
 
 ```text
-node "<synergy-root>/packages/cli/dist/cli.js" review create --pr <number-or-url> [--exclude <pattern>]... --json --root "<project-root>"
-node "<synergy-root>/packages/cli/dist/cli.js" review create --staged [--exclude <pattern>]... --json --root "<project-root>"
-node "<synergy-root>/packages/cli/dist/cli.js" review create --unstaged [--exclude <pattern>]... --json --root "<project-root>"
-node "<synergy-root>/packages/cli/dist/cli.js" review create --scope <repository-relative-path> [--exclude <pattern>]... --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --pr <number-or-url> [--exclude <pattern>]... [--explain-removals] --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --staged [--exclude <pattern>]... [--explain-removals] --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --unstaged [--exclude <pattern>]... [--explain-removals] --json --root "<project-root>"
+node "<synergy-root>/packages/cli/dist/cli.js" review create --scope <repository-relative-path> [--exclude <pattern>]... [--explain-removals] --json --root "<project-root>"
 node "<synergy-root>/packages/cli/dist/cli.js" review refresh <workspace-id> --root "<project-root>"
 node "<synergy-root>/packages/cli/dist/cli.js" review status <workspace@revision> --json --root "<project-root>"
 node "<synergy-root>/packages/cli/dist/cli.js" review open <workspace@revision> --root "<project-root>"
@@ -230,15 +230,41 @@ keep the existing `groups` plus `items` payload and use the captured diff item I
 
 ### Removal rationale
 
+Removal explanations are opt-in and OFF by default. Do not author `removals` in the analysis
+payload unless the review's policy asks for them. Read `analysisPolicy.explainRemovals` from
+`review create --json` or `review status --json` to tell: when it is `false`, `removals[]`
+in the status payload is informational only - it
+still lists every captured removal run, since that is a fact about the diff and is reported
+either way, but there is no coverage obligation. Do not treat an uncovered run as a gap to fix,
+and do not mention uncovered runs as blockers in summaries, descriptions, or completion reports.
+When `analysisPolicy.explainRemovals` is `true`, the rest of this section applies exactly as
+written: every run must be covered before analysis can finalize.
+
+If a user asks in natural language for removal explanations on a review whose policy is off,
+re-run `review create` with `--explain-removals` (this updates the stored policy on an
+unfinalized revision) rather than authoring rationales into a payload for a review whose policy
+is still off. Symmetrically, `--no-explain-removals` turns an on policy back off on a resume. A
+plain re-run of `review create` with neither flag never changes the stored policy on a resumed
+workspace - it means "no opinion", not "off" - so resuming a review whose policy is already on
+(e.g. re-running `review create --pr 370 --json` for the exact same command the user asked
+earlier) leaves it on. `review create`'s output always reports the effective policy (a
+`Removals:` line in text mode, `analysisPolicy` in JSON), and marks it explicitly when this call
+changed it (`previousAnalysisPolicy` in JSON, "(was on/off)" in text) - read that rather than
+assuming. If the create result reports `analysisPolicyLocked: true`, the revision's analysis is
+already finalized and immutable, so the policy change was refused - tell the user rather than
+retrying the same command.
+
+The rest of this section describes how to author a rationale once the policy is on.
+
 `review create --json` and `review status --json` list every captured removal run as
 `removals: [{reviewItemId, path, start, end, covered}]`. A run with `covered: true` already has a
 rationale - either freshly submitted or carried forward from the predecessor revision - and needs
 no resubmission; submitting a fresh entry for that same run replaces the carried one. When the
 diff has no removal runs at all, omit `removals` from the payload entirely - do not submit
-`"removals": []`; the schema requires at least one entry when the key is present. Submit an
-entry under `removals` for every `covered: false` run, matching its `reviewItemId`, `path`,
-`start`, and `end` exactly - `reviewItemId` is checked separately from the run coordinates, so a
-mismatched item ID is rejected even when the range is right:
+`"removals": []`; the schema requires at least one entry when the key is present. With the policy
+on, submit an entry under `removals` for every `covered: false` run, matching its `reviewItemId`,
+`path`, `start`, and `end` exactly - `reviewItemId` is checked separately from the run
+coordinates, so a mismatched item ID is rejected even when the range is right:
 
 ```json
 {

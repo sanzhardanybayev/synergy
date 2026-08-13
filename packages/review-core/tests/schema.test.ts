@@ -62,6 +62,47 @@ describe('review source excludes', () => {
   });
 });
 
+describe('workspace analysisPolicy', () => {
+  it('validates a workspace document with no analysisPolicy field (backward compatibility)', () => {
+    const workspace = baseWorkspace({ kind: 'staged', headSha: 'abc' });
+    expect(() => assertReviewWorkspace(workspace)).not.toThrow();
+    expect((workspace as { analysisPolicy?: unknown }).analysisPolicy).toBeUndefined();
+  });
+
+  it('validates a workspace with explainRemovals true or false', () => {
+    expect(() =>
+      assertReviewWorkspace({
+        ...baseWorkspace({ kind: 'staged', headSha: 'abc' }),
+        analysisPolicy: { explainRemovals: true },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertReviewWorkspace({
+        ...baseWorkspace({ kind: 'staged', headSha: 'abc' }),
+        analysisPolicy: { explainRemovals: false },
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects a non-boolean explainRemovals', () => {
+    expect(() =>
+      assertReviewWorkspace({
+        ...baseWorkspace({ kind: 'staged', headSha: 'abc' }),
+        analysisPolicy: { explainRemovals: 'on' },
+      }),
+    ).toThrow();
+  });
+
+  it('rejects an unknown property on analysisPolicy', () => {
+    expect(() =>
+      assertReviewWorkspace({
+        ...baseWorkspace({ kind: 'staged', headSha: 'abc' }),
+        analysisPolicy: { explainRemovals: true, extra: true },
+      }),
+    ).toThrow();
+  });
+});
+
 describe('assertReviewInsights narrative fields', () => {
   it('accepts insights with optional summary and group intro', () => {
     const insights = {

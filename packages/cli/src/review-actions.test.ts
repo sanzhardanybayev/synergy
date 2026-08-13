@@ -2154,6 +2154,7 @@ describe('review lifecycle actions', () => {
             evidencePaths: section.evidencePaths,
           },
         ],
+        analysisPolicy: { explainRemovals: false },
       });
       expect(JSON.stringify(finalized)).not.toContain(section.key);
       expect(
@@ -2491,11 +2492,11 @@ describe('review lifecycle actions', () => {
     }
   });
 
-  it('rejects a diff analysis that omits a rationale for a captured removal', async () => {
+  it('rejects a diff analysis that omits a rationale for a captured removal when explainRemovals is on', async () => {
     const root = join(tmpdir(), `synergy-review-removals-incomplete-${Date.now()}`);
     mkdirSync(root, { recursive: true });
     try {
-      const created = createOrResumeReview(createRequest(root));
+      const created = createOrResumeReview({ ...createRequest(root), explainRemovals: true });
       const store = createReviewStore(root);
       const snapshot = store.readBundle(
         created.reference.workspaceId,

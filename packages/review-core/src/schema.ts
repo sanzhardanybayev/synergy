@@ -86,6 +86,13 @@ const itemSchema = {
   },
 } as const;
 
+const analysisPolicySchema = {
+  type: 'object',
+  required: ['explainRemovals'],
+  additionalProperties: false,
+  properties: { explainRemovals: { type: 'boolean' } },
+} as const;
+
 export const reviewWorkspaceSchema = {
   type: 'object',
   required: [
@@ -111,6 +118,7 @@ export const reviewWorkspaceSchema = {
     currentRevisionId: nonEmptyString,
     createdAt: timestamp,
     updatedAt: timestamp,
+    analysisPolicy: analysisPolicySchema,
   },
 } as const;
 
@@ -383,6 +391,7 @@ export const reviewInsightsSchema = {
     },
     files: { type: 'array', items: fileInsightSchema },
     removals: { type: 'array', items: removalRationaleSchema },
+    analysisPolicy: analysisPolicySchema,
   },
 } as const;
 

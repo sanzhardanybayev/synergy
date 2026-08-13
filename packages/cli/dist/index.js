@@ -959,7 +959,7 @@ async function requestPreviewShutdown(origin, instanceId, controlToken, timeoutM
 }
 
 // src/version.ts
-var SYNERGY_VERSION = "0.21.0";
+var SYNERGY_VERSION = "0.22.0";
 
 // src/preview.ts
 var START_TIMEOUT_MS = 1e4;
@@ -2007,7 +2007,7 @@ function assertSafeEvidencePath(path) {
     throw new Error(`invalid evidence path: ${path}`);
   }
 }
-function assertCompleteRemovalCoverage(snapshot, removals) {
+function assertCompleteRemovalCoverage(snapshot, removals, options = { requireCoverage: true }) {
   const derived = deriveSnapshotRemovalRuns(snapshot);
   if (derived.length === 0 && removals.length === 0) return;
   const derivedByKey = new Map(derived.map((run) => [runKey(run.path, run.start, run.end), run]));
@@ -2047,6 +2047,7 @@ function assertCompleteRemovalCoverage(snapshot, removals) {
       }
     }
   }
+  if (!options.requireCoverage) return;
   const missing = derived.filter((run) => !seen.has(runKey(run.path, run.start, run.end))).map((run) => runKey(run.path, run.start, run.end));
   if (missing.length > 0) {
     throw new Error(`removal runs are missing a rationale: ${missing.join(", ")}`);
@@ -2225,7 +2226,7 @@ function buildSnapshot(captured, revisionId, now, predecessorRevisionId) {
     patch: captured.patch
   });
 }
-function resultFor(root, reference, resumed, captured) {
+function resultFor(root, reference, resumed, captured, analysisPolicyLocked, previousExplainRemovals) {
   const store = createReviewStore(root);
   const bundle = store.readBundle(reference.workspaceId, reference.revisionId);
   const excludes = bundle.snapshot.source.excludes;
@@ -2235,12 +2236,15 @@ function resultFor(root, reference, resumed, captured) {
     url: reviewUrl(reference),
     analysisRequired: !store.isAnalysisFinalized(reference.workspaceId, reference.revisionId),
     removals: removalsStatusFor(bundle),
+    analysisPolicy: bundle.workspace.analysisPolicy ?? { explainRemovals: false },
+    ...analysisPolicyLocked ? { analysisPolicyLocked: true } : {},
+    ...previousExplainRemovals !== void 0 ? { previousAnalysisPolicy: { explainRemovals: previousExplainRemovals } } : {},
     ...excludes && excludes.length > 0 ? { excludes } : {},
     ...captured?.excludedFileCount !== void 0 ? { excludedFileCount: captured.excludedFileCount } : {},
     ...bundle.snapshot.kind === "scope" ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) } : {}
   };
 }
-function createWorkspace(root, workspaceId, revisionId, captured, existing, now) {
+function createWorkspace(root, workspaceId, revisionId, captured, existing, now, explainRemovals) {
   return {
     schemaVersion: 1,
     id: workspaceId,
@@ -2248,7 +2252,10 @@ function createWorkspace(root, workspaceId, revisionId, captured, existing, now)
     source: captured.source,
     currentRevisionId: revisionId,
     createdAt: existing?.createdAt ?? now,
-    updatedAt: now
+    updatedAt: now,
+    analysisPolicy: {
+      explainRemovals: explainRemovals ?? existing?.analysisPolicy?.explainRemovals ?? false
+    }
   };
 }
 function createOrResumeReview(request, dependencies = {}) {
@@ -2258,15 +2265,41 @@ function createOrResumeReview(request, dependencies = {}) {
   const workspaceId = workspaceIdFor(root, captured);
   const existingRevision = store.findRevisionByFingerprint(workspaceId, captured.fingerprint);
   if (existingRevision) {
-    store.setCurrentRevision(workspaceId, existingRevision, captured.source, {
+    const finalized = store.isAnalysisFinalized(workspaceId, existingRevision);
+    const requestedPolicy = request.explainRemovals;
+    let priorExplainRemovals = false;
+    try {
+      priorExplainRemovals = store.readWorkspace(workspaceId).analysisPolicy?.explainRemovals ?? false;
+    } catch (error) {
+      if (!isReviewCoreError(error) || error.code !== "review_not_found") throw error;
+    }
+    let policyChangeRequested = false;
+    let explainRemovalsUpdate;
+    if (requestedPolicy !== void 0 && requestedPolicy !== priorExplainRemovals) {
+      policyChangeRequested = true;
+      if (!finalized) explainRemovalsUpdate = { explainRemovals: requestedPolicy };
+    }
+    store.setCurrentRevision(
+      workspaceId,
+      existingRevision,
+      captured.source,
+      { root, name: repositoryName(root) },
+      explainRemovalsUpdate
+    );
+    return resultFor(
       root,
-      name: repositoryName(root)
-    });
-    return resultFor(root, { workspaceId, revisionId: existingRevision }, true, captured);
+      { workspaceId, revisionId: existingRevision },
+      true,
+      captured,
+      policyChangeRequested && finalized,
+      explainRemovalsUpdate ? priorExplainRemovals : void 0
+    );
   }
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const revisionId = revisionIdFor(captured);
   const existingWorkspace = store.listWorkspaces().find((workspace2) => workspace2.id === workspaceId);
+  const priorWorkspaceExplainRemovals = existingWorkspace?.analysisPolicy?.explainRemovals ?? false;
+  const previousExplainRemovals = existingWorkspace !== void 0 && request.explainRemovals !== void 0 && request.explainRemovals !== priorWorkspaceExplainRemovals ? priorWorkspaceExplainRemovals : void 0;
   const snapshot = buildSnapshot(captured, revisionId, now, existingWorkspace?.currentRevisionId);
   const workspace = createWorkspace(
     root,
@@ -2274,7 +2307,8 @@ function createOrResumeReview(request, dependencies = {}) {
     revisionId,
     captured,
     existingWorkspace,
-    now
+    now,
+    request.explainRemovals
   );
   const reconciliation = existingWorkspace ? reconcileProgressAndInsights(
     store.readBundle(workspaceId, existingWorkspace.currentRevisionId),
@@ -2312,7 +2346,14 @@ function createOrResumeReview(request, dependencies = {}) {
     });
     return resultFor(root, { workspaceId, revisionId: concurrentRevision }, true, captured);
   }
-  return resultFor(root, { workspaceId, revisionId }, false, captured);
+  return resultFor(
+    root,
+    { workspaceId, revisionId },
+    false,
+    captured,
+    void 0,
+    previousExplainRemovals
+  );
 }
 function captureRequestFromWorkspace(workspace) {
   const excludes = workspace.source.excludes;
@@ -2338,7 +2379,10 @@ function refreshReview(request) {
     root,
     runner: request.runner,
     readFile: request.readFile,
-    source: captureRequestFromWorkspace(workspace)
+    source: captureRequestFromWorkspace(workspace),
+    // Refresh reuses the stored policy verbatim (like `--exclude`) - it is not a `create`
+    // re-run, so it must never change `explainRemovals` even implicitly.
+    explainRemovals: workspace.analysisPolicy?.explainRemovals ?? false
   });
 }
 function assertNarrativeText(value, max, label) {
@@ -2346,7 +2390,7 @@ function assertNarrativeText(value, max, label) {
     throw new Error(`${label} must be 1-${max} characters`);
   }
 }
-function assertValidAnalysis(snapshot, analysis) {
+function assertValidAnalysis(snapshot, analysis, analysisPolicy) {
   if (analysis.summary !== void 0) {
     assertNarrativeText(analysis.summary, MAX_SUMMARY_LENGTH, "review summary");
   }
@@ -2407,7 +2451,9 @@ function assertValidAnalysis(snapshot, analysis) {
     if (!groupedItemIds.has(itemId)) throw new Error(`review item is missing a group: ${itemId}`);
     if (!insightIds.has(itemId)) throw new Error(`review item is missing an analysis: ${itemId}`);
   }
-  assertCompleteRemovalCoverage(snapshot, analysis.removals ?? []);
+  assertCompleteRemovalCoverage(snapshot, analysis.removals ?? [], {
+    requireCoverage: analysisPolicy?.explainRemovals === true
+  });
 }
 function proposedCodeSection(section) {
   return {
@@ -2517,7 +2563,11 @@ async function applyReviewAnalysis(request, dependencies = {}) {
     const translated = translation.value;
     derivationMs += translation.durationMs;
     validationMs += measureMonotonic(monotonicNow, () => {
-      assertValidAnalysis(translated.snapshot, translated.analysis);
+      assertValidAnalysis(
+        translated.snapshot,
+        translated.analysis,
+        bundle.workspace.analysisPolicy
+      );
     }).durationMs;
     const derived = measureMonotonic(monotonicNow, () => {
       const progressTimestamp = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
@@ -2550,7 +2600,11 @@ async function applyReviewAnalysis(request, dependencies = {}) {
       ...translated.analysis.summary === void 0 ? {} : { summary: translated.analysis.summary },
       groups: translated.analysis.groups,
       items: translated.analysis.items,
-      ...scopeFiles ? { files: scopeFiles } : {}
+      ...scopeFiles ? { files: scopeFiles } : {},
+      // Stamps the policy this analysis was actually finalized under, so the revision stays
+      // self-describing even after a later `review create` changes the workspace's CURRENT
+      // policy - see `ReviewInsights.analysisPolicy`'s doc comment.
+      analysisPolicy: bundle.workspace.analysisPolicy ?? { explainRemovals: false }
     };
     finalizedAt = nondecreasingIsoTimestamp(derived.value.progressTimestamp, now());
     publicationMs += measureMonotonic(monotonicNow, () => {
@@ -2574,10 +2628,14 @@ async function applyReviewAnalysis(request, dependencies = {}) {
     const carriedRemovals = bundle.insights.removals;
     let resolvedRemovals;
     validationMs += measureMonotonic(monotonicNow, () => {
-      assertValidAnalysis(bundle.snapshot, {
-        ...diffAnalysis,
-        removals: mergeRemovalInsights(carriedRemovals, diffAnalysis.removals) ?? []
-      });
+      assertValidAnalysis(
+        bundle.snapshot,
+        {
+          ...diffAnalysis,
+          removals: mergeRemovalInsights(carriedRemovals, diffAnalysis.removals) ?? []
+        },
+        bundle.workspace.analysisPolicy
+      );
       const freshRemovals = diffAnalysis.removals ? resolveRemovalExcerpts(
         bundle.snapshot,
         diffAnalysis.removals,
@@ -2598,7 +2656,11 @@ async function applyReviewAnalysis(request, dependencies = {}) {
       groups: diffAnalysis.groups,
       items: diffAnalysis.items,
       ...resolvedRemovals ? { removals: resolvedRemovals } : {},
-      ...diffFiles ? { files: diffFiles } : {}
+      ...diffFiles ? { files: diffFiles } : {},
+      // Stamps the policy this analysis was actually finalized under, so the revision stays
+      // self-describing even after a later `review create` changes the workspace's CURRENT
+      // policy - see `ReviewInsights.analysisPolicy`'s doc comment.
+      analysisPolicy: bundle.workspace.analysisPolicy ?? { explainRemovals: false }
     };
     finalizedAt = nondecreasingIsoTimestamp(bundle.snapshot.createdAt, now());
     publicationMs += measureMonotonic(monotonicNow, () => {
@@ -2733,6 +2795,7 @@ function getReviewStatus(request) {
     captureFailed: freshness.captureFailed,
     url: reviewUrl(request.reference),
     removals: removalsStatusFor(bundle),
+    analysisPolicy: bundle.workspace.analysisPolicy ?? { explainRemovals: false },
     ...excludes && excludes.length > 0 ? { excludes } : {},
     ...bundle.snapshot.kind === "scope" ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) } : {}
   };
@@ -2971,10 +3034,16 @@ function printCreateResult(result, json) {
   const preparation = result.analysisRequired ? "analysis required" : "ready for review";
   const excludedLine = result.excludedFileCount && result.excludedFileCount > 0 ? `${dim3("Excluded:")} ${result.excludedFileCount} file${result.excludedFileCount === 1 ? "" : "s"} via ${result.excludes?.length ?? 0} pattern${result.excludes?.length === 1 ? "" : "s"}
 ` : "";
+  const removalsState = result.analysisPolicy.explainRemovals ? "on" : "off";
+  const removalsChangeNote = result.previousAnalysisPolicy ? ` (was ${result.previousAnalysisPolicy.explainRemovals ? "on" : "off"})` : "";
+  const removalsLine = `${dim3("Removals:")} explanations ${removalsState}${removalsChangeNote}
+`;
+  const lockedLine = result.analysisPolicyLocked ? `${yellow2("Note:")} --explain-removals was requested but the current revision's analysis is already finalized and immutable; the stored policy was left unchanged (${result.analysisPolicy.explainRemovals ? "on" : "off"}).
+` : "";
   process.stdout.write(
     `${green4("\u2713")} ${bold2(reference)} ${dim3(result.resumed ? "resumed" : "created")}
 ${dim3("Preparation:")} ${preparation}
-${excludedLine}${dim3("Open:")} ${result.url}
+${excludedLine}${removalsLine}${lockedLine}${dim3("Open:")} ${result.url}
 `
   );
 }
@@ -3059,6 +3128,7 @@ function assertKnownOptions(flags) {
     "for",
     "review",
     "exclude",
+    "explainRemovals",
     "--"
   ]);
   const unknown = Object.keys(flags).find((flag) => !known.has(flag));
@@ -3080,6 +3150,9 @@ function assertActionOptions(action, flags) {
   if (action !== "create" && flags.exclude !== void 0) {
     throw new ReviewUsageError(`review ${action} does not accept --exclude`);
   }
+  if (action !== "create" && flags.explainRemovals !== void 0) {
+    throw new ReviewUsageError(`review ${action} does not accept --explain-removals`);
+  }
   if (action !== "analysis-set" && action !== "answer" && flags.bodyFile !== void 0) {
     throw new ReviewUsageError(`review ${action} does not accept --body-file`);
   }
@@ -3093,6 +3166,18 @@ function assertActionOptions(action, flags) {
     throw new ReviewUsageError(`review ${action} does not accept --json`);
   }
 }
+function assertNoConflictingExplainRemovalsFlags(rawArgs) {
+  if (rawArgs.includes("--explain-removals") && rawArgs.includes("--no-explain-removals")) {
+    throw new ReviewUsageError("--explain-removals and --no-explain-removals cannot both be given");
+  }
+}
+function assertValidExplainRemovalsFlagValue(flags) {
+  if (flags.explainRemovals !== void 0 && typeof flags.explainRemovals !== "boolean") {
+    throw new ReviewUsageError(
+      "--explain-removals does not accept a value; use --explain-removals or --no-explain-removals"
+    );
+  }
+}
 function parseUsageWorkspaceId(value) {
   try {
     assertSafeReviewSegment(value, "workspace");
@@ -3102,14 +3187,24 @@ function parseUsageWorkspaceId(value) {
     throw new ReviewUsageError(detail);
   }
 }
-function validateReviewCommand(actionValue, references, flags, monotonicNow = () => performance3.now()) {
+function validateReviewCommand(actionValue, references, flags, monotonicNow = () => performance3.now(), rawArgs = []) {
   assertKnownAction(actionValue);
   assertKnownOptions(flags);
   assertActionOptions(actionValue, flags);
   switch (actionValue) {
     case "create":
       assertReferenceCount(actionValue, references, 0);
-      return { action: actionValue, source: createReviewSourceFromFlags(flags) };
+      assertNoConflictingExplainRemovalsFlags(rawArgs);
+      assertValidExplainRemovalsFlagValue(flags);
+      return {
+        action: actionValue,
+        source: createReviewSourceFromFlags(flags),
+        // Pass the tri-state straight through - see the field's doc comment. Coercing this with
+        // `=== true` was the bug: it turned "flag omitted" into an explicit `false`, which
+        // `createOrResumeReview` then applied as "turn the policy off" on every resumed
+        // workspace, silently disabling a gate the reviewer had turned on.
+        explainRemovals: flags.explainRemovals
+      };
     case "refresh":
       assertReferenceCount(actionValue, references, 1);
       return { action: actionValue, workspaceId: parseUsageWorkspaceId(references[0] ?? "") };
@@ -3206,14 +3301,28 @@ function registerReviewCommands(cli, dependencies = {}) {
   ).option(
     "--exclude <pattern>",
     "Repository-relative path pattern to exclude from the review (repeatable); create only"
+  ).option(
+    // `--no-explain-removals` is intentionally NOT declared as its own `.option()`: CAC
+    // treats a declared `--no-x` as a distinct boolean option with its own implicit
+    // `default: true` for `x`, which would make `explainRemovals` default to `true` on every
+    // invocation that omits both flags - exactly the "no opinion" case this must NOT resolve
+    // to a value. `mri`, the arg parser CAC delegates to, already recognizes an undeclared
+    // `--no-` prefix as boolean negation on its own, so this single declaration is enough for
+    // both spellings to parse correctly while keeping "neither given" as `undefined`.
+    "--explain-removals",
+    "Require a rationale for every detected removal run before analysis can finalize (default: off on first capture; unchanged on resume; use --no-explain-removals to turn off explicitly); create only"
   ).option("--json", "Print machine-readable output").option("--body-file <path>", "Analysis or answer body file").option("--for <duration>", "Bounded question wait, e.g. 90s, 10m, 1h").option("--review <reference>", "Review reference for review answer").allowUnknownOptions().action(async (action, references, flags) => {
     try {
       const commandStartedAt = monotonicNow();
-      const command = validateReviewCommand(action, references, flags, monotonicNow);
+      const command = validateReviewCommand(action, references, flags, monotonicNow, cli.rawArgs);
       const root = resolveRepositoryRoot(flags.root ?? process.cwd());
       if (command.action === "create") {
         printCreateResult(
-          createOrResumeReview({ root, source: requireValidatedValue(command.source) }),
+          createOrResumeReview({
+            root,
+            source: requireValidatedValue(command.source),
+            explainRemovals: command.explainRemovals
+          }),
           flags.json
         );
         return;

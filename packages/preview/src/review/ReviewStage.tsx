@@ -146,14 +146,20 @@ export function ReviewStage({
     jump.clearOrigin();
     scrollStageIntoView();
   }
-  const allStripKeys = strips.map((strip) => runKey(strip));
+  // A strip with no rationale renders no chrome at all (see RemovalStrip), so "Expand all" must
+  // only count runs that actually have something to expand - otherwise a delete-heavy diff
+  // captured with the removal-rationale policy off would show a control that toggles nothing.
+  const explainableStripKeys = strips
+    .filter((strip) => strip.rationale)
+    .map((strip) => runKey(strip));
   const allStripsExpanded =
-    allStripKeys.length > 0 && allStripKeys.every((key) => expandedRuns.includes(key));
+    explainableStripKeys.length > 0 &&
+    explainableStripKeys.every((key) => expandedRuns.includes(key));
   function handleToggleAll(): void {
     setExpandedRuns((current) => {
       const next = allStripsExpanded
-        ? current.filter((key) => !allStripKeys.includes(key))
-        : Array.from(new Set([...current, ...allStripKeys]));
+        ? current.filter((key) => !explainableStripKeys.includes(key))
+        : Array.from(new Set([...current, ...explainableStripKeys]));
       writeExpandedRuns(revisionId, next);
       return next;
     });
@@ -190,7 +196,7 @@ export function ReviewStage({
           <span className="review-stage__filedir">{directoryPrefix(item.path)}</span>
           <span className="review-stage__filename">{fileName(item.path)}</span>
         </p>
-        {strips.length > 0 ? (
+        {explainableStripKeys.length > 0 ? (
           <button
             type="button"
             className="review-removal-expand-all"

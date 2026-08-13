@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 // a no-op under vitest/jsdom because `acquireVsCodeApi` is never defined there.
 import {
   excludeSummary,
+  removalPolicySummary,
   renderDiffLines,
   renderRemovalStrip,
   renderRemovalSummary,
@@ -189,6 +190,78 @@ describe('renderDiffLines removal strips', () => {
     const container = renderDiffLines(hunk, 'src/a.ts');
     expect(container.querySelectorAll('.removal-strip')).toHaveLength(0);
     expect(container.querySelectorAll('.diff-line')).toHaveLength(hunk.lines.length);
+  });
+});
+
+describe('renderDiffLines gates removal strips on insights, not on workspace.analysisPolicy', () => {
+  // `renderDiffLines`/`renderRemovalStrip` never read `workspace.analysisPolicy` themselves -
+  // they gate purely on whether a run's insights carry a rationale. That single code path is
+  // what makes "policy off" and "policy on" both render correctly without a policy check here:
+  // with the policy off the agent simply never authors a rationale into `insights.removals`, so
+  // every run in that state naturally falls into the "no rationale" case below - the policy
+  // itself never enters this component's decision.
+  it('renders no strip when no rationale was authored for the run', () => {
+    const hunk = twoRunsHunk();
+    const container = renderDiffLines(hunk, 'src/a.ts', {
+      reviewItemId: 'item-1',
+      snapshot: snapshotFor([twoRunsItem()], [fileFor(hunk)]),
+      insights: { removals: [] },
+      onJumpToReviewItem: () => {},
+      onOpenFile: () => {},
+    });
+    expect(container.querySelectorAll('.removal-strip')).toHaveLength(0);
+  });
+
+  it('renders a rationale whenever one is present, carried forward or not', () => {
+    const hunk = twoRunsHunk();
+    const insights: Pick<ReviewInsights, 'removals'> = {
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'src/a.ts', start: 2, end: 4 },
+          reason: 'moved',
+          description: 'Moved into the interceptor.',
+        },
+      ],
+    };
+    const container = renderDiffLines(hunk, 'src/a.ts', {
+      reviewItemId: 'item-1',
+      snapshot: snapshotFor([twoRunsItem()], [fileFor(hunk)]),
+      insights,
+      onJumpToReviewItem: () => {},
+      onOpenFile: () => {},
+    });
+    const strips = container.querySelectorAll('.removal-strip');
+    expect(strips).toHaveLength(1);
+    expect(strips[0]?.textContent).toContain('moved');
+  });
+
+  it('renders every covered run when the policy is on, same as before the policy existed', () => {
+    const hunk = twoRunsHunk();
+    const insights: Pick<ReviewInsights, 'removals'> = {
+      removals: [
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'src/a.ts', start: 2, end: 4 },
+          reason: 'moved',
+          description: 'Moved into the interceptor.',
+        },
+        {
+          reviewItemId: 'item-1',
+          run: { path: 'src/a.ts', start: 6, end: 6 },
+          reason: 'dead-code',
+          description: 'Unreachable debug line.',
+        },
+      ],
+    };
+    const container = renderDiffLines(hunk, 'src/a.ts', {
+      reviewItemId: 'item-1',
+      snapshot: snapshotFor([twoRunsItem()], [fileFor(hunk)]),
+      insights,
+      onJumpToReviewItem: () => {},
+      onOpenFile: () => {},
+    });
+    expect(container.querySelectorAll('.removal-strip')).toHaveLength(2);
   });
 });
 
@@ -374,5 +447,40 @@ describe('excludeSummary', () => {
     expect(excludeSummary({ kind: 'staged', headSha: 'a', excludes: ['.vouch', 'dist'] })).toBe(
       'Excluded: .vouch, dist',
     );
+  });
+});
+
+describe('removalPolicySummary', () => {
+  it('reports explanations optional when the workspace policy is off', () => {
+    expect(
+      removalPolicySummary({
+        workspace: { analysisPolicy: { explainRemovals: false } },
+        insights: {},
+      }),
+    ).toBe('Removals: explanations optional');
+  });
+
+  it('reports explanations optional when neither workspace nor insights carry a policy', () => {
+    expect(removalPolicySummary({ workspace: {}, insights: {} })).toBe(
+      'Removals: explanations optional',
+    );
+  });
+
+  it('reports explanations required when the workspace policy is on', () => {
+    expect(
+      removalPolicySummary({
+        workspace: { analysisPolicy: { explainRemovals: true } },
+        insights: {},
+      }),
+    ).toBe('Removals: explanations required');
+  });
+
+  it('prefers the stamped insights policy over a workspace policy that later changed', () => {
+    expect(
+      removalPolicySummary({
+        workspace: { analysisPolicy: { explainRemovals: false } },
+        insights: { analysisPolicy: { explainRemovals: true } },
+      }),
+    ).toBe('Removals: explanations required');
   });
 });

@@ -29,6 +29,19 @@ interface ReviewRepository {
     name: string;
     remoteUrl?: string;
 }
+/**
+ * Reviewer-chosen analysis policy for the workspace. Deliberately NOT part of `ReviewSource`
+ * (or any input `sourceFingerprint` hashes): it governs how deeply the analysis must explain
+ * the captured diff, not what was captured, so flipping it must never change revision identity.
+ * Optional so existing on-disk workspaces (predating this field) keep validating and read as
+ * every policy being off.
+ */
+interface AnalysisPolicy {
+    /** When true, every derived removal run must carry a rationale before analysis can finalize
+     * (today's behavior). When false or absent, removal coverage is not enforced - rationales may
+     * still be submitted and are validated for correctness, just not required. */
+    explainRemovals: boolean;
+}
 interface ReviewWorkspace {
     schemaVersion: 1;
     id: string;
@@ -37,6 +50,7 @@ interface ReviewWorkspace {
     currentRevisionId: string;
     createdAt: string;
     updatedAt: string;
+    analysisPolicy?: AnalysisPolicy;
 }
 type ReviewItemKind = 'hunk' | 'code-section' | 'file';
 type ReviewItemStatus = 'needs-review' | 'reviewed' | 'carried-forward' | 'stale';
@@ -229,6 +243,13 @@ interface ReviewInsights {
     items: ReviewItemInsight[];
     files?: ReviewFileInsight[];
     removals?: RemovalRationale[];
+    /** The workspace's `analysisPolicy` at the moment THIS revision's analysis was finalized,
+     * stamped in by `applyReviewAnalysis` so a finalized revision stays self-describing even if a
+     * later `review create` changes the workspace's current policy (`analysisPolicy` is
+     * workspace-global and latest-wins - see its own doc comment). Absent on a revision finalized
+     * before this field existed, or on one not yet finalized at all; readers should fall back to
+     * `ReviewWorkspace.analysisPolicy` in both cases. */
+    analysisPolicy?: AnalysisPolicy;
 }
 type ReviewQuestionStatus = 'queued' | 'processing' | 'answered' | 'failed' | 'stale';
 interface ReviewClaim {
@@ -393,4 +414,4 @@ declare function resolveRemovalTarget(snapshot: ReviewSnapshot, rationale: Remov
 /** One strip per derived run, in row order, with its rationale (if any) and resolved target. */
 declare function buildRemovalStrips(rows: readonly ReviewDiffLineRow[], reviewItemId: string, snapshot: ReviewSnapshot, insights: Pick<ReviewInsights, 'removals'>): RemovalStrip[];
 
-export { type SourceFile as $, type ActiveReviewPointer as A, type ReviewItemProgressPatch as B, type ClaimResult as C, type DiffFile as D, type ReviewItemStatus as E, type ReviewLineRow as F, type ReviewLineSelection as G, type ReviewProgress as H, type ReviewProgressUpdate as I, type ReviewQuestion as J, type ReviewQuestionEnvelope as K, type ReviewQuestionGeneration as L, type ReviewQuestionGenerationState as M, type ReviewQuestionInput as N, type ReviewQuestionStatus as O, type ReviewRange as P, type QuestionQueue as Q, RELOCATING_REMOVAL_REASONS as R, type ReviewReadiness as S, type ReviewRef as T, type ReviewRepository as U, type ReviewScopeLineRow as V, type ReviewSnapshot as W, type ReviewSource as X, type ReviewWorkspace as Y, type ScopeReviewSnapshot as Z, type SnapshotRemovalRun as _, type DiffFileStatus as a, type SourceLine as a0, type WalkthroughPosition as a1, buildRemovalStrips as a2, deriveRemovalRuns as a3, deriveReviewReadiness as a4, deriveSnapshotRemovalRuns as a5, resolveRemovalTarget as a6, type DiffHunk as b, type DiffLine as c, type DiffLineKind as d, type DiffReviewSnapshot as e, type RemovalRationale as f, type RemovalReason as g, type RemovalRun as h, type RemovalRunRef as i, type RemovalStrip as j, type RemovalTargetExcerpt as k, type ResolvedRemovalTarget as l, type ReviewAnswer as m, type ReviewAnswerReference as n, type ReviewBundle as o, type ReviewClaim as p, type ReviewDiffLineRow as q, type ReviewFileInsight as r, type ReviewGroup as s, type ReviewInsightConfidence as t, type ReviewInsights as u, type ReviewItem as v, type ReviewItemContext as w, type ReviewItemInsight as x, type ReviewItemKind as y, type ReviewItemProgress as z };
+export { type SnapshotRemovalRun as $, type ActiveReviewPointer as A, type ReviewItemProgress as B, type ClaimResult as C, type DiffFile as D, type ReviewItemProgressPatch as E, type ReviewItemStatus as F, type ReviewLineRow as G, type ReviewLineSelection as H, type ReviewProgress as I, type ReviewProgressUpdate as J, type ReviewQuestion as K, type ReviewQuestionEnvelope as L, type ReviewQuestionGeneration as M, type ReviewQuestionGenerationState as N, type ReviewQuestionInput as O, type ReviewQuestionStatus as P, type QuestionQueue as Q, RELOCATING_REMOVAL_REASONS as R, type ReviewRange as S, type ReviewReadiness as T, type ReviewRef as U, type ReviewRepository as V, type ReviewScopeLineRow as W, type ReviewSnapshot as X, type ReviewSource as Y, type ReviewWorkspace as Z, type ScopeReviewSnapshot as _, type AnalysisPolicy as a, type SourceFile as a0, type SourceLine as a1, type WalkthroughPosition as a2, buildRemovalStrips as a3, deriveRemovalRuns as a4, deriveReviewReadiness as a5, deriveSnapshotRemovalRuns as a6, resolveRemovalTarget as a7, type DiffFileStatus as b, type DiffHunk as c, type DiffLine as d, type DiffLineKind as e, type DiffReviewSnapshot as f, type RemovalRationale as g, type RemovalReason as h, type RemovalRun as i, type RemovalRunRef as j, type RemovalStrip as k, type RemovalTargetExcerpt as l, type ResolvedRemovalTarget as m, type ReviewAnswer as n, type ReviewAnswerReference as o, type ReviewBundle as p, type ReviewClaim as q, type ReviewDiffLineRow as r, type ReviewFileInsight as s, type ReviewGroup as t, type ReviewInsightConfidence as u, type ReviewInsights as v, type ReviewItem as w, type ReviewItemContext as x, type ReviewItemInsight as y, type ReviewItemKind as z };

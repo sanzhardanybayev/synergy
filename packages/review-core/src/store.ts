@@ -41,6 +41,7 @@ import {
 } from './schema.js';
 import type {
   ActiveReviewPointer,
+  AnalysisPolicy,
   ReviewBundle,
   ReviewInsights,
   ReviewItemProgressPatch,
@@ -83,6 +84,9 @@ export interface ReviewStore {
     revisionId: string,
     source: ReviewSource,
     repository?: ReviewRepository,
+    /** When provided, replaces the workspace's stored analysis policy. Omit to leave whatever
+     * policy is already on disk untouched (e.g. a plain resume that isn't re-running `create`). */
+    analysisPolicy?: AnalysisPolicy,
   ): void;
   isAnalysisFinalized(workspaceId: string, revisionId: string): boolean;
   getAnalysisFinalizedAt(workspaceId: string, revisionId: string): string | undefined;
@@ -1115,7 +1119,7 @@ export function createReviewStore(
       });
     },
 
-    setCurrentRevision(workspaceId, revisionId, source, repository): void {
+    setCurrentRevision(workspaceId, revisionId, source, repository, analysisPolicy): void {
       withLock(workspaceId, () => {
         const snapshot = readValidated(
           snapshotFile(projectRoot, workspaceId, revisionId),
@@ -1163,6 +1167,7 @@ export function createReviewStore(
           ...workspace,
           source,
           currentRevisionId: revisionId,
+          ...(analysisPolicy !== undefined ? { analysisPolicy } : {}),
           updatedAt: nextProgressUpdatedAt(workspace.updatedAt, options.now?.() ?? Date.now()),
         };
         assertReviewWorkspace(next);
