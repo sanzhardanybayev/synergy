@@ -1,5 +1,10 @@
-import type { ReviewFileInsight, ReviewItem, ReviewItemProgress } from '@synergy/review-core';
-import { render, screen } from '@testing-library/react';
+import {
+  type ReviewFileInsight,
+  type ReviewItem,
+  type ReviewItemProgress,
+  buildDiffSnapshot,
+} from '@synergy/review-core';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { HunkTabs } from '../src/review/HunkTabs.js';
 import { ReviewSidebar } from '../src/review/ReviewSidebar.js';
@@ -114,7 +119,12 @@ describe('ReviewStage', () => {
   });
 });
 
-describe('ReviewStage removal-rationale policy', () => {
+describe('ReviewStage removal-rationale rendering', () => {
+  // ReviewStage never reads `workspace.analysisPolicy` - it gates purely on whether a run's
+  // insights carry a rationale (see the equivalent note on the VS Code pane's
+  // `renderDiffLines gates removal strips on insights, not on workspace.analysisPolicy`). These
+  // tests exercise that insights-driven behavior directly rather than varying `analysisPolicy`,
+  // which would only look like it was testing the policy.
   const RATIONALE = {
     reviewItemId: 'hunk-theme',
     run: { path: 'features/plan/PlanCardToggle.tsx', start: 17, end: 17 },
@@ -154,35 +164,103 @@ describe('ReviewStage removal-rationale policy', () => {
     );
   }
 
-  it('renders no strip and no expand-all control when the policy is off and no rationale exists', () => {
-    const bundle = makeDiffBundle({
-      workspace: { ...makeDiffBundle().workspace, analysisPolicy: { explainRemovals: false } },
-    });
+  it('renders no strip and no expand-all control when there is no rationale', () => {
+    const bundle = makeDiffBundle();
     renderStageWithBundle(bundle);
     expect(document.querySelector('.review-removal')).toBeNull();
     expect(screen.queryByRole('button', { name: /expand all/i })).toBeNull();
   });
 
-  it('still renders a carried-forward rationale even though the policy is off', () => {
-    const base = makeDiffBundle();
-    const bundle = makeDiffBundle({
-      workspace: { ...base.workspace, analysisPolicy: { explainRemovals: false } },
-      insights: { ...base.insights, removals: [RATIONALE] },
-    });
-    renderStageWithBundle(bundle);
-    expect(screen.getByText('dead-code')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /expand all/i })).toBeTruthy();
-  });
+  it.each([true, false])(
+    'renders a rationale regardless of workspace.analysisPolicy.explainRemovals (%s)',
+    (explainRemovals) => {
+      const base = makeDiffBundle();
+      const bundle = makeDiffBundle({
+        workspace: { ...base.workspace, analysisPolicy: { explainRemovals } },
+        insights: { ...base.insights, removals: [RATIONALE] },
+      });
+      renderStageWithBundle(bundle);
+      expect(screen.getByText('dead-code')).toBeTruthy();
+      expect(screen.getByRole('button', { name: /expand all/i })).toBeTruthy();
+    },
+  );
 
-  it('behaves as before the policy existed when it is on', () => {
+  /**
+   * The state a partially-explained review lands in after the policy is turned off mid-review:
+   * one removal run carries a rationale (e.g. authored while the policy was on, or carried
+   * forward from a predecessor revision), the other never got one. "Expand all" must only ever
+   * claim the runs it can actually expand - see the `explainableStripKeys` comment in
+   * `ReviewStage` - so this asserts the real behavior rather than trusting the button's label.
+   */
+  function makeMixedRemovalBundle() {
     const base = makeDiffBundle();
-    const bundle = makeDiffBundle({
-      workspace: { ...base.workspace, analysisPolicy: { explainRemovals: true } },
-      insights: { ...base.insights, removals: [RATIONALE] },
+    const snapshot = buildDiffSnapshot({
+      revisionId: 'mixed-removal-revision',
+      source: base.snapshot.source,
+      fingerprint: 'mixed-removal-fingerprint',
+      createdAt: base.snapshot.createdAt,
+      patch: [
+        'diff --git a/features/plan/PlanCardToggle.tsx b/features/plan/PlanCardToggle.tsx',
+        '--- a/features/plan/PlanCardToggle.tsx',
+        '+++ b/features/plan/PlanCardToggle.tsx',
+        '@@ -1,5 +1,3 @@',
+        ' const Card = () => {',
+        '-  const legacyStyle = oldTheme;',
+        '   return (',
+        '-    <View style={legacyStyle} />',
+        '   );',
+      ].join('\n'),
     });
+    const item = snapshot.items[0];
+    if (!item) throw new Error('fixture must produce one review item');
+    return {
+      ...base,
+      snapshot,
+      insights: {
+        schemaVersion: 1 as const,
+        revisionId: snapshot.revisionId,
+        groups: [{ id: 'cleanup', label: 'Cleanup', reviewItemIds: [item.id] }],
+        items: [
+          {
+            reviewItemId: item.id,
+            description:
+              'Drops the legacy theme style now that the card uses the primary surface token.',
+            confidence: 'high' as const,
+            evidencePaths: [item.path],
+          },
+        ],
+        // Only the first run (the legacy style variable) has a rationale; the second
+        // (the View's style prop) is bare - the mixed state.
+        removals: [
+          {
+            reviewItemId: item.id,
+            run: { path: item.path, start: 2, end: 2 },
+            reason: 'dead-code' as const,
+            description: 'Stale legacy theme variable, superseded by the primary surface token.',
+          },
+        ],
+      },
+      progress: {
+        schemaVersion: 1 as const,
+        updatedAt: base.progress.updatedAt,
+        items: { [item.id]: { status: 'needs-review' as const } },
+      },
+    };
+  }
+
+  it('expands only the rationale-covered run in a mixed set, even though the control says "all"', () => {
+    const bundle = makeMixedRemovalBundle();
     renderStageWithBundle(bundle);
-    expect(screen.getByText('dead-code')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /expand all/i })).toBeTruthy();
+
+    // The bare run renders no chrome at all - only the covered run produces a strip.
+    expect(document.querySelectorAll('.review-removal')).toHaveLength(1);
+
+    const expandAll = screen.getByRole('button', { name: /expand all/i });
+    fireEvent.click(expandAll);
+
+    expect(document.querySelectorAll('.review-removal__detail')).toHaveLength(1);
+    expect(screen.getByText(/Stale legacy theme variable/)).toBeVisible();
+    expect(expandAll).toHaveTextContent(/collapse all/i);
   });
 });
 
