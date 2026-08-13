@@ -65,6 +65,12 @@ export interface CreateReviewResult {
   analysisRequired: boolean;
   analysisGuidance?: ReviewAnalysisGuidance;
   removals: ReviewRemovalStatus[];
+  /** Repository-relative exclude patterns active for this review's source, normalized and
+   * sorted. Absent when no excludes are configured. */
+  excludes?: string[];
+  /** Number of files this capture dropped because they matched an exclude pattern. Only
+   * present when excludes are configured. */
+  excludedFileCount?: number;
 }
 
 export interface ReviewActionDependencies {
@@ -182,6 +188,9 @@ export interface ReviewStatusResult {
   url: string;
   analysisGuidance?: ReviewAnalysisGuidance;
   removals: ReviewRemovalStatus[];
+  /** Repository-relative exclude patterns active for this review's source, normalized and
+   * sorted. Absent when no excludes are configured. */
+  excludes?: string[];
 }
 
 const GROUP_ID = /^[a-z0-9][a-z0-9_-]*$/u;
@@ -331,15 +340,25 @@ function buildSnapshot(
   });
 }
 
-function resultFor(root: string, reference: ReviewRef, resumed: boolean): CreateReviewResult {
+function resultFor(
+  root: string,
+  reference: ReviewRef,
+  resumed: boolean,
+  captured?: CapturedReviewSource,
+): CreateReviewResult {
   const store = createReviewStore(root);
   const bundle = store.readBundle(reference.workspaceId, reference.revisionId);
+  const excludes = bundle.snapshot.source.excludes;
   return {
     reference,
     resumed,
     url: reviewUrl(reference),
     analysisRequired: !store.isAnalysisFinalized(reference.workspaceId, reference.revisionId),
     removals: removalsStatusFor(bundle),
+    ...(excludes && excludes.length > 0 ? { excludes } : {}),
+    ...(captured?.excludedFileCount !== undefined
+      ? { excludedFileCount: captured.excludedFileCount }
+      : {}),
     ...(bundle.snapshot.kind === 'scope'
       ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) }
       : {}),
@@ -379,7 +398,7 @@ export function createOrResumeReview(
       root,
       name: repositoryName(root),
     });
-    return resultFor(root, { workspaceId, revisionId: existingRevision }, true);
+    return resultFor(root, { workspaceId, revisionId: existingRevision }, true, captured);
   }
 
   const now = new Date().toISOString();
@@ -439,23 +458,28 @@ export function createOrResumeReview(
       root,
       name: repositoryName(root),
     });
-    return resultFor(root, { workspaceId, revisionId: concurrentRevision }, true);
+    return resultFor(root, { workspaceId, revisionId: concurrentRevision }, true, captured);
   }
-  return resultFor(root, { workspaceId, revisionId }, false);
+  return resultFor(root, { workspaceId, revisionId }, false, captured);
 }
 
 function captureRequestFromWorkspace(
   workspace: ReviewWorkspace,
 ): CaptureReviewSourceRequest['source'] {
+  const excludes = workspace.source.excludes;
   switch (workspace.source.kind) {
     case 'pr':
-      return { kind: 'pr', selector: workspace.source.url };
+      return { kind: 'pr', selector: workspace.source.url, ...(excludes ? { excludes } : {}) };
     case 'staged':
-      return { kind: 'staged' };
+      return { kind: 'staged', ...(excludes ? { excludes } : {}) };
     case 'unstaged':
-      return { kind: 'unstaged' };
+      return { kind: 'unstaged', ...(excludes ? { excludes } : {}) };
     case 'scope':
-      return { kind: 'scope', patterns: workspace.source.patterns };
+      return {
+        kind: 'scope',
+        patterns: workspace.source.patterns,
+        ...(excludes ? { excludes } : {}),
+      };
   }
 }
 
@@ -951,6 +975,7 @@ export function getReviewStatus(request: ReviewStatusRequest): ReviewStatusResul
     },
     analysisFinalized,
   );
+  const excludes = bundle.snapshot.source.excludes;
   return {
     reference: formatReviewRef(request.reference.workspaceId, request.reference.revisionId),
     analysisRequired: !analysisFinalized,
@@ -958,6 +983,7 @@ export function getReviewStatus(request: ReviewStatusRequest): ReviewStatusResul
     captureFailed: freshness.captureFailed,
     url: reviewUrl(request.reference),
     removals: removalsStatusFor(bundle),
+    ...(excludes && excludes.length > 0 ? { excludes } : {}),
     ...(bundle.snapshot.kind === 'scope'
       ? { analysisGuidance: deriveReviewAnalysisGuidance(bundle.snapshot) }
       : {}),
@@ -989,6 +1015,9 @@ export function printReviewStatus(request: ReviewStatusRequest): string {
     `stale: ${status.readiness.stale}`,
     `unanswered: ${status.readiness.unanswered}`,
     `removals: ${coveredRemovals}/${status.removals.length} explained`,
+    ...(status.excludes && status.excludes.length > 0
+      ? [`excludes: ${status.excludes.join(', ')}`]
+      : []),
     `url: ${status.url}`,
   ].join('\n');
 }

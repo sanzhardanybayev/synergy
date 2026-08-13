@@ -67,6 +67,45 @@ describe('review CLI source flags', () => {
     });
   });
 
+  it('leaves excludes absent when --exclude is not given', () => {
+    expect(createReviewSourceFromFlags({ staged: true })).toEqual({ kind: 'staged' });
+  });
+
+  it('normalizes a single --exclude occurrence into a one-element excludes array', () => {
+    expect(createReviewSourceFromFlags({ staged: true, exclude: '.vouch' })).toEqual({
+      kind: 'staged',
+      excludes: ['.vouch'],
+    });
+  });
+
+  it('normalizes several --exclude occurrences, sorted and deduped regardless of order', () => {
+    expect(
+      createReviewSourceFromFlags({ staged: true, exclude: ['.vouch', '.lavish', '.vouch'] }),
+    ).toEqual({ kind: 'staged', excludes: ['.lavish', '.vouch'] });
+    expect(createReviewSourceFromFlags({ staged: true, exclude: ['.lavish', '.vouch'] })).toEqual(
+      createReviewSourceFromFlags({ staged: true, exclude: ['.vouch', '.lavish'] }),
+    );
+  });
+
+  it('rejects an invalid --exclude pattern with a usage error naming the pattern', () => {
+    expect(() => createReviewSourceFromFlags({ staged: true, exclude: '../escape' })).toThrow(
+      /invalid exclude pattern: \.\.\/escape/,
+    );
+  });
+
+  it('rejects --exclude on actions other than create', async () => {
+    const result = await runReviewCli([
+      'status',
+      'workspace@revision',
+      '--exclude',
+      '.vouch',
+      '--root',
+      '/not-a-repository',
+    ]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toMatch(/review status does not accept --exclude/);
+  });
+
   it('rejects invalid usage before attempting Git root resolution', async () => {
     const root = mkdtempSync(join(tmpdir(), 'synergy-review-cli-body-'));
     temporaryRoots.push(root);

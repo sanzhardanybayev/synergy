@@ -58,6 +58,46 @@ function createRequest(root: string): CreateReviewRequest {
   return { root, source: { kind: 'staged' }, runner: createRunner() };
 }
 
+const PATCH_WITH_EXCLUDED_FILE = [
+  'diff --git a/.vouch/report.md b/.vouch/report.md',
+  'index 1111111..2222222 100644',
+  '--- a/.vouch/report.md',
+  '+++ b/.vouch/report.md',
+  '@@ -1 +1 @@',
+  '-old',
+  '+new',
+  '',
+  'diff --git a/src/example.ts b/src/example.ts',
+  'index 1111111..2222222 100644',
+  '--- a/src/example.ts',
+  '+++ b/src/example.ts',
+  '@@ -1 +1 @@',
+  '-export const value = 1;',
+  '+export const value = 2;',
+  '',
+].join('\n');
+
+/** Same fixture command surface as `createRunner`, but the staged diff carries a `.vouch/`
+ * file alongside `src/example.ts` so exclude filtering has something to drop. */
+function excludeRunner(): CommandRunner {
+  return {
+    run(command, args, options): CommandResult {
+      const key = [command, ...args].join(' ');
+      if (key === 'git diff --cached --no-ext-diff --binary') {
+        return { exitCode: 0, stdout: PATCH_WITH_EXCLUDED_FILE, stderr: '' };
+      }
+      if (key === 'git rev-parse HEAD') return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+      if (key === 'git rev-parse --show-toplevel') {
+        return { exitCode: 0, stdout: `${options.cwd}\n`, stderr: '' };
+      }
+      if (key === 'git config --get remote.origin.url') {
+        return { exitCode: 1, stdout: '', stderr: '' };
+      }
+      throw new Error(`missing fixture for ${key}`);
+    },
+  };
+}
+
 /** Blanket "dead-code" rationale for every derived removal run, sufficient to satisfy the
  * removal-coverage gate in tests that are not themselves exercising removal semantics. */
 function removalsForSnapshot(snapshot: ReviewSnapshot): RemovalRationale[] {
@@ -2857,5 +2897,63 @@ describe('review lifecycle actions', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  describe('review path exclusions', () => {
+    it('omits excludes and excludedFileCount from results when none are configured', () => {
+      const root = join(tmpdir(), `synergy-review-excludes-absent-${Date.now()}`);
+      mkdirSync(root, { recursive: true });
+      try {
+        const created = createOrResumeReview(createRequest(root));
+        expect(created.excludes).toBeUndefined();
+        expect(created.excludedFileCount).toBeUndefined();
+        const status = getReviewStatus({
+          root,
+          reference: created.reference,
+          runner: createRunner(),
+        });
+        expect(status.excludes).toBeUndefined();
+        expect(
+          printReviewStatus({ root, reference: created.reference, runner: createRunner() }),
+        ).not.toMatch(/excludes:/);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('echoes active exclusions in create and status results and reports what was dropped', () => {
+      const root = join(tmpdir(), `synergy-review-excludes-present-${Date.now()}`);
+      mkdirSync(root, { recursive: true });
+      try {
+        const created = createOrResumeReview({
+          root,
+          source: { kind: 'staged', excludes: ['.vouch'] },
+          runner: excludeRunner(),
+        });
+        expect(created.excludes).toEqual(['.vouch']);
+        expect(created.excludedFileCount).toBe(1);
+
+        const store = createReviewStore(root);
+        const bundle = store.readBundle(
+          created.reference.workspaceId,
+          created.reference.revisionId,
+        );
+        if (bundle.snapshot.kind !== 'diff') throw new Error('expected a diff snapshot');
+        expect(bundle.snapshot.files.map((file) => file.path)).toEqual(['src/example.ts']);
+        expect(bundle.snapshot.source.excludes).toEqual(['.vouch']);
+
+        const status = getReviewStatus({
+          root,
+          reference: created.reference,
+          runner: excludeRunner(),
+        });
+        expect(status.excludes).toEqual(['.vouch']);
+        expect(
+          printReviewStatus({ root, reference: created.reference, runner: excludeRunner() }),
+        ).toContain('excludes: .vouch');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 });

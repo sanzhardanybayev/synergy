@@ -533,6 +533,7 @@ function isPreviewRuntimePath(path) {
 }
 function filterPatch(patch, excludes) {
   let excludedAny = false;
+  const excludedPaths = /* @__PURE__ */ new Set();
   const filtered = patch.split(/(?=^diff --git )/mu).filter((chunk) => {
     const files = parseUnifiedDiff(chunk);
     if (files.length === 0) return true;
@@ -541,11 +542,12 @@ function filterPatch(patch, excludes) {
     if (files.some(isRuntimeMatch)) return false;
     if (files.some(isUserExcludeMatch)) {
       excludedAny = true;
+      for (const file of files) excludedPaths.add(file.path);
       return false;
     }
     return true;
   }).join("");
-  return { patch: filtered, excludedAny };
+  return { patch: filtered, excludedAny, excludedPaths: [...excludedPaths] };
 }
 var UTF8_DECODER = new TextDecoder2("utf-8", { fatal: true });
 function decodeUtf8(bytes) {
@@ -725,7 +727,7 @@ function capturePr(options) {
       ])
     );
     const rawDiff = runChecked(runner, options.root, "gh", ["pr", "diff", before.url]);
-    const { patch, excludedAny } = filterPatch(rawDiff, excludes);
+    const { patch, excludedAny, excludedPaths } = filterPatch(rawDiff, excludes);
     const after = parsePullRequestView(
       runChecked(runner, options.root, "gh", [
         "pr",
@@ -751,7 +753,8 @@ function capturePr(options) {
       title: after.title,
       patch,
       eligiblePaths,
-      fingerprint: sourceFingerprint(source, patch)
+      fingerprint: sourceFingerprint(source, patch),
+      ...excludes.length > 0 ? { excludedFileCount: excludedPaths.length } : {}
     };
   }
   throw new Error(
@@ -767,7 +770,7 @@ function captureStaged(options) {
     "--no-ext-diff",
     "--binary"
   ]);
-  const { patch, excludedAny } = filterPatch(rawDiff, excludes);
+  const { patch, excludedAny, excludedPaths } = filterPatch(rawDiff, excludes);
   const source = {
     kind: "staged",
     headSha: "",
@@ -775,7 +778,13 @@ function captureStaged(options) {
   };
   const excludedEverything = excludedAny && parseUnifiedDiff(patch).length === 0;
   const eligiblePaths = assertCapturedPatch(patch, "staged", excludedEverything);
-  return { source, patch, eligiblePaths, fingerprint: sourceFingerprint(source, patch) };
+  return {
+    source,
+    patch,
+    eligiblePaths,
+    fingerprint: sourceFingerprint(source, patch),
+    ...excludes.length > 0 ? { excludedFileCount: excludedPaths.length } : {}
+  };
 }
 function captureUnstaged(options) {
   const runner = options.runner ?? systemCommandRunner;
@@ -794,10 +803,11 @@ function captureUnstaged(options) {
     ":(exclude).synergy/preview.log",
     ...excludePathspecs(excludes)
   ]);
-  const { patch: trackedPatch, excludedAny: trackedExcludedAny } = filterPatch(
-    trackedRaw,
-    excludes
-  );
+  const {
+    patch: trackedPatch,
+    excludedAny: trackedExcludedAny,
+    excludedPaths: trackedExcludedPaths
+  } = filterPatch(trackedRaw, excludes);
   const allUntrackedPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, "git", [
       "ls-files",
@@ -834,7 +844,10 @@ function captureUnstaged(options) {
     patch,
     eligiblePaths,
     fingerprintContent,
-    fingerprint: sourceFingerprint(source, fingerprintContent)
+    fingerprint: sourceFingerprint(source, fingerprintContent),
+    ...excludes.length > 0 ? {
+      excludedFileCount: trackedExcludedPaths.length + (allUntrackedPaths.length - untrackedPaths.length)
+    } : {}
   };
 }
 function captureScope(options) {
@@ -878,7 +891,8 @@ function captureScope(options) {
     files: captured.files,
     eligiblePaths: paths,
     fingerprintContent: captured.fingerprintContent,
-    fingerprint: sourceFingerprint(source, captured.fingerprintContent)
+    fingerprint: sourceFingerprint(source, captured.fingerprintContent),
+    ...excludes.length > 0 ? { excludedFileCount: rawPaths.length - paths.length } : {}
   };
 }
 function captureReviewSource(request) {
@@ -957,4 +971,4 @@ export {
   resolveRepositoryRoot,
   repositoryName
 };
-//# sourceMappingURL=chunk-4RU76K66.js.map
+//# sourceMappingURL=chunk-PMLQ7SYX.js.map

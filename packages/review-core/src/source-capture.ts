@@ -51,6 +51,10 @@ export interface CapturedReviewSource {
   files?: SourceFile[];
   title?: string;
   fingerprintContent?: string;
+  /** Number of distinct files this capture dropped because they matched an exclude pattern.
+   * Present only when the source carries excludes; callers use it to report what was excluded
+   * without recomputing anything. */
+  excludedFileCount?: number;
 }
 
 export interface ReviewSourceFreshness {
@@ -164,6 +168,8 @@ interface FilteredPatch {
   patch: string;
   /** True when at least one chunk was dropped because it matched a user exclude pattern. */
   excludedAny: boolean;
+  /** Distinct file paths dropped because they matched a user exclude pattern. */
+  excludedPaths: string[];
 }
 
 /**
@@ -176,6 +182,7 @@ interface FilteredPatch {
  */
 function filterPatch(patch: string, excludes: readonly string[]): FilteredPatch {
   let excludedAny = false;
+  const excludedPaths = new Set<string>();
   const filtered = patch
     .split(/(?=^diff --git )/mu)
     .filter((chunk) => {
@@ -190,12 +197,13 @@ function filterPatch(patch: string, excludes: readonly string[]): FilteredPatch 
       if (files.some(isRuntimeMatch)) return false;
       if (files.some(isUserExcludeMatch)) {
         excludedAny = true;
+        for (const file of files) excludedPaths.add(file.path);
         return false;
       }
       return true;
     })
     .join('');
-  return { patch: filtered, excludedAny };
+  return { patch: filtered, excludedAny, excludedPaths: [...excludedPaths] };
 }
 
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
@@ -423,7 +431,7 @@ export function capturePr(options: CapturePrOptions): CapturedReviewSource {
       ]),
     );
     const rawDiff = runChecked(runner, options.root, 'gh', ['pr', 'diff', before.url]);
-    const { patch, excludedAny } = filterPatch(rawDiff, excludes);
+    const { patch, excludedAny, excludedPaths } = filterPatch(rawDiff, excludes);
     const after = parsePullRequestView(
       runChecked(runner, options.root, 'gh', [
         'pr',
@@ -450,6 +458,7 @@ export function capturePr(options: CapturePrOptions): CapturedReviewSource {
       patch,
       eligiblePaths,
       fingerprint: sourceFingerprint(source, patch),
+      ...(excludes.length > 0 ? { excludedFileCount: excludedPaths.length } : {}),
     };
   }
   throw new Error(
@@ -466,7 +475,7 @@ export function captureStaged(options: CaptureFileOptions): CapturedReviewSource
     '--no-ext-diff',
     '--binary',
   ]);
-  const { patch, excludedAny } = filterPatch(rawDiff, excludes);
+  const { patch, excludedAny, excludedPaths } = filterPatch(rawDiff, excludes);
   const source: ReviewSource = {
     kind: 'staged',
     headSha: '',
@@ -474,7 +483,13 @@ export function captureStaged(options: CaptureFileOptions): CapturedReviewSource
   };
   const excludedEverything = excludedAny && parseUnifiedDiff(patch).length === 0;
   const eligiblePaths = assertCapturedPatch(patch, 'staged', excludedEverything);
-  return { source, patch, eligiblePaths, fingerprint: sourceFingerprint(source, patch) };
+  return {
+    source,
+    patch,
+    eligiblePaths,
+    fingerprint: sourceFingerprint(source, patch),
+    ...(excludes.length > 0 ? { excludedFileCount: excludedPaths.length } : {}),
+  };
 }
 
 export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSource {
@@ -494,10 +509,11 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
     ':(exclude).synergy/preview.log',
     ...excludePathspecs(excludes),
   ]);
-  const { patch: trackedPatch, excludedAny: trackedExcludedAny } = filterPatch(
-    trackedRaw,
-    excludes,
-  );
+  const {
+    patch: trackedPatch,
+    excludedAny: trackedExcludedAny,
+    excludedPaths: trackedExcludedPaths,
+  } = filterPatch(trackedRaw, excludes);
   const allUntrackedPaths = parseNulPaths(
     runCheckedBuffer(runner, options.root, 'git', [
       'ls-files',
@@ -537,6 +553,12 @@ export function captureUnstaged(options: CaptureFileOptions): CapturedReviewSour
     eligiblePaths,
     fingerprintContent,
     fingerprint: sourceFingerprint(source, fingerprintContent),
+    ...(excludes.length > 0
+      ? {
+          excludedFileCount:
+            trackedExcludedPaths.length + (allUntrackedPaths.length - untrackedPaths.length),
+        }
+      : {}),
   };
 }
 
@@ -584,6 +606,7 @@ export function captureScope(options: CaptureScopeOptions): CapturedReviewSource
     eligiblePaths: paths,
     fingerprintContent: captured.fingerprintContent,
     fingerprint: sourceFingerprint(source, captured.fingerprintContent),
+    ...(excludes.length > 0 ? { excludedFileCount: rawPaths.length - paths.length } : {}),
   };
 }
 

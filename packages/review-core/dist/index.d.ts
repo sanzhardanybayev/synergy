@@ -63,6 +63,10 @@ interface CapturedReviewSource {
     files?: SourceFile[];
     title?: string;
     fingerprintContent?: string;
+    /** Number of distinct files this capture dropped because they matched an exclude pattern.
+     * Present only when the source carries excludes; callers use it to report what was excluded
+     * without recomputing anything. */
+    excludedFileCount?: number;
 }
 interface ReviewSourceFreshness {
     sourceChanged: boolean;
