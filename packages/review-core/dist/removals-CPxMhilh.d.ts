@@ -4,16 +4,21 @@ type ReviewSource = {
     url: string;
     baseSha: string;
     headSha: string;
+    /** Normalized, sorted, repository-relative path patterns kept out of the capture. */
+    excludes?: string[];
 } | {
     kind: 'staged';
     headSha: string;
+    excludes?: string[];
 } | {
     kind: 'unstaged';
     headSha: string;
+    excludes?: string[];
 } | {
     kind: 'scope';
     patterns: string[];
     headSha: string;
+    excludes?: string[];
 };
 interface ReviewRef {
     workspaceId: string;

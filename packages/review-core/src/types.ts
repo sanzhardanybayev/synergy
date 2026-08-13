@@ -1,8 +1,16 @@
 export type ReviewSource =
-  | { kind: 'pr'; number: number; url: string; baseSha: string; headSha: string }
-  | { kind: 'staged'; headSha: string }
-  | { kind: 'unstaged'; headSha: string }
-  | { kind: 'scope'; patterns: string[]; headSha: string };
+  | {
+      kind: 'pr';
+      number: number;
+      url: string;
+      baseSha: string;
+      headSha: string;
+      /** Normalized, sorted, repository-relative path patterns kept out of the capture. */
+      excludes?: string[];
+    }
+  | { kind: 'staged'; headSha: string; excludes?: string[] }
+  | { kind: 'unstaged'; headSha: string; excludes?: string[] }
+  | { kind: 'scope'; patterns: string[]; headSha: string; excludes?: string[] };
 
 export interface ReviewRef {
   workspaceId: string;

@@ -1,3 +1,4 @@
+import type { ReviewSource } from '@synergy/review-core';
 /**
  * Hand-written type shadow for `panel.js`.
  *
@@ -39,5 +40,7 @@ export function renderRemovalSummary(context?: {
   onJumpToReviewItem(reviewItemId: string): void;
   onOpenFile(path: string, line: number): void;
 }): HTMLElement | null;
+
+export function excludeSummary(source: ReviewSource): string | null;
 
 export type { RemovalStrip, ResolvedRemovalTarget };

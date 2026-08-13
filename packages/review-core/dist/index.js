@@ -16,14 +16,19 @@ import {
   compareReviewSourceFreshness,
   createFileReviewItem,
   createHunkReviewItem,
+  excludePathspecs,
   findDuplicateReviewItemId,
   hashText,
+  isPathExcluded,
+  normalizeExcludePattern,
+  normalizeExcludes,
+  normalizeExcludesOrUndefined,
   parseUnifiedDiff,
   recaptureReviewSource,
   repositoryName,
   resolveRepositoryRoot,
   systemCommandRunner
-} from "./chunk-KWMKYFSK.js";
+} from "./chunk-MRNQSRL4.js";
 
 // src/atomic.ts
 import { renameSync, writeFileSync } from "node:fs";
@@ -590,6 +595,7 @@ var rangeSchema = {
   additionalProperties: false,
   properties: { start: { type: "integer", minimum: 1 }, end: { type: "integer", minimum: 1 } }
 };
+var excludesSchema = { type: "array", items: nonEmptyString };
 var sourceSchema = {
   oneOf: [
     {
@@ -601,20 +607,29 @@ var sourceSchema = {
         number: { type: "integer", minimum: 1 },
         url: nonEmptyString,
         baseSha: nonEmptyString,
-        headSha: nonEmptyString
+        headSha: nonEmptyString,
+        excludes: excludesSchema
       }
     },
     {
       type: "object",
       required: ["kind", "headSha"],
       additionalProperties: false,
-      properties: { kind: { const: "staged" }, headSha: nonEmptyString }
+      properties: {
+        kind: { const: "staged" },
+        headSha: nonEmptyString,
+        excludes: excludesSchema
+      }
     },
     {
       type: "object",
       required: ["kind", "headSha"],
       additionalProperties: false,
-      properties: { kind: { const: "unstaged" }, headSha: nonEmptyString }
+      properties: {
+        kind: { const: "unstaged" },
+        headSha: nonEmptyString,
+        excludes: excludesSchema
+      }
     },
     {
       type: "object",
@@ -623,7 +638,8 @@ var sourceSchema = {
       properties: {
         kind: { const: "scope" },
         patterns: { type: "array", minItems: 1, items: nonEmptyString },
-        headSha: nonEmptyString
+        headSha: nonEmptyString,
+        excludes: excludesSchema
       }
     }
   ]
@@ -3098,12 +3114,17 @@ export {
   deriveReviewReadiness,
   deriveSnapshotRemovalRuns,
   enqueueQuestion,
+  excludePathspecs,
   failQuestion,
   formatReviewRef,
   hashText,
   insightsFile,
+  isPathExcluded,
   isReviewCoreError,
   listQuestions,
+  normalizeExcludePattern,
+  normalizeExcludes,
+  normalizeExcludesOrUndefined,
   parseReviewRef,
   parseUnifiedDiff,
   progressFile,

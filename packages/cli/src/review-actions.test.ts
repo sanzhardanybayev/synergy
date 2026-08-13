@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -56,6 +57,17 @@ function createRunner(): CommandRunner {
 
 function createRequest(root: string): CreateReviewRequest {
   return { root, source: { kind: 'staged' }, runner: createRunner() };
+}
+
+function git(root: string, ...args: string[]): void {
+  execFileSync('git', args, { cwd: root });
+}
+
+function createRealRepository(root: string): void {
+  mkdirSync(root, { recursive: true });
+  git(root, 'init', '--quiet');
+  git(root, 'config', 'user.email', 'synergy@example.test');
+  git(root, 'config', 'user.name', 'Synergy Test');
 }
 
 /** Blanket "dead-code" rationale for every derived removal run, sufficient to satisfy the
@@ -2857,5 +2869,77 @@ describe('review lifecycle actions', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  describe('review path exclusions', () => {
+    it('omits excludes and excludedFileCount from results when none are configured', () => {
+      const root = join(tmpdir(), `synergy-review-excludes-absent-${Date.now()}`);
+      mkdirSync(root, { recursive: true });
+      try {
+        const created = createOrResumeReview(createRequest(root));
+        expect(created.excludes).toBeUndefined();
+        expect(created.excludedFileCount).toBeUndefined();
+        const status = getReviewStatus({
+          root,
+          reference: created.reference,
+          runner: createRunner(),
+        });
+        expect(status.excludes).toBeUndefined();
+        expect(
+          printReviewStatus({ root, reference: created.reference, runner: createRunner() }),
+        ).not.toMatch(/excludes:/);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    // Previously fixture-based with a single excluded file, which passed regardless of whether
+    // `excludedFileCount` was actually counted correctly - staged capture happens to skip git
+    // pathspecs entirely (see path-excludes.ts / CLAUDE.md), so a fixture with exactly one
+    // excluded chunk cannot distinguish "counts every excluded file" from "always reports 1"
+    // (I5). A real repository with TWO excluded files under two different exclude patterns
+    // actually exercises the count.
+    it('echoes active exclusions in create and status results and reports what was dropped', () => {
+      const root = join(tmpdir(), `synergy-review-excludes-present-${Date.now()}`);
+      try {
+        createRealRepository(root);
+        mkdirSync(join(root, '.vouch'), { recursive: true });
+        mkdirSync(join(root, 'dist'), { recursive: true });
+        writeFileSync(join(root, '.vouch', 'report.md'), 'v1\n');
+        writeFileSync(join(root, 'dist', 'bundle.js'), 'v1\n');
+        writeFileSync(join(root, 'src.ts'), 'export const value = 1;\n');
+        git(root, 'add', '.');
+        git(root, 'commit', '--quiet', '-m', 'base');
+
+        writeFileSync(join(root, '.vouch', 'report.md'), 'v2\n');
+        writeFileSync(join(root, 'dist', 'bundle.js'), 'v2\n');
+        writeFileSync(join(root, 'src.ts'), 'export const value = 2;\n');
+        git(root, 'add', '.');
+
+        const created = createOrResumeReview({
+          root,
+          source: { kind: 'staged', excludes: ['.vouch', 'dist'] },
+        });
+        expect(created.excludes).toEqual(['.vouch', 'dist']);
+        expect(created.excludedFileCount).toBe(2);
+
+        const store = createReviewStore(root);
+        const bundle = store.readBundle(
+          created.reference.workspaceId,
+          created.reference.revisionId,
+        );
+        if (bundle.snapshot.kind !== 'diff') throw new Error('expected a diff snapshot');
+        expect(bundle.snapshot.files.map((file) => file.path)).toEqual(['src.ts']);
+        expect(bundle.snapshot.source.excludes).toEqual(['.vouch', 'dist']);
+
+        const status = getReviewStatus({ root, reference: created.reference });
+        expect(status.excludes).toEqual(['.vouch', 'dist']);
+        expect(printReviewStatus({ root, reference: created.reference })).toContain(
+          'excludes: .vouch, dist',
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 });

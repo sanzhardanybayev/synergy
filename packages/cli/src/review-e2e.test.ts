@@ -472,4 +472,79 @@ describe('integrated review workflow', () => {
       answers: [{ id: answer.id, listenerId: 'agent-second' }],
     });
   });
+
+  it('carries stored excludes through a refresh so excluded files never flood back in', () => {
+    const root = createRepository();
+    mkdirSync(join(root, '.vouch'), { recursive: true });
+    writeFileSync(join(root, '.vouch', 'artifact.json'), '{"a":1}\n', 'utf8');
+    writeFileSync(join(root, 'src.ts'), 'export const value = 1;\n', 'utf8');
+    commitAll(root, 'base');
+
+    writeFileSync(join(root, '.vouch', 'artifact.json'), '{"a":2}\n', 'utf8');
+    writeFileSync(join(root, 'src.ts'), 'export const value = 2;\n', 'utf8');
+    git(root, 'add', '.');
+
+    const created = createOrResumeReview({
+      root,
+      source: { kind: 'staged', excludes: ['.vouch'] },
+    });
+    const store = createReviewStore(root);
+    const firstBundle = store.readBundle(
+      created.reference.workspaceId,
+      created.reference.revisionId,
+    );
+    if (firstBundle.snapshot.kind !== 'diff') throw new Error('expected a diff snapshot');
+    expect(firstBundle.snapshot.files.map((file) => file.path)).toEqual(['src.ts']);
+    expect(firstBundle.snapshot.source.excludes).toEqual(['.vouch']);
+
+    // A further staged change to both the tracked file and the excluded directory: without
+    // excludes surviving the refresh, `.vouch/artifact.json` would flood back into the review.
+    writeFileSync(join(root, 'src.ts'), 'export const value = 3;\n', 'utf8');
+    writeFileSync(join(root, '.vouch', 'artifact.json'), '{"a":3}\n', 'utf8');
+    git(root, 'add', 'src.ts', '.vouch/artifact.json');
+
+    const refreshed = refreshReview({ root, workspaceId: created.reference.workspaceId });
+    expect(refreshed.reference.workspaceId).toBe(created.reference.workspaceId);
+    expect(refreshed.reference.revisionId).not.toBe(created.reference.revisionId);
+    expect(refreshed.excludes).toEqual(['.vouch']);
+
+    const refreshedBundle = store.readBundle(
+      refreshed.reference.workspaceId,
+      refreshed.reference.revisionId,
+    );
+    if (refreshedBundle.snapshot.kind !== 'diff') throw new Error('expected a diff snapshot');
+    expect(refreshedBundle.snapshot.files.map((file) => file.path)).toEqual(['src.ts']);
+    expect(refreshedBundle.snapshot.source.excludes).toEqual(['.vouch']);
+  });
+
+  it('resumes the same identity for reordered excludes and captures a fresh one for a different set', () => {
+    const root = createRepository();
+    mkdirSync(join(root, '.vouch'), { recursive: true });
+    mkdirSync(join(root, '.lavish'), { recursive: true });
+    writeFileSync(join(root, '.vouch', 'a.json'), '{}\n', 'utf8');
+    writeFileSync(join(root, '.lavish', 'b.json'), '{}\n', 'utf8');
+    writeFileSync(join(root, 'src.ts'), 'export const value = 1;\n', 'utf8');
+    commitAll(root, 'base');
+    writeFileSync(join(root, 'src.ts'), 'export const value = 2;\n', 'utf8');
+    git(root, 'add', 'src.ts');
+
+    const first = createOrResumeReview({
+      root,
+      source: { kind: 'staged', excludes: ['.vouch', '.lavish'] },
+    });
+    const reordered = createOrResumeReview({
+      root,
+      source: { kind: 'staged', excludes: ['.lavish', '.vouch'] },
+    });
+    expect(reordered.resumed).toBe(true);
+    expect(reordered.reference.workspaceId).toBe(first.reference.workspaceId);
+    expect(reordered.reference.revisionId).toBe(first.reference.revisionId);
+
+    const differentSet = createOrResumeReview({
+      root,
+      source: { kind: 'staged', excludes: ['.vouch'] },
+    });
+    expect(differentSet.resumed).toBe(false);
+    expect(differentSet.reference.revisionId).not.toBe(first.reference.revisionId);
+  });
 });

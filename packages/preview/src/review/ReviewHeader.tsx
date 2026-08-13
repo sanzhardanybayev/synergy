@@ -75,6 +75,14 @@ export function ReviewHeader({ bundle, readiness, captureFailed, walkthrough }: 
             {completed} of {total}
           </dd>
         </div>
+        {bundle.snapshot.source.excludes && bundle.snapshot.source.excludes.length > 0 ? (
+          <div className="review-header__fact--excludes">
+            <dt>Excluded</dt>
+            <dd title={bundle.snapshot.source.excludes.join(', ')}>
+              {bundle.snapshot.source.excludes.join(', ')}
+            </dd>
+          </div>
+        ) : null}
       </dl>
       {walkthrough?.enabled ? (
         <div className="review-header__reveal">

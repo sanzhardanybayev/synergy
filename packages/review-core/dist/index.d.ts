@@ -1,5 +1,5 @@
-import { X as ReviewSource, $ as SourceFile, o as ReviewBundle, W as ReviewSnapshot, H as ReviewProgress, r as ReviewFileInsight, f as RemovalRationale, v as ReviewItem, w as ReviewItemContext, G as ReviewLineSelection, e as DiffReviewSnapshot, b as DiffHunk, D as DiffFile, Z as ScopeReviewSnapshot, T as ReviewRef, m as ReviewAnswer, u as ReviewInsights, J as ReviewQuestion, K as ReviewQuestionEnvelope, L as ReviewQuestionGeneration, Y as ReviewWorkspace, U as ReviewRepository, I as ReviewProgressUpdate, B as ReviewItemProgressPatch, a1 as WalkthroughPosition, A as ActiveReviewPointer, M as ReviewQuestionGenerationState, C as ClaimResult, Q as QuestionQueue, N as ReviewQuestionInput } from './removals-Dpv1u444.js';
-export { a as DiffFileStatus, c as DiffLine, d as DiffLineKind, R as RELOCATING_REMOVAL_REASONS, g as RemovalReason, h as RemovalRun, i as RemovalRunRef, j as RemovalStrip, k as RemovalTargetExcerpt, l as ResolvedRemovalTarget, n as ReviewAnswerReference, p as ReviewClaim, q as ReviewDiffLineRow, s as ReviewGroup, t as ReviewInsightConfidence, x as ReviewItemInsight, y as ReviewItemKind, z as ReviewItemProgress, E as ReviewItemStatus, F as ReviewLineRow, O as ReviewQuestionStatus, P as ReviewRange, S as ReviewReadiness, V as ReviewScopeLineRow, _ as SnapshotRemovalRun, a0 as SourceLine, a2 as buildRemovalStrips, a3 as deriveRemovalRuns, a4 as deriveReviewReadiness, a5 as deriveSnapshotRemovalRuns, a6 as resolveRemovalTarget } from './removals-Dpv1u444.js';
+import { X as ReviewSource, $ as SourceFile, o as ReviewBundle, W as ReviewSnapshot, H as ReviewProgress, r as ReviewFileInsight, f as RemovalRationale, v as ReviewItem, w as ReviewItemContext, G as ReviewLineSelection, e as DiffReviewSnapshot, b as DiffHunk, D as DiffFile, Z as ScopeReviewSnapshot, T as ReviewRef, m as ReviewAnswer, u as ReviewInsights, J as ReviewQuestion, K as ReviewQuestionEnvelope, L as ReviewQuestionGeneration, Y as ReviewWorkspace, U as ReviewRepository, I as ReviewProgressUpdate, B as ReviewItemProgressPatch, a1 as WalkthroughPosition, A as ActiveReviewPointer, M as ReviewQuestionGenerationState, C as ClaimResult, Q as QuestionQueue, N as ReviewQuestionInput } from './removals-CPxMhilh.js';
+export { a as DiffFileStatus, c as DiffLine, d as DiffLineKind, R as RELOCATING_REMOVAL_REASONS, g as RemovalReason, h as RemovalRun, i as RemovalRunRef, j as RemovalStrip, k as RemovalTargetExcerpt, l as ResolvedRemovalTarget, n as ReviewAnswerReference, p as ReviewClaim, q as ReviewDiffLineRow, s as ReviewGroup, t as ReviewInsightConfidence, x as ReviewItemInsight, y as ReviewItemKind, z as ReviewItemProgress, E as ReviewItemStatus, F as ReviewLineRow, O as ReviewQuestionStatus, P as ReviewRange, S as ReviewReadiness, V as ReviewScopeLineRow, _ as SnapshotRemovalRun, a0 as SourceLine, a2 as buildRemovalStrips, a3 as deriveRemovalRuns, a4 as deriveReviewReadiness, a5 as deriveSnapshotRemovalRuns, a6 as resolveRemovalTarget } from './removals-CPxMhilh.js';
 
 declare function atomicWriteJson(path: string, value: unknown): void;
 
@@ -28,6 +28,8 @@ interface CaptureFileOptions {
     root: string;
     runner?: CommandRunner;
     readFile?: (path: string) => string;
+    /** Repository-relative path patterns to keep out of the capture entirely. */
+    excludes?: string[];
 }
 interface CapturePrOptions extends CaptureFileOptions {
     selector: string;
@@ -38,13 +40,17 @@ interface CaptureScopeOptions extends CaptureFileOptions {
 type ReviewCaptureSourceRequest = {
     kind: 'pr';
     selector: string;
+    excludes?: string[];
 } | {
     kind: 'staged';
+    excludes?: string[];
 } | {
     kind: 'unstaged';
+    excludes?: string[];
 } | {
     kind: 'scope';
     patterns: string[];
+    excludes?: string[];
 };
 interface CaptureReviewSourceRequest extends CaptureFileOptions {
     source: ReviewCaptureSourceRequest;
@@ -57,6 +63,10 @@ interface CapturedReviewSource {
     files?: SourceFile[];
     title?: string;
     fingerprintContent?: string;
+    /** Number of distinct files this capture dropped because they matched an exclude pattern.
+     * Present only when the source carries excludes; callers use it to report what was excluded
+     * without recomputing anything. */
+    excludedFileCount?: number;
 }
 interface ReviewSourceFreshness {
     sourceChanged: boolean;
@@ -120,6 +130,51 @@ declare function reconciliationKey(item: ReviewItem): string;
  * Derives mutable progress for a new immutable snapshot without changing the prior revision.
  */
 declare function reconcileReview(previous: ReviewBundle, currentSnapshot: ReviewSnapshot, now: string): ReviewReconciliation;
+
+/**
+ * Repository-relative path exclusion matching shared by every review capture path.
+ *
+ * Matching semantics:
+ * - Patterns are repository-relative (never absolute, never containing `..` segments).
+ * - A pattern naming a directory (`.vouch` or `.vouch/`) excludes that path AND everything
+ *   beneath it. A sibling that merely shares a text prefix (`.vouchx/file.ts`) is NOT excluded
+ *   by a `.vouch` pattern - matching is always on full path segments.
+ * - `*` matches any run of characters within a single path segment (never crosses `/`).
+ * - `**` matches any run of characters, including `/` - it crosses directory boundaries.
+ * - Callers never supply git pathspec magic (a leading `:`) - pathspecs are constructed
+ *   internally via `excludePathspecs`.
+ *
+ * This module is the ONLY authority on glob semantics. `excludePathspecs` never emits a git
+ * pathspec that could exclude more than this matcher would - git's own wildcard fallback
+ * (`fnmatch(3)` without `FNM_PATHNAME`, which lets a bare `*` cross `/`) does not agree with the
+ * single-segment `*` semantics documented above, so any pattern containing `*` is left for this
+ * module to filter in JS; only wildcard-free patterns get a (literal, therefore safe) pathspec.
+ */
+/** Trims, converts backslash separators to forward slashes, strips a leading `./`, and collapses
+ * trailing slashes so directory forms collapse. Without the backslash conversion, a pattern like
+ * `.vouch\sub` (typed on Windows, or by an agent unaware the matcher is POSIX-only) would pass
+ * `assertSafeExcludePattern` unchanged, then compile to a regex matching a literal backslash
+ * character - which no repository-relative path ever contains, so the pattern silently excludes
+ * nothing. Normalizing the separator first means it matches the same path a `/`-separated
+ * pattern would. */
+declare function normalizeExcludePattern(raw: string): string;
+/** Normalizes, dedupes, and sorts a set of exclude patterns so equivalent input is identical. */
+declare function normalizeExcludes(patterns: readonly string[]): string[];
+/** Normalizes excludes, returning `undefined` for an empty/absent set (preserves optionality). */
+declare function normalizeExcludesOrUndefined(patterns: readonly string[] | undefined): string[] | undefined;
+/** True when `path` (repository-relative) matches any normalized exclude pattern. */
+declare function isPathExcluded(path: string, excludes: readonly string[]): boolean;
+/**
+ * Builds git pathspec arguments that pre-filter excluded files at the git level, as a
+ * performance optimization so excluded files are never read off disk. Only wildcard-free
+ * patterns are emitted, using `:(literal)` magic so git never re-interprets `*`/`?`/`[]` with
+ * its own (`*` crosses `/`) wildcard semantics - git's plain literal pathspec matching already
+ * matches a path exactly or as a leading directory component, which agrees with this module's
+ * directory-prefix rule. A pattern containing `*` is omitted here entirely and left for
+ * `isPathExcluded`/patch filtering to enforce, so this function never excludes more than the JS
+ * matcher would; that is always the correctness backstop.
+ */
+declare function excludePathspecs(excludes: readonly string[]): string[];
 
 /** Resolves one item's complete canonical immutable line context. */
 declare function resolveReviewItemContext(snapshot: ReviewSnapshot, reviewItemId: string): ReviewItemContext;
@@ -227,6 +282,13 @@ declare const reviewWorkspaceSchema: {
                         readonly type: "string";
                         readonly minLength: 1;
                     };
+                    readonly excludes: {
+                        readonly type: "array";
+                        readonly items: {
+                            readonly type: "string";
+                            readonly minLength: 1;
+                        };
+                    };
                 };
             }, {
                 readonly type: "object";
@@ -240,6 +302,13 @@ declare const reviewWorkspaceSchema: {
                         readonly type: "string";
                         readonly minLength: 1;
                     };
+                    readonly excludes: {
+                        readonly type: "array";
+                        readonly items: {
+                            readonly type: "string";
+                            readonly minLength: 1;
+                        };
+                    };
                 };
             }, {
                 readonly type: "object";
@@ -252,6 +321,13 @@ declare const reviewWorkspaceSchema: {
                     readonly headSha: {
                         readonly type: "string";
                         readonly minLength: 1;
+                    };
+                    readonly excludes: {
+                        readonly type: "array";
+                        readonly items: {
+                            readonly type: "string";
+                            readonly minLength: 1;
+                        };
                     };
                 };
             }, {
@@ -273,6 +349,13 @@ declare const reviewWorkspaceSchema: {
                     readonly headSha: {
                         readonly type: "string";
                         readonly minLength: 1;
+                    };
+                    readonly excludes: {
+                        readonly type: "array";
+                        readonly items: {
+                            readonly type: "string";
+                            readonly minLength: 1;
+                        };
                     };
                 };
             }];
@@ -461,6 +544,13 @@ declare const reviewSnapshotSchema: {
                             readonly type: "string";
                             readonly minLength: 1;
                         };
+                        readonly excludes: {
+                            readonly type: "array";
+                            readonly items: {
+                                readonly type: "string";
+                                readonly minLength: 1;
+                            };
+                        };
                     };
                 }, {
                     readonly type: "object";
@@ -474,6 +564,13 @@ declare const reviewSnapshotSchema: {
                             readonly type: "string";
                             readonly minLength: 1;
                         };
+                        readonly excludes: {
+                            readonly type: "array";
+                            readonly items: {
+                                readonly type: "string";
+                                readonly minLength: 1;
+                            };
+                        };
                     };
                 }, {
                     readonly type: "object";
@@ -486,6 +583,13 @@ declare const reviewSnapshotSchema: {
                         readonly headSha: {
                             readonly type: "string";
                             readonly minLength: 1;
+                        };
+                        readonly excludes: {
+                            readonly type: "array";
+                            readonly items: {
+                                readonly type: "string";
+                                readonly minLength: 1;
+                            };
                         };
                     };
                 }, {
@@ -507,6 +611,13 @@ declare const reviewSnapshotSchema: {
                         readonly headSha: {
                             readonly type: "string";
                             readonly minLength: 1;
+                        };
+                        readonly excludes: {
+                            readonly type: "array";
+                            readonly items: {
+                                readonly type: "string";
+                                readonly minLength: 1;
+                            };
                         };
                     };
                 }];
@@ -646,6 +757,13 @@ declare const reviewSnapshotSchema: {
                             readonly type: "string";
                             readonly minLength: 1;
                         };
+                        readonly excludes: {
+                            readonly type: "array";
+                            readonly items: {
+                                readonly type: "string";
+                                readonly minLength: 1;
+                            };
+                        };
                     };
                 }, {
                     readonly type: "object";
@@ -659,6 +777,13 @@ declare const reviewSnapshotSchema: {
                             readonly type: "string";
                             readonly minLength: 1;
                         };
+                        readonly excludes: {
+                            readonly type: "array";
+                            readonly items: {
+                                readonly type: "string";
+                                readonly minLength: 1;
+                            };
+                        };
                     };
                 }, {
                     readonly type: "object";
@@ -671,6 +796,13 @@ declare const reviewSnapshotSchema: {
                         readonly headSha: {
                             readonly type: "string";
                             readonly minLength: 1;
+                        };
+                        readonly excludes: {
+                            readonly type: "array";
+                            readonly items: {
+                                readonly type: "string";
+                                readonly minLength: 1;
+                            };
                         };
                     };
                 }, {
@@ -692,6 +824,13 @@ declare const reviewSnapshotSchema: {
                         readonly headSha: {
                             readonly type: "string";
                             readonly minLength: 1;
+                        };
+                        readonly excludes: {
+                            readonly type: "array";
+                            readonly items: {
+                                readonly type: "string";
+                                readonly minLength: 1;
+                            };
                         };
                     };
                 }];
@@ -1614,4 +1753,4 @@ declare function removeReviewListener(projectRoot: string, reference: ReviewRef,
 declare function createQuestionQueue(projectRoot: string, reference: ReviewRef, options?: QuestionPersistenceOptions): QuestionQueue;
 declare function reviewQuestionsDirectory(projectRoot: string, reference: ReviewRef): string;
 
-export { ActiveReviewPointer, type BuildDiffSnapshotInput, type BuildScopeSnapshotInput, type CaptureFileOptions, type CapturePrOptions, type CaptureReviewSourceRequest, type CaptureScopeOptions, type CapturedReviewSource, ClaimResult, type CommandResult, type CommandRunner, DiffFile, DiffHunk, DiffReviewSnapshot, type ProposedCodeSection, type QuestionPersistenceOptions, type QuestionPublication, QuestionQueue, RemovalRationale, ReviewAnswer, ReviewBundle, type ReviewCaptureSourceRequest, ReviewCoreError, type ReviewCoreErrorCode, ReviewFileInsight, ReviewFreshnessAsyncError, type ReviewFreshnessAsyncErrorCode, type ReviewFreshnessWorker, type ReviewFreshnessWorkerData, type ReviewFreshnessWorkerFactory, type ReviewFreshnessWorkerInput, ReviewInsights, ReviewItem, ReviewItemContext, ReviewItemProgressPatch, ReviewLineSelection, ReviewProgress, ReviewProgressUpdate, ReviewQuestion, ReviewQuestionEnvelope, ReviewQuestionGeneration, ReviewQuestionGenerationState, ReviewQuestionInput, ReviewRef, ReviewRepository, ReviewSnapshot, ReviewSource, type ReviewSourceFreshness, type ReviewSourceFreshnessAsyncOptions, type ReviewStore, type ReviewStoreOptions, ReviewWorkspace, SAFE_SEGMENT, ScopeReviewSnapshot, SourceFile, WalkthroughPosition, answersDir, applyCodeSections, assertReviewAnswer, assertReviewInsights, assertReviewProgress, assertReviewQuestion, assertReviewQuestionEnvelope, assertReviewQuestionGeneration, assertReviewSnapshot, assertReviewWorkspace, assertSafeReviewSegment, atomicWriteJson, buildDiffSnapshot, buildScopeSnapshot, capturePr, captureReviewSource, captureScope, captureStaged, captureUnstaged, claimQuestion, claimQuestions, compareReviewSourceFreshness, compareReviewSourceFreshnessAsync, createHunkReviewItem, createQuestionQueue, createReviewStore, enqueueQuestion, failQuestion, formatReviewRef, hashText, insightsFile, isReviewCoreError, listQuestions, parseReviewRef, parseUnifiedDiff, progressFile, questionsDir, recaptureReviewSource, reconcileExpiredQuestions, reconcileReview, reconciliationKey, releaseClaim, removalRunHash, removeReviewListener, renewClaim, repositoryName, resolveRepositoryRoot, resolveReviewItemContext, resolveReviewLineSelection, reviewAnswerSchema, reviewInsightsSchema, reviewProgressSchema, reviewQuestionEnvelopeSchema, reviewQuestionGenerationSchema, reviewQuestionSchema, reviewQuestionsDirectory, reviewRevisionDir, reviewSnapshotSchema, reviewWorkspaceDir, reviewWorkspaceSchema, reviewsDir, snapshotFile, systemCommandRunner, touchReviewListener, workspaceFile, writeAnswer };
+export { ActiveReviewPointer, type BuildDiffSnapshotInput, type BuildScopeSnapshotInput, type CaptureFileOptions, type CapturePrOptions, type CaptureReviewSourceRequest, type CaptureScopeOptions, type CapturedReviewSource, ClaimResult, type CommandResult, type CommandRunner, DiffFile, DiffHunk, DiffReviewSnapshot, type ProposedCodeSection, type QuestionPersistenceOptions, type QuestionPublication, QuestionQueue, RemovalRationale, ReviewAnswer, ReviewBundle, type ReviewCaptureSourceRequest, ReviewCoreError, type ReviewCoreErrorCode, ReviewFileInsight, ReviewFreshnessAsyncError, type ReviewFreshnessAsyncErrorCode, type ReviewFreshnessWorker, type ReviewFreshnessWorkerData, type ReviewFreshnessWorkerFactory, type ReviewFreshnessWorkerInput, ReviewInsights, ReviewItem, ReviewItemContext, ReviewItemProgressPatch, ReviewLineSelection, ReviewProgress, ReviewProgressUpdate, ReviewQuestion, ReviewQuestionEnvelope, ReviewQuestionGeneration, ReviewQuestionGenerationState, ReviewQuestionInput, ReviewRef, ReviewRepository, ReviewSnapshot, ReviewSource, type ReviewSourceFreshness, type ReviewSourceFreshnessAsyncOptions, type ReviewStore, type ReviewStoreOptions, ReviewWorkspace, SAFE_SEGMENT, ScopeReviewSnapshot, SourceFile, WalkthroughPosition, answersDir, applyCodeSections, assertReviewAnswer, assertReviewInsights, assertReviewProgress, assertReviewQuestion, assertReviewQuestionEnvelope, assertReviewQuestionGeneration, assertReviewSnapshot, assertReviewWorkspace, assertSafeReviewSegment, atomicWriteJson, buildDiffSnapshot, buildScopeSnapshot, capturePr, captureReviewSource, captureScope, captureStaged, captureUnstaged, claimQuestion, claimQuestions, compareReviewSourceFreshness, compareReviewSourceFreshnessAsync, createHunkReviewItem, createQuestionQueue, createReviewStore, enqueueQuestion, excludePathspecs, failQuestion, formatReviewRef, hashText, insightsFile, isPathExcluded, isReviewCoreError, listQuestions, normalizeExcludePattern, normalizeExcludes, normalizeExcludesOrUndefined, parseReviewRef, parseUnifiedDiff, progressFile, questionsDir, recaptureReviewSource, reconcileExpiredQuestions, reconcileReview, reconciliationKey, releaseClaim, removalRunHash, removeReviewListener, renewClaim, repositoryName, resolveRepositoryRoot, resolveReviewItemContext, resolveReviewLineSelection, reviewAnswerSchema, reviewInsightsSchema, reviewProgressSchema, reviewQuestionEnvelopeSchema, reviewQuestionGenerationSchema, reviewQuestionSchema, reviewQuestionsDirectory, reviewRevisionDir, reviewSnapshotSchema, reviewWorkspaceDir, reviewWorkspaceSchema, reviewsDir, snapshotFile, systemCommandRunner, touchReviewListener, workspaceFile, writeAnswer };

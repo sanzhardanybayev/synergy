@@ -48,6 +48,13 @@ explanation, and the question rail sends durable questions to the listening agen
   response, and listens again.
 - **Readiness you can trust.** Completion remains blocked by unreviewed or stale items,
   unanswered questions, or changed source.
+- **Exclude noise at capture time.** `synergy review create --pr 370 --exclude .vouch --exclude .lavish`
+  (repeatable, works with `--pr`, `--staged`, `--unstaged`, `--scope`) keeps matched paths out of
+  the review entirely - absent from the file list, the item count, the coverage gate, and the
+  walkthrough, not merely hidden. Patterns are repository-relative; a directory pattern excludes
+  everything beneath it; `*` matches within one path segment and `**` crosses segments; `?` and
+  `[...]` are literal characters. `synergy review refresh` reuses the excludes stored on the
+  workspace - you don't (and can't) re-pass `--exclude` there.
 
 Local artifacts live under `.synergy/reviews/<workspace>/revisions/<revision>/`; the active
 browser pointer is `.synergy/active-review.json`. Both are gitignored by `synergy init`.
@@ -160,7 +167,7 @@ For terminal users — available at `node "$CLAUDE_PLUGIN_ROOT/packages/cli/dist
 | `synergy handoff <session>` | `--root`, `--next <id>`, `--body <text>`, `--body-file <path>` | Write the KT handoff baton (`.state/handoff.md`) + resume pointer |
 | `synergy status <session>` | `--root` | Print the execution-state rollup (phases done / total) |
 | `synergy feedback wait <session>` | `--root`, `--for <dur>` (e.g. `10m`; default: indefinite) | Block until review comments arrive, the user clicks **Done reviewing**, or the bounded wait expires |
-| `synergy review create` | exactly one of `--pr`, `--staged`, `--unstaged`, `--scope`; optional `--json` | Capture or resume an immutable review revision |
+| `synergy review create` | exactly one of `--pr`, `--staged`, `--unstaged`, `--scope`; repeatable `--exclude <pattern>`; optional `--json` | Capture or resume an immutable review revision |
 | `synergy review refresh <workspace>` | `--root` | Capture current source and reconcile safe prior coverage |
 | `synergy review list` | `--root`, `--json` | List local review workspaces |
 | `synergy review open <workspace@revision>` | `--root`, `--json` | Return the full review URL from the verified preview runtime |

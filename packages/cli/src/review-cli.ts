@@ -5,6 +5,7 @@ import {
   assertSafeReviewSegment,
   claimQuestion,
   failQuestion,
+  normalizeExcludes,
   parseReviewRef,
   writeAnswer,
 } from '@synergy/review-core';
@@ -32,6 +33,9 @@ interface ReviewCreateFlags {
   unstaged?: boolean;
   scope?: string;
   json?: boolean;
+  /** Repository-relative path pattern(s) to exclude from the review. CAC yields a bare string
+   * for one `--exclude` occurrence and an array for several. */
+  exclude?: string | string[];
 }
 
 interface ReviewCommandFlags extends ReviewCreateFlags {
@@ -50,6 +54,32 @@ export interface ReviewCliDependencies {
   monotonicNow?: () => number;
 }
 
+/** Normalizes the `--exclude` flag's CAC shape (undefined, a bare string for one occurrence, or
+ * an array for several) into a sorted, deduped pattern list, or `undefined` when the flag was
+ * not given. Surfaces `normalizeExcludes`'s validation errors (unsafe patterns) as a usage error
+ * naming the offending pattern rather than a raw stack trace.
+ *
+ * The parameter type says `string | string[] | undefined`, but CAC does not actually enforce
+ * that at runtime: a valueless occurrence (`--exclude` with nothing after it, or followed
+ * immediately by another flag) yields the boolean `true` instead. Passing that straight to
+ * `normalizeExcludes` reaches `raw.trim()` on a boolean and throws `raw.trim is not a function`,
+ * which surfaces to the user as a raw stack trace instead of a usage error - so this validates
+ * every entry is actually a string before normalizing. */
+function excludesFromFlag(value: string | string[] | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  const raw = Array.isArray(value) ? value : [value];
+  if (raw.some((entry) => typeof entry !== 'string')) {
+    throw new ReviewUsageError('--exclude requires a pattern value, e.g. --exclude .vouch');
+  }
+  try {
+    const normalized = normalizeExcludes(raw);
+    return normalized.length > 0 ? normalized : undefined;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'invalid exclude pattern';
+    throw new ReviewUsageError(detail);
+  }
+}
+
 export function createReviewSourceFromFlags(flags: ReviewCreateFlags): ReviewCaptureSourceRequest {
   const selected = [
     flags.pr !== undefined,
@@ -62,13 +92,16 @@ export function createReviewSourceFromFlags(flags: ReviewCreateFlags): ReviewCap
       'review create requires exactly one of --pr, --staged, --unstaged, or --scope',
     );
   }
-  if (flags.pr !== undefined) return { kind: 'pr', selector: flags.pr };
-  if (flags.staged) return { kind: 'staged' };
-  if (flags.unstaged) return { kind: 'unstaged' };
+  const excludes = excludesFromFlag(flags.exclude);
+  if (flags.pr !== undefined) {
+    return { kind: 'pr', selector: flags.pr, ...(excludes ? { excludes } : {}) };
+  }
+  if (flags.staged) return { kind: 'staged', ...(excludes ? { excludes } : {}) };
+  if (flags.unstaged) return { kind: 'unstaged', ...(excludes ? { excludes } : {}) };
   if (!flags.scope || flags.scope.trim().length === 0) {
     throw new ReviewUsageError('--scope cannot be empty');
   }
-  return { kind: 'scope', patterns: [flags.scope] };
+  return { kind: 'scope', patterns: [flags.scope], ...(excludes ? { excludes } : {}) };
 }
 
 function printCreateResult(
@@ -81,8 +114,12 @@ function printCreateResult(
     return;
   }
   const preparation = result.analysisRequired ? 'analysis required' : 'ready for review';
+  const excludedLine =
+    result.excludedFileCount && result.excludedFileCount > 0
+      ? `${dim('Excluded:')} ${result.excludedFileCount} file${result.excludedFileCount === 1 ? '' : 's'} via ${result.excludes?.length ?? 0} pattern${result.excludes?.length === 1 ? '' : 's'}\n`
+      : '';
   process.stdout.write(
-    `${green('✓')} ${bold(reference)} ${dim(result.resumed ? 'resumed' : 'created')}\n${dim('Preparation:')} ${preparation}\n${dim('Open:')} ${result.url}\n`,
+    `${green('✓')} ${bold(reference)} ${dim(result.resumed ? 'resumed' : 'created')}\n${dim('Preparation:')} ${preparation}\n${excludedLine}${dim('Open:')} ${result.url}\n`,
   );
 }
 
@@ -184,6 +221,7 @@ function assertKnownOptions(flags: ReviewCommandFlags): void {
     'bodyFile',
     'for',
     'review',
+    'exclude',
     '--',
   ]);
   const unknown = Object.keys(flags).find((flag) => !known.has(flag));
@@ -207,6 +245,9 @@ function assertActionOptions(action: ReviewAction, flags: ReviewCommandFlags): v
     flags.scope !== undefined;
   if (action !== 'create' && hasSourceOption) {
     throw new ReviewUsageError(`review ${action} does not accept a source selector`);
+  }
+  if (action !== 'create' && flags.exclude !== undefined) {
+    throw new ReviewUsageError(`review ${action} does not accept --exclude`);
   }
   if (action !== 'analysis-set' && action !== 'answer' && flags.bodyFile !== undefined) {
     throw new ReviewUsageError(`review ${action} does not accept --body-file`);
@@ -363,6 +404,10 @@ export function registerReviewCommands(cli: CAC, dependencies: ReviewCliDependen
     .option(
       '--scope <path>',
       'Review tracked and non-ignored files under a repository-relative path',
+    )
+    .option(
+      '--exclude <pattern>',
+      'Repository-relative path pattern to exclude from the review (repeatable); create only',
     )
     .option('--json', 'Print machine-readable output')
     .option('--body-file <path>', 'Analysis or answer body file')
