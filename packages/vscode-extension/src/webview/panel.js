@@ -296,6 +296,26 @@ function excludeSummary(source) {
   return `Excluded: ${excludes.join(', ')}`;
 }
 
+/** Mirrors the preview's `ReviewHeader` "Removals" fact for the same reason `excludeSummary`
+ * mirrors "Excluded": the person signing off on completeness must be told whether every removal
+ * run in this review is required to carry a rationale, since a finalized review with nothing
+ * explained renders identically whether that gate was on or off. Always returns a string - unlike
+ * `excludeSummary`, there is no "nothing to report" case, because `analysisPolicy` (absent on a
+ * pre-policy workspace) reads as off rather than as missing.
+ *
+ * Prefers `insights.analysisPolicy` - stamped once at finalize time, so it stays true to what
+ * this exact revision was analyzed under even if a later `review create` moves the workspace's
+ * CURRENT policy - and falls back to the workspace's live policy for an unfinalized revision or
+ * one finalized before this field existed.
+ *
+ * @param {{workspace: {analysisPolicy?: {explainRemovals: boolean}}, insights: {analysisPolicy?: {explainRemovals: boolean}}}} bundle
+ */
+function removalPolicySummary(bundle) {
+  const explainRemovals = (bundle.insights.analysisPolicy ?? bundle.workspace.analysisPolicy)
+    ?.explainRemovals;
+  return explainRemovals ? 'Removals: explanations required' : 'Removals: explanations optional';
+}
+
 function startWebview() {
   const vscode = acquireVsCodeApi();
   const app = document.getElementById('app');
@@ -798,6 +818,11 @@ function startWebview() {
     const excludeBadge = excludeText
       ? el('span', { className: 'toolbar-excludes', title: excludeText }, [excludeText])
       : null;
+    const removalPolicyText =
+      state.screen === 'bundle' && state.bundle ? removalPolicySummary(state.bundle.bundle) : null;
+    const removalPolicyBadge = removalPolicyText
+      ? el('span', { className: 'toolbar-removal-policy' }, [removalPolicyText])
+      : null;
     const diffToggle =
       state.screen === 'bundle'
         ? el(
@@ -814,6 +839,7 @@ function startWebview() {
       back,
       el('span', { className: 'toolbar-title' }, [title]),
       excludeBadge,
+      removalPolicyBadge,
       diffToggle,
     ]);
   }
@@ -957,4 +983,10 @@ function startWebview() {
 // without it throwing immediately on import.
 if (typeof acquireVsCodeApi === 'function') startWebview();
 
-export { renderDiffLines, renderRemovalStrip, renderRemovalSummary, excludeSummary };
+export {
+  renderDiffLines,
+  renderRemovalStrip,
+  renderRemovalSummary,
+  excludeSummary,
+  removalPolicySummary,
+};

@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 // a no-op under vitest/jsdom because `acquireVsCodeApi` is never defined there.
 import {
   excludeSummary,
+  removalPolicySummary,
   renderDiffLines,
   renderRemovalStrip,
   renderRemovalSummary,
@@ -192,13 +193,14 @@ describe('renderDiffLines removal strips', () => {
   });
 });
 
-describe('renderDiffLines respects the opt-in removal-rationale policy', () => {
+describe('renderDiffLines gates removal strips on insights, not on workspace.analysisPolicy', () => {
   // `renderDiffLines`/`renderRemovalStrip` never read `workspace.analysisPolicy` themselves -
-  // they gate purely on whether a run's insights carry a rationale, which is what makes "policy
-  // off" and "policy on" both render correctly with the same code path: with the policy off the
-  // agent simply never authors a rationale into `insights.removals`, so every run in that state
-  // naturally falls into the "no rationale" case below.
-  it('renders no strip when the policy is off and no rationale was authored', () => {
+  // they gate purely on whether a run's insights carry a rationale. That single code path is
+  // what makes "policy off" and "policy on" both render correctly without a policy check here:
+  // with the policy off the agent simply never authors a rationale into `insights.removals`, so
+  // every run in that state naturally falls into the "no rationale" case below - the policy
+  // itself never enters this component's decision.
+  it('renders no strip when no rationale was authored for the run', () => {
     const hunk = twoRunsHunk();
     const container = renderDiffLines(hunk, 'src/a.ts', {
       reviewItemId: 'item-1',
@@ -210,7 +212,7 @@ describe('renderDiffLines respects the opt-in removal-rationale policy', () => {
     expect(container.querySelectorAll('.removal-strip')).toHaveLength(0);
   });
 
-  it('still renders a rationale carried forward from a revision captured with the policy on', () => {
+  it('renders a rationale whenever one is present, carried forward or not', () => {
     const hunk = twoRunsHunk();
     const insights: Pick<ReviewInsights, 'removals'> = {
       removals: [
@@ -445,5 +447,40 @@ describe('excludeSummary', () => {
     expect(excludeSummary({ kind: 'staged', headSha: 'a', excludes: ['.vouch', 'dist'] })).toBe(
       'Excluded: .vouch, dist',
     );
+  });
+});
+
+describe('removalPolicySummary', () => {
+  it('reports explanations optional when the workspace policy is off', () => {
+    expect(
+      removalPolicySummary({
+        workspace: { analysisPolicy: { explainRemovals: false } },
+        insights: {},
+      }),
+    ).toBe('Removals: explanations optional');
+  });
+
+  it('reports explanations optional when neither workspace nor insights carry a policy', () => {
+    expect(removalPolicySummary({ workspace: {}, insights: {} })).toBe(
+      'Removals: explanations optional',
+    );
+  });
+
+  it('reports explanations required when the workspace policy is on', () => {
+    expect(
+      removalPolicySummary({
+        workspace: { analysisPolicy: { explainRemovals: true } },
+        insights: {},
+      }),
+    ).toBe('Removals: explanations required');
+  });
+
+  it('prefers the stamped insights policy over a workspace policy that later changed', () => {
+    expect(
+      removalPolicySummary({
+        workspace: { analysisPolicy: { explainRemovals: false } },
+        insights: { analysisPolicy: { explainRemovals: true } },
+      }),
+    ).toBe('Removals: explanations required');
   });
 });
